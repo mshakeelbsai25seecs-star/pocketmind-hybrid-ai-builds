@@ -37,6 +37,8 @@ pub mod partitions;
 pub mod parent_merge;
 pub mod path_guard;
 pub mod pipeline;
+pub mod pipeline_diagnose;
+pub mod pipeline_trace;
 pub mod pdf_ocr;
 pub mod qa_corpus;
 pub mod qa_eval_expanded;

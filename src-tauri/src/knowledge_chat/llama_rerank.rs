@@ -194,7 +194,9 @@ pub fn resolve_llama_rerank_path(db: &Database) -> Option<String> {
     probe_qwen3_rerank_ggufs(&deploy.models_dir)
 }
 
-/// Apply Qwen3 / llama.cpp RANK reranking to the top hits. Returns true on success.
+/// Apply Qwen3 / llama.cpp RANK reranking to the top hits.
+/// Returns `Ok(true)` when scores were applied, `Ok(false)` when skipped,
+/// `Err(reason)` when the rerank server/path failed.
 pub async fn apply_llama_rerank(
     pool: &Arc<KcRerankPool>,
     model_path: &str,
@@ -203,9 +205,9 @@ pub async fn apply_llama_rerank(
     top_n: usize,
     blend_self: f64,
     blend_new: f64,
-) -> bool {
+) -> Result<bool, String> {
     if hits.is_empty() || query.trim().is_empty() {
-        return false;
+        return Ok(false);
     }
     let capped = hits.len().min(top_n.max(1));
     let documents: Vec<String> = hits[..capped]
@@ -226,11 +228,15 @@ pub async fn apply_llama_rerank(
         })
         .collect();
 
-    let Ok(scores) = pool.score(model_path, query, &documents).await else {
-        return false;
-    };
+    let scores = pool
+        .score(model_path, query, &documents)
+        .await
+        .map_err(|e| e.to_string())?;
     if scores.len() != capped {
-        return false;
+        return Err(format!(
+            "rerank score count mismatch: got {}, expected {capped}",
+            scores.len()
+        ));
     }
 
     let max_score = scores.iter().copied().fold(0.0f64, f64::max);
@@ -246,7 +252,7 @@ pub async fn apply_llama_rerank(
     for (idx, hit) in hits.iter_mut().enumerate() {
         hit.rank = idx + 1;
     }
-    true
+    Ok(true)
 }
 
 async fn spawn_rerank_server(model_path: &str) -> AppResult<WarmRerankSession> {

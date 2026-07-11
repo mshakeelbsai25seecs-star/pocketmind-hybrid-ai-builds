@@ -100,8 +100,10 @@ export function buildExplainFallbackFromAttached(
     }
     if (textLower.includes('environ')
       && (question.toLowerCase().includes('timeout') || symbols.some(s => s.includes('timeout')))) {
+      const envMatch = text.match(/['"]([A-Z][A-Z0-9_]{3,})['"]/);
+      const varName = envMatch?.[1] || 'the configured environment variable';
       return formatExplainAnswer(
-        'Reads the API timeout from the `NEXUS_API_TIMEOUT` environment variable, defaults to 30 seconds when unset or invalid, and enforces a minimum of 5 seconds.',
+        `Reads the API timeout from \`${varName}\`, with a default fallback when unset or invalid.`,
         source.file_name,
       );
     }
@@ -112,8 +114,10 @@ export function buildExplainFallbackFromAttached(
 function summarizeAttachedSymbol(symbol: string, text: string, fileName: string): string | null {
   const body = text.replace(/^This (function|method|class)[^\n]*\n/gm, '').trim();
   if (body.toLowerCase().includes('environ') && symbol.toLowerCase().includes('timeout')) {
+    const envMatch = body.match(/['"]([A-Z][A-Z0-9_]{3,})['"]/);
+    const varName = envMatch?.[1] || 'the configured environment variable';
     return formatExplainAnswer(
-      'Reads `NEXUS_API_TIMEOUT` from the environment, defaults to 30 seconds when unset or invalid, and enforces a minimum of 5 seconds via `max(5, int(raw))`.',
+      `Reads \`${varName}\` from the environment, with a default fallback when unset or invalid.`,
       fileName,
     );
   }

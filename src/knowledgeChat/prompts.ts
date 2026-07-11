@@ -409,7 +409,9 @@ function describeFunctionBody(symbol: string, body: string): string | null {
     .join('\n');
 
   if (/environ/.test(executable) && /timeout/i.test(executable)) {
-    return `\`${symbol}\` reads \`NEXUS_API_TIMEOUT\` from the environment, defaults to 30 seconds when unset or invalid, and enforces a minimum of 5 seconds.`;
+    const envMatch = executable.match(/['"]([A-Z][A-Z0-9_]{3,})['"]/);
+    const varName = envMatch?.[1] || 'the configured environment variable';
+    return `\`${symbol}\` reads \`${varName}\` from the environment, with a default fallback when unset or invalid.`;
   }
   const docstring = body.match(/"""([^"]+)"""/)?.[1]?.trim();
   if (docstring && docstring.length >= 12) {

@@ -300,6 +300,32 @@ export interface KcSearchResult {
   parent_merge_applied?: boolean;
   /** Filters auto-derived from the query when the client sent none. */
   auto_filters_applied?: KcSearchFilters | null;
+  /** Per-component pipeline observability for this search. */
+  pipeline_trace?: KcPipelineTrace | null;
+}
+
+export type KcStageStatus = 'ok' | 'skipped' | 'degraded' | 'failed';
+
+export interface KcStageTrace {
+  id: string;
+  status: KcStageStatus;
+  duration_ms?: number;
+  detail?: string;
+  remediation?: string;
+  /** Truncated snapshot of stage input. */
+  input?: string;
+  /** Truncated snapshot of stage output. */
+  output?: string;
+}
+
+export interface KcPipelineTrace {
+  stages: KcStageTrace[];
+  winning_answer_stage?: string | null;
+  corrective_used?: boolean;
+  overall_status?: KcStageStatus;
+  primary_culprit_stage?: string | null;
+  diagnosis_summary?: string | null;
+  diagnosis_actions?: string[];
 }
 
 export interface KcSymbolEntity {
@@ -510,6 +536,8 @@ export interface KnowledgeChatMessageMeta {
   answer_ms?: number;
   /** Unix epoch ms when the answer was published. */
   answered_at_ms?: number;
+  /** Per-component pipeline trace for this answer. */
+  pipeline_trace?: KcPipelineTrace;
 }
 
 export const KC_DEFAULT_EMBEDDING_MODEL = '';

@@ -43,18 +43,13 @@ const PROMPT_LEAK_PATTERNS = [
 
 const TOPIC_PATTERNS = [
   /\bAction Plan Purpose\b/i,
-  /\bTermination Process\b/i,
   /\bKnowledge Sharing(?:\s+Initiatives?)?\b/i,
-  /\bNS Filters?\b/i,
-  /\bSecurity Capability(?:\s+Recommendations?)?\b/i,
   /\bpost-?mortem analyses?\b/i,
   /\bLesson Learning\b/i,
-  /\bSOC Intake Notes?\b/i,
-  /\bCompany SOC Policies(?:\s+[—-]\s+Index\s*&\s*Intake Notes?)?\b/i,
   /\bPage\s+\d+\b/i,
 ];
 
-const FILE_TOKENS = ['policies', 'policy', 'ocr', 'soc', 'handbook', 'index', 'intake', 'notes'];
+const FILE_TOKENS = ['policies', 'policy', 'ocr', 'handbook', 'index', 'intake', 'notes'];
 
 export function prepareKnowledgeDisplayMarkdown(
   text: string,

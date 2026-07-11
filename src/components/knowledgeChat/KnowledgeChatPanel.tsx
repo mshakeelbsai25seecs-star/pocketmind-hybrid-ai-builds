@@ -70,8 +70,9 @@ import { expandVagueQueryWithLlm } from '../../knowledgeChat/queryRewrite';
 import { useKnowledgeChatStore } from '../../knowledgeChat/store';
 import { SOC_LOW_CONFIDENCE_BLOCKED_MESSAGE, saveProductConfig, type KcKnowledgeChatMode } from '../../productConfig';
 import MessageSources, { type SourceSummary } from './MessageSources';
-import type { KcAnswerMode, KcRetrievalConfidence, KcSearchHit, KcSearchResult, KcSearchScope } from '../../knowledgeChat/types';
+import type { KcAnswerMode, KcPipelineTrace, KcRetrievalConfidence, KcSearchHit, KcSearchResult, KcSearchScope } from '../../knowledgeChat/types';
 import { KC_RETRIEVAL_MODE_LABELS } from '../../knowledgeChat/types';
+import { mergeAnswerStagesIntoTrace, stageStatusLabel } from '../../knowledgeChat/pipelineTrace';
 
 const KC_SEARCH_SCOPE_OPTIONS: KcSearchScope[] = [
   'all', 'code', 'documentation', 'runbooks', 'logs_data', 'general', 'docs', 'both',
@@ -164,6 +165,7 @@ function parseMessageMetadata(metadata?: string | null): {
   retrieval_ms?: number;
   answer_ms?: number;
   answered_at_ms?: number;
+  pipeline_trace?: KcPipelineTrace;
 } | null {
   if (!metadata) return null;
   try {
@@ -178,6 +180,7 @@ function parseMessageMetadata(metadata?: string | null): {
       retrieval_ms?: number;
       answer_ms?: number;
       answered_at_ms?: number;
+      pipeline_trace?: KcPipelineTrace;
     };
   } catch {
     return null;
@@ -191,6 +194,7 @@ function buildAssistantMetadata(
   question: string,
   formatted = true,
   timing?: AnswerTiming | null,
+  pipelineTrace?: KcPipelineTrace | null,
 ) {
   const evidenceItems = searchResult.grounded_context?.evidence_items ?? [];
   const evidenceByFile = new Map(evidenceItems.map(item => [item.file_name, item]));
@@ -231,6 +235,7 @@ function buildAssistantMetadata(
           answered_at_ms: timing.answered_at_ms,
         }
       : {}),
+    ...(pipelineTrace ? { pipeline_trace: pipelineTrace } : {}),
   });
 }
 
@@ -640,7 +645,28 @@ export default function KnowledgeChatPanel() {
         },
       );
 
-      const publishAnswer = async (text: string, hitsForMeta: KcSearchHit[] = contextHits, citations = citationHitsForAnswer) => {
+      const publishAnswer = async (
+        text: string,
+        hitsForMeta: KcSearchHit[] = contextHits,
+        citations = citationHitsForAnswer,
+        extras?: {
+          winningStageId?: string | null;
+          extractiveUsed?: boolean;
+          structuredUsed?: boolean;
+          llmUsed?: boolean;
+        },
+      ) => {
+        const pipelineTrace = mergeAnswerStagesIntoTrace(searchResult.pipeline_trace, {
+          correctiveUsed: correctiveRetrievalUsed,
+          winningStageId: extras?.winningStageId,
+          extractiveUsed: !!extras?.extractiveUsed || !!extractivePreview,
+          structuredUsed: !!extras?.structuredUsed || !!structuredAnswer,
+          llmUsed: !!extras?.llmUsed || extras?.winningStageId === 'llm-synthesis',
+          question,
+          extractivePreview,
+          structuredAnswer,
+          finalAnswerPreview: text.slice(0, 1200),
+        });
         const metadata = buildAssistantMetadata(
           searchResult,
           hitsForMeta,
@@ -648,6 +674,7 @@ export default function KnowledgeChatPanel() {
           question,
           true,
           snapshotTiming(),
+          pipelineTrace,
         );
         if (isStale()) return;
         await invoke('update_message', { id: assistantMsgId, content: text, metadata });
@@ -925,6 +952,12 @@ export default function KnowledgeChatPanel() {
         result.text,
         result.hitsForMeta ?? contextHits,
         result.withCitations === false ? [] : citationHitsForAnswer,
+        {
+          winningStageId: result.stageId,
+          extractiveUsed: result.stageId === 'extractive-code-symbol' || !!extractivePreview,
+          structuredUsed: result.stageId === 'structured' || !!structuredAnswer,
+          llmUsed: result.stageId === 'llm-synthesis',
+        },
       );
     } catch (err) {
       const msg = humanError(err);
@@ -1042,6 +1075,54 @@ export default function KnowledgeChatPanel() {
                       ? ` (retrieve ${formatLatencyMs(meta.retrieval_ms)} · answer ${formatLatencyMs(meta.answer_ms)})`
                       : ''}
                   </p>
+                )}
+                {meta?.pipeline_trace && meta.pipeline_trace.stages?.length > 0 && (
+                  <details className="mt-2 rounded-xl border border-white/60 dark:border-surface-800 bg-surface-50/70 dark:bg-surface-950/40 px-3 py-2">
+                    <summary className="cursor-pointer text-[10px] font-bold uppercase tracking-[0.12em] text-surface-500">
+                      Pipeline diagnostics
+                      {meta.pipeline_trace.primary_culprit_stage
+                        ? ` · culprit: ${meta.pipeline_trace.primary_culprit_stage}`
+                        : ''}
+                    </summary>
+                    {meta.pipeline_trace.diagnosis_summary && (
+                      <p className="mt-2 text-[11px] text-surface-600 dark:text-surface-300">
+                        {meta.pipeline_trace.diagnosis_summary}
+                      </p>
+                    )}
+                    {!!meta.pipeline_trace.diagnosis_actions?.length && (
+                      <ul className="mt-1 list-disc pl-4 text-[11px] text-surface-500">
+                        {meta.pipeline_trace.diagnosis_actions.map(action => (
+                          <li key={action}>{action}</li>
+                        ))}
+                      </ul>
+                    )}
+                    <ul className="mt-2 space-y-2">
+                      {meta.pipeline_trace.stages.map(stage => (
+                        <li key={stage.id} className="text-[11px] text-surface-700 dark:text-surface-200 border-t border-white/50 dark:border-surface-800 pt-2 first:border-0 first:pt-0">
+                          <div>
+                            <span className="font-semibold">{stage.id}</span>
+                            {' · '}
+                            <span>{stageStatusLabel(stage.status)}</span>
+                            {typeof stage.duration_ms === 'number' ? ` · ${stage.duration_ms} ms` : ''}
+                            {stage.detail ? ` — ${stage.detail}` : ''}
+                          </div>
+                          {stage.input ? (
+                            <pre className="mt-1 whitespace-pre-wrap break-words rounded-lg bg-white/60 dark:bg-surface-900/60 px-2 py-1 text-[10px] text-surface-600 dark:text-surface-300">
+                              <span className="font-bold text-surface-500">IN: </span>{stage.input}
+                            </pre>
+                          ) : null}
+                          {stage.output ? (
+                            <pre className="mt-1 whitespace-pre-wrap break-words rounded-lg bg-white/60 dark:bg-surface-900/60 px-2 py-1 text-[10px] text-surface-600 dark:text-surface-300">
+                              <span className="font-bold text-surface-500">OUT: </span>{stage.output}
+                            </pre>
+                          ) : null}
+                          {stage.remediation ? (
+                            <span className="block text-amber-700 dark:text-amber-300 pl-0.5 mt-1">Fix: {stage.remediation}</span>
+                          ) : null}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
                 )}
                 {meta?.context_sources && meta.context_sources.length > 0 && (
                   <MessageSources

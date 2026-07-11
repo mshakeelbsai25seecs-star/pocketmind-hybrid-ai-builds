@@ -134,7 +134,12 @@ fn template_summary(query: &str, hit: &KcSearchHit, excerpt: &str) -> String {
             }
         }
         if q.contains("load_api_timeout") || excerpt_lower.contains("load_api_timeout") {
-            return "Reads `NEXUS_API_TIMEOUT` from the environment, defaults to 30 seconds when unset or invalid, and enforces a minimum of 5 seconds.".to_string();
+            if let Some(var) = extract_env_var_name(excerpt) {
+                return format!(
+                    "Reads `{var}` from the environment; falls back to a default if unset or invalid."
+                );
+            }
+            return "Reads an API timeout from the environment, with a default fallback and minimum bound.".to_string();
         }
     }
 

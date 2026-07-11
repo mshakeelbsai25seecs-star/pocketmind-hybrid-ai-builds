@@ -200,7 +200,7 @@ fn extract_timeline_answer(_query: &str, hit: &KcSearchHit) -> Option<Extracted>
     let excerpt = excerpt_text(hit);
     let duration = extract_duration_phrase(&excerpt)?;
     Some(Extracted {
-        text: format!("Standard onboarding takes {duration}."),
+        text: format!("The indexed source states the timeline is {duration}."),
         confidence: 0.70,
     })
 }

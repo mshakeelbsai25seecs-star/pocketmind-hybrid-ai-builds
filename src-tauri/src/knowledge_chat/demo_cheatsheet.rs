@@ -4,8 +4,6 @@ use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
-use crate::knowledge_chat::qa_corpus::qa_corpus_source_path;
-
 pub const DEMO_CHEATSHEET_FILENAME: &str = "demo_cheatsheet.json";
 
 #[derive(Debug, Clone, Deserialize)]
@@ -49,19 +47,15 @@ pub struct DemoCheatsheetMatch {
 }
 
 pub fn load_cheatsheet_for_collection(collection_name: &str, root_path: &str) -> Option<DemoCheatsheet> {
-    let root = Path::new(root_path);
-    let candidates = [
-        root.join(DEMO_CHEATSHEET_FILENAME),
-        qa_corpus_source_path().join(DEMO_CHEATSHEET_FILENAME),
-    ];
-    for path in candidates {
-        if let Some(sheet) = read_cheatsheet_file(&path) {
-            if sheet.collection_name.eq_ignore_ascii_case(collection_name)
-                || collection_name.is_empty()
-            {
-                return Some(sheet);
-            }
-        }
+    // Universal: only load a cheatsheet from the collection root — never fall back
+    // to the bundled QA corpus path for unrelated customer folders.
+    let path = Path::new(root_path).join(DEMO_CHEATSHEET_FILENAME);
+    let sheet = read_cheatsheet_file(&path)?;
+    if sheet.collection_name.eq_ignore_ascii_case(collection_name)
+        || collection_name.is_empty()
+        || sheet.collection_name.is_empty()
+    {
+        return Some(sheet);
     }
     None
 }

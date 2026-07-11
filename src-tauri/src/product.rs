@@ -108,7 +108,7 @@ impl Default for ProductConfig {
             enable_semantic_chunking: true,
             enable_exact_dense_search: true,
             enable_llm_contextual_summaries: false,
-            knowledge_chat_demo_cheatsheet: true,
+            knowledge_chat_demo_cheatsheet: false,
             knowledge_chat_mode: KC_MODE_FOLDER_QA.to_string(),
         }
     }

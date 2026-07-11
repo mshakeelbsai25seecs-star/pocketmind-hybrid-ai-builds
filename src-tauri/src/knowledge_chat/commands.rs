@@ -394,6 +394,15 @@ pub async fn kc_hybrid_search(
     state: State<'_, AppState>,
     mut request: KcSearchRequest,
 ) -> AppResult<KcSearchResult> {
+    use crate::knowledge_chat::pipeline_diagnose;
+    use crate::knowledge_chat::pipeline_trace::{
+        stage_io, summarize_hits, StageTimer, KcPipelineTrace, KcStageStatus,
+    };
+
+    let mut trace = KcPipelineTrace::default();
+    let original_query = request.query.trim().to_string();
+    let requested_scope = format!("{:?}", request.search_scope);
+
     let db = state.db.lock().await;
     let deploy = load_deployment(&db);
     let product = product::load_product_config(&db);
@@ -406,13 +415,41 @@ pub async fn kc_hybrid_search(
         rewrite.retrieval_query.clone()
     };
     let partition_config = collection.partition_config.clone();
+    let collection_root = collection.root_path.clone();
+
+    let scope_timer = StageTimer::start();
     let (scope, scope_widen_notice) =
         pipeline::resolve_scope_for_accuracy(request.search_scope, request.query.trim());
+    let scope_ms = scope_timer.elapsed_ms();
+    let scope_in = format!("query={original_query:?}; requested_scope={requested_scope}");
+    if let Some(ref notice) = scope_widen_notice {
+        trace.push(stage_io(
+            "scope_resolve",
+            KcStageStatus::Degraded,
+            scope_ms,
+            notice.clone(),
+            "Use All partitions for docs/process questions, or keep Auto widen.",
+            &scope_in,
+            format!("effective_scope={scope:?}; widened=true"),
+        ));
+    } else {
+        trace.push(stage_io(
+            "scope_resolve",
+            KcStageStatus::Ok,
+            scope_ms,
+            format!("scope={scope:?}"),
+            "",
+            &scope_in,
+            format!("effective_scope={scope:?}; widened=false"),
+        ));
+    }
     drop(db);
 
     request.query_dense_vector = None;
     request.search_scope = Some(scope);
     let mut partition_models_used = Vec::new();
+    let embed_timer = StageTimer::start();
+    let embed_in = format!("embed_source={embed_source:?}; mode={:?}", request.mode);
     if needs_server_dense_embedding(&request.mode) {
         let remote = crate::commands::resolve_remote_embed_config(&state).await;
         let embeds = pipeline::embed_partition_query_vectors(
@@ -424,24 +461,155 @@ pub async fn kc_hybrid_search(
             &embed_source,
         )
         .await;
+        let embed_ms = embed_timer.elapsed_ms();
         request.partition_query_vectors = embeds.vectors;
         partition_models_used = embeds.models_used;
+        if request.partition_query_vectors.is_empty() {
+            trace.push(stage_io(
+                "embed",
+                KcStageStatus::Degraded,
+                embed_ms,
+                "No partition query vectors produced",
+                "Verify embedding GGUFs under models/embeddings and llama-server runtime.",
+                &embed_in,
+                "vectors=[]",
+            ));
+        } else {
+            let models: Vec<String> = partition_models_used
+                .iter()
+                .map(|(partition, model)| {
+                    let dims = request
+                        .partition_query_vectors
+                        .iter()
+                        .find(|(id, _)| id == partition)
+                        .map(|(_, v)| v.len())
+                        .unwrap_or(0);
+                    format!("{partition}:{model} dims={dims}")
+                })
+                .collect();
+            trace.push(stage_io(
+                "embed",
+                KcStageStatus::Ok,
+                embed_ms,
+                format!("vectors={}", request.partition_query_vectors.len()),
+                "",
+                &embed_in,
+                format!(
+                    "vector_count={}; models=[{}]",
+                    request.partition_query_vectors.len(),
+                    models.join("; ")
+                ),
+            ));
+        }
     } else {
         request.partition_query_vectors = Vec::new();
+        trace.push(stage_io(
+            "embed",
+            KcStageStatus::Skipped,
+            embed_timer.elapsed_ms(),
+            "Mode does not require server dense embedding",
+            "",
+            &embed_in,
+            "skipped",
+        ));
     }
 
     let db = state.db.lock().await;
     let retrieval_config = retrieval_config::RetrievalConfig::from_db(&db);
+    let begin_timer = StageTimer::start();
+    let begin_in = format!(
+        "retrieval_query={:?}; top_k={:?}; partition_vectors={}",
+        rewrite.retrieval_query,
+        request.top_k,
+        request.partition_query_vectors.len()
+    );
     let mut pending = search::hybrid_search_begin(&db, request)?;
+    let begin_ms = begin_timer.elapsed_ms();
     let dense_ready =
         pending.dense_available && !pending.request.partition_query_vectors.is_empty();
+    let hit_count_begin = pending.hits.len();
+    let hits_summary = summarize_hits(&pending.hits, 5);
+    if !pending.fts_available {
+        trace.push(stage_io(
+            "fts",
+            KcStageStatus::Degraded,
+            0,
+            "FTS index empty or unavailable",
+            "Rebuild the collection so FTS is populated.",
+            &begin_in,
+            "fts_available=false",
+        ));
+    } else {
+        trace.push(stage_io(
+            "fts",
+            KcStageStatus::Ok,
+            begin_ms / 3,
+            "FTS available",
+            "",
+            &begin_in,
+            format!("fts_available=true; {hits_summary}"),
+        ));
+    }
+    if !pending.dense_available {
+        trace.push(stage_io(
+            "dense",
+            KcStageStatus::Degraded,
+            0,
+            "No dense vectors indexed",
+            "Rebuild dense index; confirm embed models in Collection Health.",
+            &begin_in,
+            "dense_available=false",
+        ));
+    } else if !pending.query_dense_ready {
+        trace.push(stage_io(
+            "dense",
+            KcStageStatus::Degraded,
+            0,
+            "Query dense embedding unavailable",
+            "Check embed stage / llama-server.",
+            &begin_in,
+            "query_dense_ready=false",
+        ));
+    } else {
+        trace.push(stage_io(
+            "dense",
+            KcStageStatus::Ok,
+            begin_ms / 3,
+            "Dense retrieval available",
+            "",
+            &begin_in,
+            format!("dense_available=true; query_dense_ready=true; {hits_summary}"),
+        ));
+    }
+    trace.push(stage_io(
+        "rrf",
+        if hit_count_begin > 0 {
+            KcStageStatus::Ok
+        } else {
+            KcStageStatus::Degraded
+        },
+        begin_ms,
+        format!("hybrid_search_begin hits={hit_count_begin}"),
+        if hit_count_begin == 0 {
+            "Widen scope or rebuild index if expected files are missing."
+        } else {
+            ""
+        },
+        &begin_in,
+        &hits_summary,
+    ));
     drop(db);
 
     let rerank_models = pipeline::partition_rerank_models(&partition_config, &deploy, scope);
     let mut dense_pair_rerank_used = false;
     let mut dense_pair_failure_notes: Vec<String> = Vec::new();
+    let dense_pair_timer = StageTimer::start();
+    let dense_pair_in = format!(
+        "query={:?}; {}",
+        pending.rewrite.retrieval_query,
+        summarize_hits(&pending.hits, 8)
+    );
     if retrieval_config.enable_dense_pair_rerank && dense_ready && !pending.hits.is_empty() {
-        // Accuracy-first: retry once if the first pair-rerank pass fails (transient embed blip).
         for attempt in 0..2 {
             match dense_rerank::apply_dense_pair_rerank_partitioned(
                 &state.kc_embed_pool,
@@ -475,35 +643,207 @@ pub async fn kc_hybrid_search(
     {
         dense_pair_failure_notes.push("no retrieval hits".to_string());
     }
+    let dense_pair_ms = dense_pair_timer.elapsed_ms();
+    let dense_pair_out = summarize_hits(&pending.hits, 8);
+    if !retrieval_config.enable_dense_pair_rerank {
+        trace.push(stage_io(
+            "dense_pair_rerank",
+            KcStageStatus::Skipped,
+            dense_pair_ms,
+            "Disabled in retrieval config",
+            "",
+            &dense_pair_in,
+            "skipped",
+        ));
+    } else if dense_pair_rerank_used {
+        trace.push(stage_io(
+            "dense_pair_rerank",
+            KcStageStatus::Ok,
+            dense_pair_ms,
+            "Applied",
+            "",
+            &dense_pair_in,
+            &dense_pair_out,
+        ));
+    } else if !dense_ready {
+        trace.push(stage_io(
+            "dense_pair_rerank",
+            KcStageStatus::Skipped,
+            dense_pair_ms,
+            "Dense not ready",
+            "Rebuild dense vectors and ensure query embed succeeded.",
+            &dense_pair_in,
+            "skipped",
+        ));
+    } else {
+        let notes = if dense_pair_failure_notes.is_empty() {
+            "not applied".to_string()
+        } else {
+            dense_pair_failure_notes.join("; ")
+        };
+        trace.push(stage_io(
+            "dense_pair_rerank",
+            KcStageStatus::Degraded,
+            dense_pair_ms,
+            notes,
+            "Check embed server / OOM / partition model paths.",
+            &dense_pair_in,
+            &dense_pair_out,
+        ));
+    }
 
-    // Prefer Qwen3 / llama.cpp RANK reranker when the GGUF is present; otherwise
-    // hybrid_search_complete falls back to ONNX / phrase rerank.
     let mut llama_rerank_used = false;
+    let llama_timer = StageTimer::start();
+    let llama_in = format!(
+        "query={:?}; {}",
+        pending.rewrite.retrieval_query,
+        summarize_hits(&pending.hits, 8)
+    );
     if retrieval_config.enable_onnx_rerank && !pending.hits.is_empty() {
         let db = state.db.lock().await;
         let llama_path = llama_rerank::resolve_llama_rerank_path(&db);
         drop(db);
-        if let Some(path) = llama_path {
-            llama_rerank_used = llama_rerank::apply_llama_rerank(
-                &state.kc_rerank_pool,
-                &path,
-                &pending.rewrite.retrieval_query,
-                &mut pending.hits,
-                retrieval_config.onnx_rerank_top_n,
-                retrieval_config.onnx_blend_self,
-                retrieval_config.onnx_blend_new,
-            )
-            .await;
+        match llama_path {
+            Some(path) => {
+                match llama_rerank::apply_llama_rerank(
+                    &state.kc_rerank_pool,
+                    &path,
+                    &pending.rewrite.retrieval_query,
+                    &mut pending.hits,
+                    retrieval_config.onnx_rerank_top_n,
+                    retrieval_config.onnx_blend_self,
+                    retrieval_config.onnx_blend_new,
+                )
+                .await
+                {
+                    Ok(true) => {
+                        llama_rerank_used = true;
+                        trace.push(stage_io(
+                            "llama_rank",
+                            KcStageStatus::Ok,
+                            llama_timer.elapsed_ms(),
+                            format!("path={path}"),
+                            "",
+                            &llama_in,
+                            summarize_hits(&pending.hits, 8),
+                        ));
+                    }
+                    Ok(false) => {
+                        trace.push(stage_io(
+                            "llama_rank",
+                            KcStageStatus::Skipped,
+                            llama_timer.elapsed_ms(),
+                            format!("skipped path={path}"),
+                            "",
+                            &llama_in,
+                            "skipped",
+                        ));
+                    }
+                    Err(err) => {
+                        trace.push(stage_io(
+                            "llama_rank",
+                            KcStageStatus::Failed,
+                            llama_timer.elapsed_ms(),
+                            format!("path={path}; error={err}"),
+                            "Install RANK-capable Qwen3-Reranker GGUF; check llama-server runtime and VRAM.",
+                            &llama_in,
+                            format!("error={err}"),
+                        ));
+                    }
+                }
+            }
+            None => {
+                trace.push(stage_io(
+                    "llama_rank",
+                    KcStageStatus::Skipped,
+                    llama_timer.elapsed_ms(),
+                    "No Qwen3-Reranker GGUF resolved",
+                    "Place Qwen3-Reranker-4B-*.gguf under models/rerankers.",
+                    &llama_in,
+                    "no_model_path",
+                ));
+            }
         }
+    } else {
+        trace.push(stage_io(
+            "llama_rank",
+            KcStageStatus::Skipped,
+            llama_timer.elapsed_ms(),
+            if pending.hits.is_empty() {
+                "No hits to rerank"
+            } else {
+                "Neural rerank disabled in config"
+            },
+            "",
+            &llama_in,
+            "skipped",
+        ));
     }
 
+    let pre_complete_hits = summarize_hits(&pending.hits, 8);
     let db = state.db.lock().await;
+    let complete_timer = StageTimer::start();
     let mut result = search::hybrid_search_complete(
         &db,
         pending,
         dense_pair_rerank_used,
         llama_rerank_used,
     )?;
+    let complete_ms = complete_timer.elapsed_ms();
+    let post_complete_hits = summarize_hits(&result.hits, 8);
+    if result.onnx_reranker_used {
+        trace.push(stage_io(
+            "onnx_or_phrase_rerank",
+            KcStageStatus::Ok,
+            complete_ms,
+            "ONNX or phrase rerank applied in complete",
+            "",
+            &pre_complete_hits,
+            &post_complete_hits,
+        ));
+    } else if llama_rerank_used {
+        trace.push(stage_io(
+            "onnx_or_phrase_rerank",
+            KcStageStatus::Skipped,
+            complete_ms,
+            "Skipped; llama RANK already applied",
+            "",
+            &pre_complete_hits,
+            "skipped",
+        ));
+    } else {
+        trace.push(stage_io(
+            "onnx_or_phrase_rerank",
+            KcStageStatus::Degraded,
+            complete_ms,
+            "No neural/ONNX rerank applied (phrase fallback may still run)",
+            "Configure ONNX or Qwen3 RANK for stronger ranking.",
+            &pre_complete_hits,
+            &post_complete_hits,
+        ));
+    }
+    if result.parent_merge_applied {
+        trace.push(stage_io(
+            "parent_merge",
+            KcStageStatus::Ok,
+            0,
+            "Sibling chunks merged into parent context",
+            "",
+            &pre_complete_hits,
+            &post_complete_hits,
+        ));
+    } else {
+        trace.push(stage_io(
+            "parent_merge",
+            KcStageStatus::Skipped,
+            0,
+            "No parent merge",
+            "",
+            &pre_complete_hits,
+            "unchanged",
+        ));
+    }
+
     result.search_scope_applied = Some(scope);
     result.partition_models_used = partition_models_used;
     if let Some(notice) = scope_widen_notice {
@@ -515,24 +855,31 @@ pub async fn kc_hybrid_search(
                 "Dense pair rerank disabled in retrieval config.".to_string(),
             );
         }
-        for note in dense_pair_failure_notes {
+        for note in &dense_pair_failure_notes {
             let msg = format!("Dense pair rerank: {note}");
-            if !result.degradation_reasons.iter().any(|r| r.contains(&note)) {
+            if !result.degradation_reasons.iter().any(|r| r.contains(note)) {
                 result.degradation_reasons.push(msg);
             }
         }
     }
+
+    let conf_label = format!("{:?}", result.confidence).to_lowercase();
+    pipeline_diagnose::diagnose(&mut trace, &conf_label, result.hits.len());
+    let audit_detail = format!(
+        "hits={}; confidence={:?}; intent={}; {}",
+        result.hits.len(),
+        result.confidence,
+        result.intent_match.is_some(),
+        trace.summary_for_audit()
+    );
+    result.pipeline_trace = Some(trace);
+
     log_kc_audit(
         &db,
         "kc.search",
         "Knowledge hybrid search",
-        Some(&format!(
-            "hits={}; confidence={:?}; intent={}",
-            result.hits.len(),
-            result.confidence,
-            result.intent_match.is_some()
-        )),
-        Some(&collection.root_path),
+        Some(&audit_detail),
+        Some(&collection_root),
         true,
     );
     Ok(result)

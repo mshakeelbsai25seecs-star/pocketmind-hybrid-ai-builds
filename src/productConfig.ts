@@ -43,7 +43,7 @@ export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
   enable_semantic_chunking: true,
   enable_exact_dense_search: true,
   enable_llm_contextual_summaries: false,
-  knowledge_chat_demo_cheatsheet: true,
+  knowledge_chat_demo_cheatsheet: false,
   knowledge_chat_mode: 'folder_qa',
 };
 
@@ -74,7 +74,7 @@ export function mapProductConfig(raw: ProductConfig): ProductConfig {
     enable_exact_dense_search: raw.enable_exact_dense_search !== false
       || raw.knowledge_chat_deployment_profile !== 'demo',
     enable_llm_contextual_summaries: raw.enable_llm_contextual_summaries === true,
-    knowledge_chat_demo_cheatsheet: raw.knowledge_chat_demo_cheatsheet !== false,
+    knowledge_chat_demo_cheatsheet: raw.knowledge_chat_demo_cheatsheet === true,
     knowledge_chat_mode: raw.knowledge_chat_mode === 'codebase_explorer'
       ? 'codebase_explorer'
       : 'folder_qa',

@@ -135,11 +135,6 @@ export function boostSelectedPathsFromQuery(
         paths.add(entry.relative_path);
       }
     }
-
-    if (symbols.some(s => s.includes('api_timeout') || s.includes('load_api'))
-      && pathLower.includes('config_loader')) {
-      paths.add(entry.relative_path);
-    }
   }
 
   return [...paths];

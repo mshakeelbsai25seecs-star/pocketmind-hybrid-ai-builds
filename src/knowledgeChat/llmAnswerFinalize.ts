@@ -21,9 +21,6 @@ export function sanitizeLlmKnowledgeDraft(text: string): string {
       const name = String(file).replace(/\\/g, '/').split('/').pop() || String(file);
       return `[Source: ${name} | `;
     })
-    .replace(/NEXUS_\{\}/g, 'NEXUS_API_TIMEOUT')
-    .replace(/NEXUS_\{\}_API/g, 'NEXUS_API_TIMEOUT')
-    .replace(/loadApiTimeout/g, 'load_api_timeout')
     .replace(/\\t/g, ' ')
     .replace(/\\n/g, '\n')
     .replace(/\*{3,}/g, '**')

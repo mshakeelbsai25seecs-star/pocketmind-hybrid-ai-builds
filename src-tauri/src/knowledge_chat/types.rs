@@ -385,6 +385,9 @@ pub struct KcSearchResult {
     /// Filters auto-derived from the query when the client sent none.
     #[serde(default)]
     pub auto_filters_applied: Option<KcSearchFilters>,
+    /// Per-component pipeline observability for this search (additive).
+    #[serde(default)]
+    pub pipeline_trace: Option<crate::knowledge_chat::pipeline_trace::KcPipelineTrace>,
 }
 
 /// A code entity (function/class/etc.) whose name matches a symbol in the query.

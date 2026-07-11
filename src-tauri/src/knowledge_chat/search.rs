@@ -290,6 +290,7 @@ pub fn hybrid_search_complete(
         symbol_entities,
         parent_merge_applied,
         auto_filters_applied,
+        pipeline_trace: None,
     })
 }
 
@@ -333,6 +334,7 @@ fn intent_short_circuit_result(pending: HybridSearchPending, intent: KcIntentMat
         symbol_entities: Vec::new(),
         parent_merge_applied: false,
         auto_filters_applied,
+        pipeline_trace: None,
     }
 }
 
@@ -509,6 +511,7 @@ fn search_single(
         symbol_entities: Vec::new(),
         parent_merge_applied: false,
         auto_filters_applied: None,
+        pipeline_trace: None,
     })
 }
 
@@ -545,6 +548,7 @@ fn empty_result(request: &KcSearchRequest, query: &str) -> KcSearchResult {
         symbol_entities: Vec::new(),
         parent_merge_applied: false,
         auto_filters_applied: None,
+        pipeline_trace: None,
     }
 }
 
@@ -554,17 +558,12 @@ fn hard_pin_candidates(
     query: &str,
     candidates: &mut HashSet<String>,
 ) {
-    use crate::knowledge_chat::query_intent::extract_camel_symbols;
+    use crate::knowledge_chat::query_intent::{extract_camel_symbols, extract_snake_case_symbols};
 
-    let intent = classify_query_intent(query);
-    if let QueryIntent::ErrorCode = intent {
-        if let Some(code) = extract_error_code(query) {
-            if let Ok(ids) = db::load_chunk_ids_for_file_substring(db, collection_id, "error-codes", 40) {
-                candidates.extend(ids);
-            }
-            if let Ok(ids) = db::load_chunk_ids_containing_text(db, collection_id, &code, 24) {
-                candidates.extend(ids);
-            }
+    // Universal: only pin from tokens present in the query (file hints, symbols, error codes).
+    if let Some(code) = extract_error_code(query) {
+        if let Ok(ids) = db::load_chunk_ids_containing_text(db, collection_id, &code, 24) {
+            candidates.extend(ids);
         }
     }
     if let Some(file) = extract_file_hint(query) {
@@ -572,30 +571,15 @@ fn hard_pin_candidates(
             candidates.extend(ids);
         }
     }
-    for symbol in extract_camel_symbols(query) {
+    for symbol in extract_camel_symbols(query)
+        .into_iter()
+        .chain(extract_snake_case_symbols(query))
+    {
         if let Ok(ids) = db::load_chunk_ids_for_entity_name(db, collection_id, &symbol, 24) {
             candidates.extend(ids);
         }
-    }
-    if matches!(intent, QueryIntent::EnvVar) {
-        for pattern in ["config_loader", "config", "env"] {
-            if let Ok(ids) = db::load_chunk_ids_for_file_substring(db, collection_id, pattern, 24) {
-                candidates.extend(ids);
-            }
-        }
-    }
-    if matches!(intent, QueryIntent::RunbookStep) {
-        for pattern in ["incident", "runbook", "vpn-incident", "response"] {
-            if let Ok(ids) = db::load_chunk_ids_for_file_substring(db, collection_id, pattern, 24) {
-                candidates.extend(ids);
-            }
-        }
-    }
-    if matches!(intent, QueryIntent::Timeline) {
-        for pattern in ["onboarding", "guide"] {
-            if let Ok(ids) = db::load_chunk_ids_for_file_substring(db, collection_id, pattern, 24) {
-                candidates.extend(ids);
-            }
+        if let Ok(ids) = db::load_chunk_ids_containing_text(db, collection_id, &symbol, 16) {
+            candidates.extend(ids);
         }
     }
 }
@@ -606,35 +590,38 @@ fn boost_file_candidates(
     query: &str,
     candidates: &mut HashSet<String>,
 ) {
-    let intent = classify_query_intent(query);
-    match intent {
-        QueryIntent::ErrorCode => {
-            if let Some(code) = extract_error_code(query) {
-                inject_fts_candidates(db, collection_id, &code, candidates);
-                inject_fts_candidates(db, collection_id, "error-codes", candidates);
-            }
+    use crate::knowledge_chat::query_intent::{extract_camel_symbols, extract_snake_case_symbols};
+
+    // Universal: FTS inject only query-derived tokens (no corpus-specific file names).
+    if let Some(code) = extract_error_code(query) {
+        inject_fts_candidates(db, collection_id, &code, candidates);
+    }
+    if let Some(file) = extract_file_hint(query) {
+        inject_fts_candidates(db, collection_id, &file, candidates);
+    }
+    for symbol in extract_camel_symbols(query)
+        .into_iter()
+        .chain(extract_snake_case_symbols(query))
+    {
+        if symbol.len() >= 4 {
+            inject_fts_candidates(db, collection_id, &symbol, candidates);
         }
-        QueryIntent::CodeSymbol => {
-            if let Some(file) = extract_file_hint(query) {
-                inject_fts_candidates(db, collection_id, &file, candidates);
-            }
+    }
+    // Significant lowercase content words from the query (generic lexical boost).
+    for token in query.split_whitespace() {
+        let cleaned = token
+            .trim_matches(|c: char| !c.is_alphanumeric() && c != '_' && c != '-')
+            .to_lowercase();
+        if cleaned.len() >= 5
+            && ![
+                "about", "which", "where", "what", "when", "does", "with", "from", "this", "that",
+                "have", "should", "would", "could", "there", "their", "these", "those", "after",
+                "before", "under", "over",
+            ]
+            .contains(&cleaned.as_str())
+        {
+            inject_fts_candidates(db, collection_id, &cleaned, candidates);
         }
-        QueryIntent::RunbookStep => {
-            inject_fts_candidates(db, collection_id, "vpn incident", candidates);
-            inject_fts_candidates(db, collection_id, "contain block", candidates);
-            if query.to_lowercase().contains("vpn") {
-                inject_fts_candidates(db, collection_id, "vpn", candidates);
-            }
-        }
-        QueryIntent::EnvVar => {
-            inject_fts_candidates(db, collection_id, "NEXUS_API_TIMEOUT", candidates);
-            inject_fts_candidates(db, collection_id, "config_loader", candidates);
-        }
-        QueryIntent::Timeline => {
-            inject_fts_candidates(db, collection_id, "onboarding business", candidates);
-            inject_fts_candidates(db, collection_id, "business days", candidates);
-        }
-        QueryIntent::General => {}
     }
 }
 

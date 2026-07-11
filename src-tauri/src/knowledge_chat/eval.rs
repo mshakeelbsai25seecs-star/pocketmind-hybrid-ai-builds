@@ -316,7 +316,8 @@ async fn run_production_search(
                 retrieval_config.onnx_blend_self,
                 retrieval_config.onnx_blend_new,
             )
-            .await;
+            .await
+            .unwrap_or(false);
         }
     }
 

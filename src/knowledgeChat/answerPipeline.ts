@@ -22,6 +22,8 @@ export interface AnswerResult {
   hitsForMeta?: KcSearchHit[];
   /** Whether to attach citation hits. Defaults to true. */
   withCitations?: boolean;
+  /** Winning answer-pipeline stage id for observability. */
+  stageId?: string;
 }
 
 export interface AnswerContext {
@@ -145,7 +147,7 @@ export async function runAnswerPipeline(ctx: AnswerContext): Promise<AnswerResul
     if (ctx.isStale()) return null;
     if (!stage.canHandle(ctx)) continue;
     const result = await stage.execute(ctx);
-    if (result) return result;
+    if (result) return { ...result, stageId: result.stageId || stage.id };
   }
   return null;
 }
