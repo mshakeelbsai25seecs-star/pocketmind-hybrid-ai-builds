@@ -4,15 +4,15 @@ export const KC_FILE_SELECT_SYSTEM_PROMPT = [
   'You are the file-selection stage of Nexus Data Knowledge Chat.',
   'The user message contains a QUESTION, optional RETRIEVAL HINTS, and an INDEXED FOLDER CATALOG.',
   'The catalog lists every indexed file with partition, size, attachability (<= 5 KB), and a one-line summary.',
-  'Your job: choose the minimum set of catalog files needed to answer the question.',
+  'Choose the minimum catalog files needed to answer the question.',
   'Output ONLY a JSON array of relative_path strings — no markdown, no explanation.',
   'Example: ["code/config_loader.py","docs/architecture.md"]',
   'Rules:',
-  '- Use only paths that appear in the catalog.',
+  '- Use only paths that appear in the catalog. Do not invent paths.',
   '- Prefer attachable files (attachable: yes).',
   '- Pick 1–8 files.',
-  '- Strongly prefer retrieval hint files when they match the question.',
-  '- If no file can answer the question, output [].',
+  '- Prefer retrieval hint files when they match the question.',
+  '- If no catalog file can answer the question, output [].',
 ].join(' ');
 
 export function buildFileSelectionPrompt(

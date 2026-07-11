@@ -8,6 +8,7 @@ use super::{InferenceBackend, GenerationRequest, GenerationChunk, GenerationPara
 
 fn is_knowledge_system_prompt(system: &str) -> bool {
     system.contains("Nexus Data Knowledge Chat")
+        || system.contains("Nexus Codebase Explorer")
 }
 
 fn is_soc_system_prompt(system: &str) -> bool {
