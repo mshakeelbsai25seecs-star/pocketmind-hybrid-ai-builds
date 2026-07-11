@@ -10,13 +10,17 @@ const KnowledgeMarkdown = memo(function KnowledgeMarkdown({
   content,
   citationHits = [],
   question = '',
+  alreadyFormatted = false,
 }: {
   content: string;
   citationHits?: CitationHit[];
   question?: string;
+  /** When true, content was already formatKnowledgeAnswer'd at publish time. */
+  alreadyFormatted?: boolean;
 }) {
   const normalized = prepareKnowledgeDisplayMarkdown(content, citationHits, {
     question,
+    alreadyFormatted,
     notFoundFallback: 'I could not find enough evidence in the selected folder index to answer this question reliably.',
   });
 
@@ -42,8 +46,12 @@ const KnowledgeMarkdown = memo(function KnowledgeMarkdown({
           ol: ({ children }) => <ol className="nexus-kc-ol">{children}</ol>,
           li: ({ children }) => <li className="nexus-kc-li">{children}</li>,
           blockquote: ({ children }) => <blockquote className="nexus-kc-quote">{children}</blockquote>,
+          hr: () => <hr className="nexus-kc-hr" />,
           code: ({ className, children, ...props }) => {
-            const isBlock = className?.includes('language-');
+            const text = String(children ?? '');
+            // react-markdown v9: bare ``` fences have no language- class; treat
+            // multiline / classed nodes as blocks (extractive evidence uses bare fences).
+            const isBlock = Boolean(className) || text.includes('\n');
             if (isBlock) {
               return (
                 <code className={`nexus-kc-code-block ${className || ''}`} {...props}>

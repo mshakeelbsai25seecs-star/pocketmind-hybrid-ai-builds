@@ -154,6 +154,13 @@ function formatLatencyMs(ms: number): string {
   return `${Math.round(seconds)} s`;
 }
 
+/** Keep pipeline IO previews short so they do not re-print the full answer. */
+function truncatePipelineIo(text: string, maxChars = 140): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  if (flat.length <= maxChars) return flat;
+  return `${flat.slice(0, maxChars - 1).trimEnd()}…`;
+}
+
 function parseMessageMetadata(metadata?: string | null): {
   citationHits?: CitationHit[];
   question?: string;
@@ -1067,6 +1074,7 @@ export default function KnowledgeChatPanel() {
                   content={message.content}
                   citationHits={meta?.citationHits || []}
                   question={meta?.question || ''}
+                  alreadyFormatted={meta?.formatted === true}
                 />
                 {typeof meta?.latency_ms === 'number' && meta.latency_ms >= 0 && (
                   <p className="mt-2 text-[10px] text-surface-500 dark:text-surface-400">
@@ -1108,12 +1116,12 @@ export default function KnowledgeChatPanel() {
                           </div>
                           {stage.input ? (
                             <pre className="mt-1 whitespace-pre-wrap break-words rounded-lg bg-white/60 dark:bg-surface-900/60 px-2 py-1 text-[10px] text-surface-600 dark:text-surface-300">
-                              <span className="font-bold text-surface-500">IN: </span>{stage.input}
+                              <span className="font-bold text-surface-500">IN: </span>{truncatePipelineIo(stage.input)}
                             </pre>
                           ) : null}
                           {stage.output ? (
                             <pre className="mt-1 whitespace-pre-wrap break-words rounded-lg bg-white/60 dark:bg-surface-900/60 px-2 py-1 text-[10px] text-surface-600 dark:text-surface-300">
-                              <span className="font-bold text-surface-500">OUT: </span>{stage.output}
+                              <span className="font-bold text-surface-500">OUT: </span>{truncatePipelineIo(stage.output)}
                             </pre>
                           ) : null}
                           {stage.remediation ? (
@@ -1127,8 +1135,6 @@ export default function KnowledgeChatPanel() {
                 {meta?.context_sources && meta.context_sources.length > 0 && (
                   <MessageSources
                     summaries={meta.context_sources}
-                    confidence={meta.confidence}
-                    answerMode={meta.answer_mode}
                     compact
                     title="Sources used"
                   />

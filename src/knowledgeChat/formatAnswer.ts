@@ -18,6 +18,11 @@ export type FormatAnswerOptions = {
   preferredCitation?: CitationHit;
   /** Demo cheatsheet mode: enforce one-line Answer + line citations. */
   demoMode?: boolean;
+  /**
+   * Content was already passed through `formatKnowledgeAnswer` at publish time.
+   * Use a light display pass so fenced evidence / appendix is not re-processed.
+   */
+  alreadyFormatted?: boolean;
 };
 
 const UNWANTED_LEAD_PATTERNS = [
@@ -56,7 +61,26 @@ export function prepareKnowledgeDisplayMarkdown(
   citationHits: CitationHit[] = [],
   options: Omit<FormatAnswerOptions, 'skipQualityGate'> = {},
 ): string {
+  if (options.alreadyFormatted) {
+    return lightDisplayNormalize(text);
+  }
   return formatKnowledgeAnswer(text, citationHits, { ...options, skipQualityGate: true });
+}
+
+/** Light pass for already-published answers (heading breaks + unescape only). */
+function lightDisplayNormalize(text: string): string {
+  if (!text) return '';
+  return normalizeStructuredAnswerMarkdown(unescapeLlmLiterals(text))
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** Apply prose transforms without mutating fenced code blocks. */
+function transformOutsideFencedCode(text: string, transform: (segment: string) => string): string {
+  return text
+    .split(/(```[\s\S]*?```)/g)
+    .map(part => (part.startsWith('```') ? part : transform(part)))
+    .join('');
 }
 
 export function isListStyleQuestion(question: string): boolean {
@@ -83,11 +107,14 @@ export function unescapeLlmLiterals(text: string): string {
 }
 
 function collapseInlineWhitespace(text: string): string {
-  return text
-    .split('\n')
-    .map(line => line.replace(/[ \t]{2,}/g, ' ').trimEnd())
-    .join('\n')
-    .replace(/\n{3,}/g, '\n\n');
+  // Never flatten indentation inside ``` fences — extractive / evidence answers
+  // embed real source bodies that must keep leading whitespace.
+  return transformOutsideFencedCode(text, segment =>
+    segment
+      .split('\n')
+      .map(line => line.replace(/[ \t]{2,}/g, ' ').trimEnd())
+      .join('\n'),
+  ).replace(/\n{3,}/g, '\n\n');
 }
 
 export function formatKnowledgeAnswer(
@@ -104,9 +131,14 @@ export function formatKnowledgeAnswer(
   }
 
   out = stripMetaCommentary(out);
-  out = normalizeStructuredAnswerMarkdown(out);
+  // Demo compacting must see ## Answer before the redundant heading is stripped.
+  if (options.demoMode) {
+    out = enforceDemoAnswerShape(out);
+  } else {
+    out = normalizeStructuredAnswerMarkdown(out);
+  }
   out = stripProseSourceArtifacts(out);
-  out = normalizeListItems(out);
+  out = transformOutsideFencedCode(out, normalizeListItems);
   out = normalizeShorthandCitations(out, citationHits);
   out = normalizeCitations(out, citationHits);
   if (!isStructuredKnowledgeAnswer(out)) {
@@ -116,23 +148,25 @@ export function formatKnowledgeAnswer(
   out = stripProseSourceArtifacts(out);
   out = stripMultiSourceNoise(out);
 
-  if (options.question && isListStyleQuestion(options.question)) {
+  if (
+    options.question
+    && isListStyleQuestion(options.question)
+    && !isStructuredKnowledgeAnswer(out)
+  ) {
     out = restructureAsNumberedList(out);
   }
 
-  out = out
-    .replace(/\[([^\]]+)\]\(\s*#?\s*\)/g, '$1')
-    .replace(/\(\s*\[[^\]]+\]\([^)]*\)\s*,\s*[^)]+\)/g, '')
+  out = transformOutsideFencedCode(out, segment =>
+    segment
+      .replace(/\[([^\]]+)\]\(\s*#?\s*\)/g, '$1')
+      .replace(/\(\s*\[[^\]]+\]\([^)]*\)\s*,\s*[^)]+\)/g, ''),
+  )
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
   if (!options.skipQualityGate && !isStructuredKnowledgeAnswer(out) && isLowQualityAnswer(out)) {
     return options.notFoundFallback
       || 'I could not find enough evidence in the selected folder index to answer this question reliably.';
-  }
-
-  if (options.demoMode) {
-    out = enforceDemoAnswerShape(out);
   }
 
   if (options.question && isConciseQuestion(options.question) && !isStructuredKnowledgeAnswer(out)) {
@@ -143,41 +177,55 @@ export function formatKnowledgeAnswer(
 }
 
 function normalizeStructuredAnswerMarkdown(text: string): string {
-  let out = unescapeLlmLiterals(text);
+  const raw = unescapeLlmLiterals(text);
+  const out = transformOutsideFencedCode(raw, segment => {
+    let part = segment;
 
-  // Section headings must start on their own line (prevents mid-paragraph color jumps).
-  out = out.replace(/([^\n#])\s*(##\s+(?:Answer|Evidence|Explanation)\b)/gi, '$1\n\n$2');
+    // Section headings must start on their own line (prevents mid-paragraph color jumps).
+    part = part.replace(/([^\n#])\s*(##\s+(?:Answer|Evidence|Explanation)\b)/gi, '$1\n\n$2');
 
-  // LLM sometimes glues ". ## Explanation" or ". Explanation" without a heading break.
-  out = out.replace(/\.\s+(##\s+Explanation\b)/gi, '.\n\n$1');
-  out = out.replace(/\.\s+(Explanation)\s*$/gim, '.\n\n## $1');
+    // LLM sometimes glues ". ## Explanation" or ". Explanation" without a heading break.
+    part = part.replace(/\.\s+(##\s+Explanation\b)/gi, '.\n\n$1');
+    part = part.replace(/\.\s+(Explanation)\s*$/gim, '.\n\n## $1');
 
-  // Broken underscore "emphasis" artifacts (_ ., _ _, trailing _.)
-  out = out.replace(/_\s+\./g, '.');
-  out = out.replace(/_\s+_/g, ' ');
-  out = out.replace(/\s+_\s*([,.;:!?])/g, '$1');
-  out = out.replace(/([^\s`])_\s*$/gm, '$1');
+    // Broken underscore "emphasis" artifacts (_ ., _ _, trailing _.)
+    part = part.replace(/_\s+\./g, '.');
+    part = part.replace(/_\s+_/g, ' ');
+    part = part.replace(/\s+_\s*([,.;:!?])/g, '$1');
+    part = part.replace(/([^\s`])_\s*$/gm, '$1');
 
-  // Panel already labels the bubble "Answer"; drop redundant heading.
-  out = out.replace(/^##\s+Answer\s*\n+/im, '');
+    // Panel already labels the bubble "Answer"; drop redundant heading.
+    part = part.replace(/^##\s+Answer\s*\n+/im, '');
+
+    return part;
+  });
 
   return out.replace(/\n{3,}/g, '\n\n').trim();
 }
 
 function enforceDemoAnswerShape(text: string): string {
-  let out = normalizeStructuredAnswerMarkdown(text);
+  // Compact the answer body before ## Answer is stripped by normalizeStructuredAnswerMarkdown.
+  let out = unescapeLlmLiterals(text);
   const answerMatch = out.match(/^##\s+Answer\s*\n+([\s\S]*?)(?=\n##\s+(?:Evidence|Explanation)\b|$)/im);
   if (answerMatch) {
     const body = answerMatch[1].replace(/\s+/g, ' ').trim();
     const firstSentence = body.match(/^[^.!?]+[.!?]/)?.[0]?.trim() || body.split(/\n/)[0]?.trim() || body;
     out = out.replace(answerMatch[0], `## Answer\n\n${firstSentence}`);
+  } else {
+    // Already stripped: compact the leading prose before Evidence/Explanation.
+    const split = out.split(/(?=\n##\s+(?:Evidence|Explanation)\b)/i);
+    if (split.length > 1 && split[0].trim()) {
+      const body = split[0].replace(/\s+/g, ' ').trim();
+      const firstSentence = body.match(/^[^.!?]+[.!?]/)?.[0]?.trim() || body;
+      out = `${firstSentence}${split.slice(1).join('')}`;
+    }
   }
   if (!/^##\s+Evidence\b/im.test(out) && /\[Source:[^\]]+\]/i.test(out)) {
     const cite = out.match(/\[Source:[^\]]+\]/i)?.[0] || '';
     const body = out.replace(/\[Source:[^\]]+\]/gi, '').trim();
     out = `## Answer\n\n${body}\n\n## Evidence\n\n${cite}`;
   }
-  return out.trim();
+  return normalizeStructuredAnswerMarkdown(out);
 }
 
 function stripMultiSourceNoise(text: string): string {

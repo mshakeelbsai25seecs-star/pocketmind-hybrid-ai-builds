@@ -333,6 +333,11 @@
     padding-bottom: 0.25rem;
   }
 
+  .nexus-markdown-knowledge > .nexus-kc-section:first-child,
+  .nexus-markdown-knowledge > .nexus-kc-subsection:first-child {
+    @apply mt-1;
+  }
+
   .nexus-kc-section::before {
     content: none !important;
     display: none !important;
@@ -369,6 +374,10 @@
     background: none;
   }
 
+  .nexus-kc-hr {
+    @apply my-4 border-0 border-t border-surface-200 dark:border-surface-700;
+  }
+
   .nexus-kc-code {
     @apply rounded px-1 py-0.5 font-mono text-[0.85em] font-normal text-sky-800 dark:text-sky-200 bg-surface-100 dark:bg-surface-800;
     border: none;
@@ -380,8 +389,11 @@
     white-space: pre-wrap;
   }
 
-  .nexus-kc-pre .nexus-kc-code-block {
-    @apply font-mono text-[0.85em] font-normal text-surface-800 dark:text-surface-200 bg-transparent p-0;
+  .nexus-kc-pre .nexus-kc-code-block,
+  .nexus-kc-pre .nexus-kc-code {
+    @apply font-mono text-[0.85em] font-normal text-surface-800 dark:text-surface-200 bg-transparent p-0 rounded-none;
+    border: none;
+    background-image: none;
   }
 
   /* Legacy overrides kept for any mixed markup paths */

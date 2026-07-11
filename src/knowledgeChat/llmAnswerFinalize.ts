@@ -13,8 +13,7 @@ export function sanitizeLlmKnowledgeDraft(text: string): string {
         .replace(/\\/g, '/')
         .split('/')
         .pop()
-        ?.replace(/^code_/, '')
-        ?.replace(/_/g, '_') || String(file);
+        ?.replace(/^code_/, '') || String(file);
       return `[Source: ${name} | `;
     })
     .replace(/\[File:([^|\]]+)\|/gi, (_m, file) => {
@@ -24,7 +23,9 @@ export function sanitizeLlmKnowledgeDraft(text: string): string {
     .replace(/\\t/g, ' ')
     .replace(/\\n/g, '\n')
     .replace(/\*{3,}/g, '**')
-    .replace(/[※_]+/g, ' ')
+    // Strip decorative reference marks / underscore runs only — never wipe snake_case ids.
+    .replace(/※+/g, ' ')
+    .replace(/(^|[\s(])_{2,}(?=[\s).,;:!?]|$)/g, '$1')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 
