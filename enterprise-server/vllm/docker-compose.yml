@@ -1,0 +1,34 @@
+# Example vLLM deployment for NexusAI Enterprise Server Mode.
+# Run this on a Linux GPU server with NVIDIA drivers and Docker GPU support installed.
+# Replace MODEL_ID and tensor parallel size according to your hardware.
+
+services:
+  nexusai-vllm:
+    image: vllm/vllm-openai:latest
+    container_name: nexusai-vllm
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+    volumes:
+      - ./hf-cache:/root/.cache/huggingface
+    ipc: host
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --model
+      - ${MODEL_ID:-Qwen/Qwen2.5-7B-Instruct}
+      - --tensor-parallel-size
+      - ${TENSOR_PARALLEL_SIZE:-1}
+      - --max-model-len
+      - ${MAX_MODEL_LEN:-8192}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

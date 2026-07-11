@@ -1,0 +1,7 @@
+{
+  "E-401": "Unauthorized — missing or invalid bearer token",
+  "E-402": "Embedding model not loaded — check models directory and restart inference",
+  "E-403": "Forbidden — user lacks permission for this collection",
+  "E-429": "Rate limited — retry after backoff",
+  "E-500": "Internal server error — see application logs"
+}

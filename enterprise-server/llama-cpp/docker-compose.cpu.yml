@@ -1,0 +1,22 @@
+services:
+  nexusai-llama-cpp-cpu:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: nexusai-llama-cpp-cpu
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    volumes:
+      - ./models:/models
+    command:
+      - -m
+      - ${MODEL_PATH:-/models/model.gguf}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - -c
+      - ${CTX_SIZE:-4096}
+      - -ngl
+      - "0"
+      - -t
+      - ${THREADS:-8}

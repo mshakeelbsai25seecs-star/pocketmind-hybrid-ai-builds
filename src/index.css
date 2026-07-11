@@ -1,0 +1,510 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-primary: 14 165 233;
+    --nexus-blue: 14 165 233;
+    --nexus-orange: 249 115 22;
+    --nexus-amber: 245 158 11;
+  }
+
+  html {
+    @apply antialiased;
+    overflow: hidden;
+  }
+
+  html, body, #root {
+    width: 100%;
+    height: 100%;
+  }
+
+  body {
+    @apply text-surface-900 dark:text-surface-100 bg-surface-50;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    overflow: hidden;
+  }
+
+  .dark body {
+    @apply bg-surface-950;
+  }
+
+  * {
+    min-width: 0;
+  }
+
+  img, video, canvas, svg {
+    max-width: 100%;
+  }
+
+  ::-webkit-scrollbar {
+    @apply w-2 h-2;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full bg-surface-300 dark:bg-surface-700;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-surface-400 dark:bg-surface-600;
+  }
+
+  pre {
+    @apply bg-surface-950 text-surface-50 p-4 rounded-xl overflow-x-auto my-3 max-w-full border border-surface-800;
+  }
+
+  code {
+    @apply font-mono text-sm;
+  }
+
+  p {
+    @apply mb-2;
+  }
+
+  ul, ol {
+    @apply pl-5 mb-2;
+  }
+
+  li {
+    @apply mb-1;
+  }
+
+  ::selection {
+    @apply bg-primary-200 dark:bg-primary-900 text-primary-900 dark:text-primary-100;
+  }
+}
+
+@layer components {
+  .app-gradient-bg {
+    @apply bg-surface-50 dark:bg-surface-950;
+  }
+
+  .panel-shell {
+    @apply rounded-2xl border border-surface-200/90 dark:border-surface-800 bg-white dark:bg-surface-950 shadow-sm;
+  }
+
+  .glass-panel {
+    @apply min-w-0 border shadow-sm;
+    @apply bg-white/95 dark:bg-surface-950/95 border-surface-200 dark:border-surface-800;
+  }
+
+  .premium-card {
+    @apply rounded-2xl border shadow-sm transition-colors duration-200;
+    @apply bg-white dark:bg-surface-900 border-surface-200 dark:border-surface-800;
+  }
+
+  .premium-card:hover {
+    @apply border-sky-300 dark:border-sky-700;
+  }
+
+  html[data-perf="low-ram"] .glass-panel,
+  html[data-perf="battery-saver"] .glass-panel,
+  html[data-perf="low-ram"] .panel-shell,
+  html[data-perf="battery-saver"] .panel-shell {
+    backdrop-filter: none !important;
+  }
+
+  html[data-perf="maximum-quality"] .app-gradient-bg {
+    background:
+      radial-gradient(circle at 7% 8%, rgba(14, 165, 233, 0.16), transparent 30%),
+      linear-gradient(135deg, rgba(255, 247, 237, 0.96), rgba(239, 246, 255, 0.96));
+  }
+
+  html[data-perf="maximum-quality"].dark .app-gradient-bg {
+    background:
+      radial-gradient(circle at 8% 12%, rgba(14, 165, 233, 0.18), transparent 28%),
+      linear-gradient(135deg, rgba(2, 6, 23, 0.98), rgba(15, 23, 42, 0.98));
+  }
+
+  .gradient-text {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(90deg, #0284c7, #f97316, #2563eb);
+  }
+
+  .nexus-pill {
+    @apply inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-bold tracking-wide;
+    background: linear-gradient(90deg, rgba(14,165,233,0.12), rgba(249,115,22,0.12));
+    color: rgb(3, 105, 161);
+    border: 1px solid rgba(14,165,233,0.20);
+  }
+
+  .dark .nexus-pill {
+    color: rgb(186, 230, 253);
+    border-color: rgba(125,211,252,0.24);
+  }
+
+  .btn-primary {
+    @apply px-4 py-2 text-white rounded-xl transition-colors duration-200 font-bold shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed bg-sky-600 hover:bg-sky-700;
+  }
+
+  .btn-primary:hover {
+    @apply bg-sky-700;
+  }
+
+  .btn-secondary {
+    @apply px-4 py-2 rounded-xl transition-colors duration-200 font-semibold active:scale-[0.98] border bg-white dark:bg-surface-900 border-surface-300 dark:border-surface-700 text-surface-900 dark:text-surface-100 hover:bg-surface-50 dark:hover:bg-surface-800;
+  }
+
+  .dark .btn-secondary {
+    @apply bg-surface-900 border-surface-700 text-surface-100 hover:bg-surface-800;
+  }
+
+  .dark .btn-secondary:hover {
+    @apply bg-surface-800;
+  }
+
+  .input-field {
+    @apply w-full px-3 py-2 rounded-xl focus:outline-none transition-all duration-200 placeholder:text-surface-400 border;
+    background: rgba(255,255,255,0.78);
+    border-color: rgba(203, 213, 225, 0.85);
+  }
+
+  .input-field:focus {
+    border-color: rgba(14, 165, 233, 0.70);
+    box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.12), 0 0 0 7px rgba(249, 115, 22, 0.06);
+  }
+
+  .dark .input-field {
+    background: rgba(15, 23, 42, 0.78);
+    border-color: rgba(71, 85, 105, 0.82);
+  }
+
+  .sidebar-nav-scroll,
+  .sidebar-chat-scroll {
+    scrollbar-gutter: stable;
+  }
+
+  .sidebar-nav-scroll::-webkit-scrollbar,
+  .sidebar-chat-scroll::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .sidebar-nav-scroll::-webkit-scrollbar-thumb,
+  .sidebar-chat-scroll::-webkit-scrollbar-thumb {
+    @apply bg-surface-300 dark:bg-surface-700 rounded-full;
+  }
+
+  .chat-message-surface {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .composer-shell {
+    @apply rounded-3xl border shadow-2xl transition-all;
+    background: linear-gradient(135deg, rgba(255,255,255,0.88), rgba(240,249,255,0.78));
+    border-color: rgba(255,255,255,0.76);
+    box-shadow: 0 22px 50px rgba(2, 132, 199, 0.12), 0 10px 26px rgba(249, 115, 22, 0.08);
+  }
+
+  .dark .composer-shell {
+    background: linear-gradient(135deg, rgba(15,23,42,0.90), rgba(2,6,23,0.82));
+    border-color: rgba(148,163,184,0.16);
+    box-shadow: 0 22px 50px rgba(0,0,0,0.30);
+  }
+}
+
+@layer components {
+  .nexus-markdown {
+    @apply max-w-none text-[0.96rem] leading-7;
+  }
+
+  .nexus-markdown > :first-child {
+    margin-top: 0 !important;
+  }
+
+  .nexus-markdown > :last-child {
+    margin-bottom: 0 !important;
+  }
+
+  .nexus-markdown-assistant {
+    @apply text-surface-900 dark:text-surface-100;
+  }
+
+  .nexus-markdown-user {
+    @apply text-white;
+  }
+
+  .nexus-md-h1 {
+    @apply mt-2 mb-4 text-2xl sm:text-3xl font-black tracking-tight;
+    background: linear-gradient(90deg, #0284c7, #2563eb, #f97316);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .nexus-md-h2 {
+    @apply mt-6 mb-3 text-xl sm:text-2xl font-extrabold tracking-tight text-sky-700 dark:text-sky-300;
+  }
+
+  .nexus-md-h2::before {
+    content: '';
+    @apply inline-block w-2.5 h-2.5 mr-2 rounded-full align-middle;
+    background: linear-gradient(135deg, #0ea5e9, #f97316);
+    box-shadow: 0 0 20px rgba(14,165,233,0.35);
+  }
+
+  .nexus-md-h3 {
+    @apply mt-5 mb-2 text-lg font-bold text-orange-600 dark:text-orange-300;
+  }
+
+  .nexus-md-h4 {
+    @apply mt-4 mb-2 text-base font-bold text-surface-800 dark:text-surface-200;
+  }
+
+  .nexus-md-p {
+    @apply my-2 text-surface-700 dark:text-surface-200;
+  }
+
+  .nexus-markdown-user .nexus-md-p,
+  .nexus-markdown-user .nexus-md-li,
+  .nexus-markdown-user .nexus-md-strong,
+  .nexus-markdown-user .nexus-md-em {
+    color: rgba(255,255,255,0.96);
+  }
+
+  .nexus-md-strong {
+    @apply font-extrabold text-surface-950 dark:text-white;
+  }
+
+  .nexus-md-em {
+    @apply text-surface-600 dark:text-surface-300;
+  }
+
+  .nexus-md-ul,
+  .nexus-md-ol {
+    @apply my-3 space-y-2 pl-0;
+  }
+
+  .nexus-md-ul {
+    @apply list-none;
+  }
+
+  .nexus-md-ol {
+    @apply list-decimal pl-6;
+  }
+
+  .nexus-md-li {
+    @apply relative text-surface-700 dark:text-surface-200;
+  }
+
+  .nexus-md-ul > .nexus-md-li {
+    @apply pl-7;
+  }
+
+  .nexus-md-ul > .nexus-md-li::before {
+    content: '';
+    @apply absolute left-1 top-[0.65rem] w-2 h-2 rounded-full;
+    background: linear-gradient(135deg, #0ea5e9, #f97316);
+    box-shadow: 0 0 14px rgba(249,115,22,0.30);
+  }
+
+  .nexus-md-ol > .nexus-md-li {
+    @apply pl-1;
+  }
+
+  /* Knowledge Chat: readable prose — separate from flashy assistant chat markdown. */
+  .nexus-markdown-knowledge {
+    @apply max-w-none text-[0.9375rem] leading-[1.65] font-normal text-surface-700 dark:text-surface-300;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  .nexus-kc-p {
+    @apply my-2 font-normal text-[0.9375rem] leading-[1.65] text-surface-700 dark:text-surface-300;
+  }
+
+  .nexus-kc-strong {
+    @apply font-medium text-surface-800 dark:text-surface-200;
+  }
+
+  .nexus-kc-em {
+    @apply italic font-normal text-surface-600 dark:text-surface-400;
+  }
+
+  .nexus-kc-section {
+    @apply mt-5 mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-surface-500 dark:text-surface-400;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.35);
+    padding-bottom: 0.25rem;
+  }
+
+  .nexus-kc-section::before {
+    content: none !important;
+    display: none !important;
+  }
+
+  .nexus-kc-subsection {
+    @apply mt-4 mb-2 text-sm font-semibold text-surface-600 dark:text-surface-400;
+  }
+
+  .nexus-kc-subsection::before {
+    content: none !important;
+    display: none !important;
+  }
+
+  .nexus-kc-ul,
+  .nexus-kc-ol {
+    @apply my-2 space-y-1 pl-5;
+  }
+
+  .nexus-kc-ul {
+    @apply list-disc;
+  }
+
+  .nexus-kc-ol {
+    @apply list-decimal;
+  }
+
+  .nexus-kc-li {
+    @apply font-normal text-surface-700 dark:text-surface-300;
+  }
+
+  .nexus-kc-quote {
+    @apply my-3 border-l-2 border-surface-300 dark:border-surface-600 pl-3 text-surface-600 dark:text-surface-400 italic;
+    background: none;
+  }
+
+  .nexus-kc-code {
+    @apply rounded px-1 py-0.5 font-mono text-[0.85em] font-normal text-sky-800 dark:text-sky-200 bg-surface-100 dark:bg-surface-800;
+    border: none;
+    background-image: none;
+  }
+
+  .nexus-kc-pre {
+    @apply my-3 rounded-lg border border-surface-200 dark:border-surface-700 bg-surface-100 dark:bg-surface-900 p-3 overflow-x-auto;
+    white-space: pre-wrap;
+  }
+
+  .nexus-kc-pre .nexus-kc-code-block {
+    @apply font-mono text-[0.85em] font-normal text-surface-800 dark:text-surface-200 bg-transparent p-0;
+  }
+
+  /* Legacy overrides kept for any mixed markup paths */
+  .nexus-markdown-knowledge .nexus-md-p {
+    @apply my-2 font-normal text-[0.9375rem] leading-[1.65] text-surface-700 dark:text-surface-300;
+  }
+
+  .nexus-markdown-knowledge .nexus-md-strong {
+    @apply font-medium text-surface-800 dark:text-surface-200;
+  }
+
+  .nexus-md-quote {
+    @apply my-4 rounded-2xl border-l-4 px-4 py-3 italic text-surface-700 dark:text-surface-200;
+    border-left-color: rgb(14 165 233);
+    background: linear-gradient(135deg, rgba(14,165,233,0.10), rgba(249,115,22,0.08));
+  }
+
+  .nexus-md-link {
+    @apply font-semibold text-sky-600 dark:text-sky-300 underline decoration-sky-300/70 underline-offset-4 hover:text-orange-500;
+  }
+
+  .nexus-inline-code {
+    @apply rounded-lg px-1.5 py-0.5 text-[0.88em] font-semibold;
+    color: rgb(3 105 161);
+    background: linear-gradient(135deg, rgba(14,165,233,0.12), rgba(249,115,22,0.10));
+    border: 1px solid rgba(14,165,233,0.18);
+  }
+
+  .dark .nexus-inline-code {
+    color: rgb(186 230 253);
+    background: linear-gradient(135deg, rgba(14,165,233,0.16), rgba(249,115,22,0.12));
+    border-color: rgba(125,211,252,0.18);
+  }
+
+  .nexus-code-shell {
+    @apply my-4 overflow-hidden rounded-2xl border shadow-xl max-w-full;
+    border-color: rgba(14,165,233,0.22);
+    background: rgba(2, 6, 23, 0.98);
+    box-shadow: 0 20px 50px rgba(2, 6, 23, 0.24), 0 10px 22px rgba(14,165,233,0.10);
+  }
+
+  .nexus-code-toolbar {
+    @apply flex items-center justify-between gap-3 px-4 py-2 border-b;
+    border-color: rgba(148,163,184,0.18);
+    background: linear-gradient(90deg, rgba(14,165,233,0.22), rgba(249,115,22,0.14));
+  }
+
+  .nexus-code-language {
+    @apply text-[11px] font-black uppercase tracking-[0.18em] text-sky-100;
+  }
+
+  .nexus-code-copy {
+    @apply inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold text-white transition-all;
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.14);
+  }
+
+  .nexus-code-copy:hover {
+    background: rgba(255,255,255,0.20);
+    transform: translateY(-1px);
+  }
+
+  .nexus-code-pre {
+    @apply m-0 max-w-full overflow-x-hidden rounded-none border-0 bg-surface-950 p-4 text-surface-50 shadow-none;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .nexus-code-pre code {
+    @apply block max-w-full text-[0.9rem] leading-6;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .nexus-md-table-wrap {
+    @apply my-4 max-w-full overflow-x-auto rounded-2xl border;
+    border-color: rgba(14,165,233,0.20);
+  }
+
+  .nexus-md-table {
+    @apply w-full border-collapse text-sm;
+  }
+
+  .nexus-md-th {
+    @apply px-3 py-2 text-left font-bold text-sky-700 dark:text-sky-200;
+    background: linear-gradient(90deg, rgba(14,165,233,0.12), rgba(249,115,22,0.10));
+  }
+
+  .nexus-md-td {
+    @apply border-t border-surface-200/70 dark:border-surface-800 px-3 py-2 text-surface-700 dark:text-surface-200;
+  }
+
+  .nexus-md-hr {
+    @apply my-5 border-0 h-px;
+    background: linear-gradient(90deg, transparent, rgba(14,165,233,0.6), rgba(249,115,22,0.45), transparent);
+  }
+}
+
+.nexus-code-shell,
+.nexus-code-pre,
+.nexus-code-pre code {
+  max-width: 100%;
+  min-width: 0;
+}
+
+.nexus-code-pre {
+  overflow-x: hidden !important;
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
+
+.nexus-code-pre code {
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
+
+.nexus-markdown,
+.nexus-md-p,
+.nexus-md-li {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}

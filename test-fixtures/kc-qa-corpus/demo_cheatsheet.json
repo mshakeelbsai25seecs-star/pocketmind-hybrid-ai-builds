@@ -1,0 +1,118 @@
+{
+  "collection_name": "NexusAI QA Corpus",
+  "version": 1,
+  "entries": [
+    {
+      "id": "handlesend",
+      "file": "code/ChatView.tsx",
+      "symbols": ["handleSend", "handleKeyDown", "ChatView"],
+      "topics": ["send message", "chat input", "enter key", "user message", "add_message"],
+      "line_start": 10,
+      "line_end": 16,
+      "summary": "handleSend trims the input, clears the field with setInput(''), and sends the user message to the backend via add_message before starting generation.",
+      "evidence_hint": "const handleSend = async () => { if (!input.trim()) return; const content = input.trim(); setInput('');"
+    },
+    {
+      "id": "api-timeout-env",
+      "file": "code/config_loader.py",
+      "symbols": ["NEXUS_API_TIMEOUT", "load_api_timeout", "API_TIMEOUT_ENV"],
+      "topics": ["api timeout", "environment variable", "timeout configuration", "env var"],
+      "line_start": 6,
+      "line_end": 17,
+      "summary": "The NEXUS_API_TIMEOUT environment variable controls the API timeout; load_api_timeout reads it with a default of 30 seconds and a minimum of 5.",
+      "evidence_hint": "API_TIMEOUT_ENV = \"NEXUS_API_TIMEOUT\""
+    },
+    {
+      "id": "jwt-validation",
+      "file": "code/auth_service.rs",
+      "symbols": ["validate_jwt_token", "AuthError"],
+      "topics": ["jwt", "token validation", "validates jwt", "authentication"],
+      "line_start": 4,
+      "line_end": 14,
+      "summary": "validate_jwt_token is the Rust function that validates JWT access tokens and returns the subject claim when valid.",
+      "evidence_hint": "pub fn validate_jwt_token(token: &str, secret: &str) -> Result<String, AuthError>"
+    },
+    {
+      "id": "architecture-layers",
+      "file": "docs/architecture.md",
+      "symbols": ["Presentation layer", "Orchestration layer", "Inference layer"],
+      "topics": ["three layers", "architecture", "nexusai architecture", "system layers"],
+      "line_start": 5,
+      "line_end": 9,
+      "summary": "NexusAI has three layers: Presentation (React UI), Orchestration (Tauri Rust backend), and Inference (local or remote LLM and embedding servers).",
+      "evidence_hint": "1. **Presentation layer** — React UI (ChatView, Knowledge Chat, Settings)."
+    },
+    {
+      "id": "onboarding-duration",
+      "file": "docs/onboarding-guide.md",
+      "symbols": ["five business days", "onboarding"],
+      "topics": ["new hire", "onboarding duration", "how long onboarding", "business days"],
+      "line_start": 7,
+      "line_end": 7,
+      "summary": "Standard new-hire onboarding takes five business days.",
+      "evidence_hint": "Standard onboarding takes **five business days**"
+    },
+    {
+      "id": "vpn-first-step",
+      "file": "runbooks/vpn-incident-response.md",
+      "symbols": ["Contain", "VPN-BLOCK-TEMP"],
+      "topics": ["vpn brute force", "vpn alert", "first step", "brute-force", "block source ip"],
+      "line_start": 9,
+      "line_end": 9,
+      "summary": "The first step for a VPN brute-force alert is Contain — block the source IP on the VPN gateway.",
+      "evidence_hint": "1. **Contain** — Block the source IP on the VPN gateway"
+    },
+    {
+      "id": "password-reset-approver",
+      "file": "runbooks/password-reset-sop.md",
+      "symbols": ["emergency password reset", "manager", "SOC lead"],
+      "topics": ["password reset", "emergency reset", "who approves", "approver"],
+      "line_start": 9,
+      "line_end": 10,
+      "summary": "An emergency password reset requires approval from the user's manager or a SOC lead on call.",
+      "evidence_hint": "requires approval from the user's manager **or** a SOC lead on call"
+    },
+    {
+      "id": "alice-log-error",
+      "file": "logs/app-2026-06-26.log",
+      "symbols": ["alice", "E-402"],
+      "topics": ["alice error", "app log", "user alice", "log error"],
+      "line_start": 4,
+      "line_end": 4,
+      "summary": "User alice's request to /v1/chat failed with error code E-402 (Embedding model not loaded).",
+      "evidence_hint": "user=alice route=/v1/chat status=500 error_code=E-402"
+    },
+    {
+      "id": "error-e402",
+      "file": "data/error-codes.json",
+      "symbols": ["E-402"],
+      "topics": ["error code e-402", "e-402 meaning", "embedding model"],
+      "line_start": 3,
+      "line_end": 3,
+      "summary": "Error code E-402 means the embedding model is not loaded — check the models directory and restart inference.",
+      "evidence_hint": "\"E-402\": \"Embedding model not loaded"
+    },
+    {
+      "id": "acme-industry",
+      "file": "general/company-overview.txt",
+      "symbols": ["Acme Corp", "cybersecurity"],
+      "topics": ["acme corp", "industry", "what industry", "company operates"],
+      "line_start": 1,
+      "line_end": 1,
+      "summary": "Acme Corp operates in cybersecurity services and managed detection for mid-market enterprises.",
+      "evidence_hint": "Acme Corp operates in cybersecurity services"
+    }
+  ],
+  "question_routes": [
+    { "patterns": ["handlesend", "handle send", "chatview.tsx", "send message", "what does handlesend"], "entry_ids": ["handlesend"] },
+    { "patterns": ["api timeout", "nexus_api_timeout", "environment variable", "env var", "config_loader"], "entry_ids": ["api-timeout-env"] },
+    { "patterns": ["jwt", "validate_jwt", "validates jwt", "auth_service"], "entry_ids": ["jwt-validation"] },
+    { "patterns": ["three layers", "architecture", "presentation layer", "orchestration layer"], "entry_ids": ["architecture-layers"] },
+    { "patterns": ["onboarding", "new hire", "business days", "how long"], "entry_ids": ["onboarding-duration"] },
+    { "patterns": ["vpn", "brute force", "brute-force", "first step", "contain"], "entry_ids": ["vpn-first-step"] },
+    { "patterns": ["password reset", "emergency reset", "who approves", "approver"], "entry_ids": ["password-reset-approver"] },
+    { "patterns": ["alice", "app-2026-06-26", "user alice"], "entry_ids": ["alice-log-error"] },
+    { "patterns": ["e-402", "error code", "error e-402"], "entry_ids": ["error-e402"] },
+    { "patterns": ["acme", "industry", "cybersecurity", "company operates"], "entry_ids": ["acme-industry"] }
+  ]
+}

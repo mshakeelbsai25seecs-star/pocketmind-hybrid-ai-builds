@@ -1,0 +1,646 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { invoke } from '@tauri-apps/api/tauri';
+import { listen } from '@tauri-apps/api/event';
+import { open } from '@tauri-apps/api/dialog';
+import { Download, FolderSearch, HardDrive, Link as LinkIcon, RefreshCcw, Search, Trash2, CheckCircle, AlertTriangle, FlaskConical, Globe2, KeyRound, Crown, Zap, Tags } from 'lucide-react';
+import { useAppStore } from '../store';
+import { LocalModelRecord, OnlineChatModel, ModelCategoryId, Conversation } from '../types';
+import { MODEL_CATEGORIES, OFFLINE_CHAT_CATALOG, ONLINE_CHAT_MODELS } from '../modelCatalog';
+import { pathPlaceholder } from '../platformPaths';
+
+interface DownloadProgress {
+  id: string;
+  file_name: string;
+  status: string;
+  downloaded_bytes: number;
+  total_bytes: number | null;
+  speed_bytes_per_sec: number;
+  retries: number;
+  message: string;
+  elapsed_secs: number;
+}
+
+type DownloadableModel = (typeof OFFLINE_CHAT_CATALOG)[number];
+
+type ModelTab = 'offline' | 'online-free' | 'online-premium' | 'categories';
+
+const CHAT_CATEGORIES = MODEL_CATEGORIES.filter(c => !c.id.startsWith('image-'));
+const PRESETS: DownloadableModel[] = OFFLINE_CHAT_CATALOG;
+
+function formatBytes(bytes: number | null | undefined): string {
+  if (bytes == null || Number.isNaN(bytes)) return 'Unknown';
+  if (bytes <= 0) return '0 B';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let value = bytes;
+  let idx = 0;
+  while (value >= 1024 && idx < units.length - 1) {
+    value /= 1024;
+    idx += 1;
+  }
+  return `${value.toFixed(idx === 0 ? 0 : 2)} ${units[idx]}`;
+}
+
+function formatSpeed(bytesPerSec: number): string {
+  if (!bytesPerSec || bytesPerSec < 1) return '0 MB/s';
+  return `${(bytesPerSec / 1024 / 1024).toFixed(2)} MB/s`;
+}
+
+function formatTime(seconds: number): string {
+  if (!Number.isFinite(seconds) || seconds <= 0) return 'Unknown';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function fileNameFromUrl(url: string): string {
+  try {
+    const clean = url.split('?')[0];
+    const last = clean.substring(clean.lastIndexOf('/') + 1);
+    return decodeURIComponent(last || 'model.gguf');
+  } catch {
+    return 'model.gguf';
+  }
+}
+
+export default function ModelManager() {
+  const [search, setSearch] = useState('');
+  const statusRef = useRef<HTMLDivElement | null>(null);
+  const [directUrl, setDirectUrl] = useState('');
+  const [status, setStatus] = useState<string>('');
+  const [error, setError] = useState<string>('');
+  const [progress, setProgress] = useState<DownloadProgress | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [healthBusy, setHealthBusy] = useState(false);
+  const [healthResult, setHealthResult] = useState<string>('');
+  const [activeTab, setActiveTab] = useState<ModelTab>('offline');
+  const [categoryFilter, setCategoryFilter] = useState<ModelCategoryId | 'all'>('all');
+  const [configuredProviders, setConfiguredProviders] = useState<string[]>([]);
+  const [apiKeyInputs, setApiKeyInputs] = useState<Record<string, string>>({});
+  const {
+    localModels,
+    setLocalModels,
+    setCurrentModel,
+    currentModel,
+    modelsDir,
+    setModelsDir,
+    defaultParams,
+    activeCharacterId,
+    setActiveConversation,
+    setMessages,
+    setConversations,
+    setActiveView,
+    deploymentConfig,
+  } = useAppStore();
+
+  const filtered = useMemo(
+    () => PRESETS.filter(m => {
+      const q = search.toLowerCase().trim();
+      const matchesSearch = !q || [m.name, m.params, m.quant, m.recommendedUse, ...m.categories].join(' ').toLowerCase().includes(q);
+      const matchesCategory = categoryFilter === 'all' || m.categories.includes(categoryFilter);
+      return matchesSearch && matchesCategory;
+    }),
+    [search, categoryFilter]
+  );
+
+  const onlineFreeModels = useMemo(() => ONLINE_CHAT_MODELS.filter(m => m.tier === 'free' && (categoryFilter === 'all' || m.categories.includes(categoryFilter))), [categoryFilter]);
+  const onlinePremiumModels = useMemo(() => ONLINE_CHAT_MODELS.filter(m => m.tier === 'premium' && (categoryFilter === 'all' || m.categories.includes(categoryFilter))), [categoryFilter]);
+
+  const refreshModels = async () => {
+    const models = await invoke<LocalModelRecord[]>('get_local_models');
+    setLocalModels(models);
+  };
+
+  const refreshProviders = async () => {
+    try {
+      const providers = await invoke<string[]>('get_api_key_providers');
+      setConfiguredProviders(providers);
+    } catch {
+      setConfiguredProviders([]);
+    }
+  };
+
+  useEffect(() => {
+    refreshModels().catch(err => setError(String(err)));
+    refreshProviders();
+    const unlisten = listen<DownloadProgress>('model-download-progress', event => {
+      setProgress(event.payload);
+      setStatus(event.payload.message || event.payload.status);
+    });
+    return () => {
+      unlisten.then(fn => fn()).catch(() => undefined);
+    };
+  }, []);
+
+
+  const announce = (message: string, isError = false) => {
+    if (isError) {
+      setError(message);
+    } else {
+      setError('');
+      setStatus(message);
+    }
+    setTimeout(() => statusRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' }), 50);
+  };
+
+  const hasMeaningfulMessages = (items: Array<{ role?: string; content?: string }> | undefined): boolean => {
+    return (items || []).some(m => {
+      const role = String(m.role || '').toLowerCase();
+      const content = String(m.content || '').trim();
+      return (role === 'user' || role === 'assistant') && Boolean(content) && content !== 'Thinking...';
+    });
+  };
+
+  const removeEmptyActiveChatBeforeModelSwitch = async () => {
+    const state = useAppStore.getState();
+    const activeId = state.activeConversationId;
+    if (!activeId) return;
+
+    const localMessages = state.messages[activeId];
+    let hasMessages = hasMeaningfulMessages(localMessages);
+
+    // If the message list is not loaded in memory yet, check the database before deciding.
+    if (!Array.isArray(localMessages)) {
+      try {
+        const savedMessages = await invoke<Array<{ role?: string; content?: string }>>('get_messages', { conversationId: activeId });
+        hasMessages = hasMeaningfulMessages(savedMessages);
+      } catch {
+        // If the DB check fails, do not delete anything. Safety first.
+        return;
+      }
+    }
+
+    if (hasMessages) return;
+
+    try {
+      await invoke('delete_conversation', { id: activeId });
+    } catch {
+      // Local cleanup still runs so an empty draft does not stay visible in the sidebar.
+    }
+    state.removeConversationLocal(activeId);
+  };
+
+  const startFreshChatForModel = async (modelPath: string, modelName: string) => {
+    const previousModel = useAppStore.getState().currentModel;
+
+    if (previousModel === modelPath) {
+      announce(`${modelName} is already the active chat model.`);
+      return;
+    }
+
+    try {
+      // If the previous model switch created an empty draft chat and the user never typed,
+      // remove that draft before creating the next one. This prevents sidebar clutter.
+      await removeEmptyActiveChatBeforeModelSwitch();
+      setCurrentModel(modelPath);
+
+      // Model changes should never continue inside an unrelated older conversation.
+      // Start one fresh chat for the selected model, but do not keep unused empty drafts.
+      const id = await invoke<string>('create_conversation', {
+        title: 'New Chat',
+        characterId: activeCharacterId || null,
+        modelId: modelPath,
+        mode: 'chat'
+      });
+      setActiveConversation(id);
+      setMessages(id, []);
+      const convs = await invoke<Conversation[]>('get_conversations');
+      setConversations(convs);
+      setActiveView('chat');
+      announce(`Started a new chat with ${modelName}.`);
+    } catch (err) {
+      // Keep the model selection if chat creation fails so the user can still create a chat manually.
+      setCurrentModel(modelPath);
+      announce(`Model selected, but NexusAI could not create a fresh chat automatically: ${String(err)}`, true);
+    }
+  };
+
+  const selectModelForChat = async (model: LocalModelRecord) => {
+    await startFreshChatForModel(model.path, model.name);
+  };
+
+  const chooseFolder = async () => {
+    const selected = await open({ directory: true, multiple: false });
+    if (typeof selected === 'string') setModelsDir(selected);
+  };
+
+  const scanFolder = async () => {
+    setError('');
+    announce('Scanning selected folder for .gguf models...');
+    try {
+      const models = await invoke<LocalModelRecord[]>('scan_model_folder', { folderPath: modelsDir });
+      setLocalModels(models);
+      announce(`Scan complete. ${models.length} local model(s) are now in the library.`);
+    } catch (err) {
+      announce(String(err), true);
+    }
+  };
+
+  const importModel = async () => {
+    setError('');
+    try {
+      const selected = await open({ multiple: false, filters: [{ name: 'GGUF model', extensions: ['gguf'] }] });
+      if (typeof selected !== 'string') return;
+      const model = await invoke<LocalModelRecord>('import_local_model', { path: selected });
+      await refreshModels();
+      await startFreshChatForModel(model.path, model.name);
+      announce(`Imported ${model.name}. A fresh chat has been created for this model.`);
+    } catch (err) {
+      announce(String(err), true);
+    }
+  };
+
+  const startDownload = async (model: DownloadableModel | null) => {
+    const url = model?.url || directUrl.trim();
+    if (!url) {
+      announce(model ? `${model.name} is a catalog entry. This catalog entry does not include a direct GGUF URL. Paste a direct .gguf link or choose a downloadable entry.` : 'Paste a direct .gguf URL first. Hugging Face links usually contain /resolve/main/ and end with .gguf.', true);
+      return;
+    }
+    setError('');
+    announce('Starting download. Progress will stay visible in the status panel below.');
+    setProgress({
+      id: model?.id || 'direct',
+      file_name: fileNameFromUrl(url),
+      status: 'starting',
+      downloaded_bytes: 0,
+      total_bytes: null,
+      speed_bytes_per_sec: 0,
+      retries: 0,
+      message: 'Connecting...',
+      elapsed_secs: 0,
+    });
+    setDownloadingId(model?.id || 'direct');
+    try {
+      const record = await invoke<LocalModelRecord>('download_model', {
+        url,
+        destDir: modelsDir,
+        name: model?.name || null,
+      });
+      await refreshModels();
+      await startFreshChatForModel(record.path, record.name);
+      announce(`Download complete. A fresh chat has been created for ${record.name}.`);
+    } catch (err) {
+      announce(String(err), true);
+    } finally {
+      setDownloadingId(null);
+    }
+  };
+
+  const testCurrentModel = async () => {
+    if (!currentModel) {
+      announce('Select a model first, then run the health test.', true);
+      return;
+    }
+    setHealthBusy(true);
+    setHealthResult('Starting model health test...');
+    setError('');
+    try {
+      const started = performance.now();
+      const result = await invoke<{ text: string; tokens_generated?: number; tokens_per_sec?: number }>('generate_response', {
+        request: {
+          prompt: 'Say hello in one sentence.',
+          messages: [{ role: 'user', content: 'Say hello in one sentence.' }],
+          system_prompt: 'You are NexusAI. Reply with exactly one short friendly sentence.',
+          params: { ...defaultParams, max_tokens: 96, temperature: 0.35, top_p: 0.8, repetition_penalty: 1.2 },
+          model_path: currentModel,
+          backend: currentModel.startsWith('remote:') ? 'remote' : 'llama.cpp'
+        }
+      });
+      const elapsed = ((performance.now() - started) / 1000).toFixed(1);
+      const text = result.text?.trim() || '[empty response]';
+      const suspicious = /(workflow engine|model card|what is gemma|\b(\w+)\s+\1\s+\1\b)/i.test(text);
+      setHealthResult(`${suspicious ? 'Warning' : 'Passed'} in ${elapsed}s: ${text}`);
+      announce(suspicious ? 'The model responded, but the output looks unreliable. Try a general instruct model and keep creativity low for validation.' : 'Model health test passed. You can open Chat.', suspicious);
+    } catch (err) {
+      const msg = String(err);
+      setHealthResult(`Failed: ${msg}`);
+      announce(msg, true);
+    } finally {
+      setHealthBusy(false);
+    }
+  };
+
+
+  const saveProviderKey = async (provider: string) => {
+    const key = (apiKeyInputs[provider] || '').trim();
+    if (!key) {
+      announce(`Paste an API key for ${provider} first.`, true);
+      return;
+    }
+    try {
+      await invoke('store_api_key', { provider, key });
+      setApiKeyInputs(prev => ({ ...prev, [provider]: '' }));
+      await refreshProviders();
+      announce(`${provider} API key saved locally and encrypted. You can now use ${provider} online models.`);
+    } catch (err) {
+      announce(String(err), true);
+    }
+  };
+
+  const useOnlineChatModel = async (model: OnlineChatModel) => {
+    if (model.requiresApiKey && !configuredProviders.includes(model.provider)) {
+      announce(`Add your ${model.providerName} API key before using ${model.name}.`, true);
+      setActiveTab(model.tier === 'free' ? 'online-free' : 'online-premium');
+      return;
+    }
+    await startFreshChatForModel(`remote:${model.provider}/${model.modelId}`, `${model.name} through ${model.providerName}`);
+  };
+
+  const handleDelete = async (id: string) => {
+    setError('');
+    try {
+      await invoke('delete_local_model', { id });
+      await refreshModels();
+      announce('Removed model from the local library. The physical GGUF file was not deleted.');
+    } catch (err) {
+      announce(String(err), true);
+    }
+  };
+
+  const percent = progress?.total_bytes ? Math.min(100, (progress.downloaded_bytes / progress.total_bytes) * 100) : 0;
+  const remaining = progress?.total_bytes ? Math.max(0, progress.total_bytes - progress.downloaded_bytes) : null;
+  const eta = progress && remaining != null && progress.speed_bytes_per_sec > 0 ? remaining / progress.speed_bytes_per_sec : 0;
+
+  return (
+    <div className="flex-1 overflow-y-auto p-6">
+      <div className="max-w-6xl mx-auto space-y-6">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold mb-1">Model Manager</h1>
+            <p className="text-surface-500">Manage local GGUF models, online chat providers, API keys, model categories, and health checks from one place.</p>
+          </div>
+          <button onClick={refreshModels} className="btn-secondary flex items-center gap-2">
+            <RefreshCcw className="w-4 h-4" /> Refresh
+          </button>
+        </div>
+
+        <div className="glass-panel rounded-xl p-4 space-y-4 border border-surface-200 dark:border-surface-800">
+          <div className="flex flex-wrap gap-2">
+            {[
+              { id: 'offline', label: 'Offline GGUF', icon: HardDrive },
+              { id: 'online-free', label: 'Online Free / Free Tier', icon: Zap },
+              { id: 'online-premium', label: 'Online Premium', icon: Crown },
+              { id: 'categories', label: 'Categories', icon: Tags },
+            ].map(tab => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id as ModelTab)} className={`px-4 py-2 rounded-xl text-sm font-semibold flex items-center gap-2 transition-all ${activeTab === tab.id ? 'bg-primary-600 text-white shadow-lg shadow-primary-500/20' : 'bg-surface-100 dark:bg-surface-800 hover:bg-surface-200 dark:hover:bg-surface-700 text-surface-600 dark:text-surface-300'}`}>
+                <tab.icon className="w-4 h-4" /> {tab.label}
+              </button>
+            ))}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => setCategoryFilter('all')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${categoryFilter === 'all' ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300' : 'bg-surface-100 dark:bg-surface-800 text-surface-500'}`}>All categories</button>
+            {CHAT_CATEGORIES.map(cat => (
+              <button key={cat.id} onClick={() => setCategoryFilter(cat.id)} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${categoryFilter === cat.id ? 'bg-primary-100 dark:bg-primary-900/40 text-primary-700 dark:text-primary-300' : 'bg-surface-100 dark:bg-surface-800 hover:bg-surface-200 dark:hover:bg-surface-700 text-surface-500'}`}>{cat.icon} {cat.label}</button>
+            ))}
+          </div>
+        </div>
+
+        <div ref={statusRef} className="glass-panel rounded-xl p-5 border border-surface-200 dark:border-surface-800">
+          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+            <div>
+              <p className="text-sm uppercase tracking-wider text-surface-500 font-semibold">Active chat model</p>
+              <p className="font-semibold text-lg break-all">{currentModel ? currentModel.split(/[\\/]/).pop() : 'No model selected yet'}</p>
+              <p className="text-sm text-surface-500 mt-1">{currentModel ? currentModel : 'Import or scan a GGUF file, then click Use. Selecting a model does not create duplicate imports.'}</p>
+            </div>
+            <div className="flex flex-wrap gap-2"><button onClick={testCurrentModel} disabled={!currentModel || healthBusy} className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"><FlaskConical className="w-4 h-4" /> {healthBusy ? 'Checking...' : 'Run Health Check'}</button><button onClick={() => useAppStore.getState().setActiveView('chat')} disabled={!currentModel} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">Open Chat</button></div>
+          </div>
+        </div>
+
+        {healthResult && (
+          <div className="glass-panel rounded-xl p-4 border border-surface-200 dark:border-surface-800 text-sm">
+            <p className="font-semibold mb-1">Latest Model Health Check</p>
+            <p className="text-surface-500 whitespace-pre-wrap">{healthResult}</p>
+          </div>
+        )}
+
+        {(status || error || progress) && (
+          <div className={`glass-panel rounded-xl p-5 border ${error ? 'border-red-500/50' : 'border-primary-500/30'}`}>
+            <div className="flex items-start gap-3">
+              {error ? <AlertTriangle className="w-5 h-5 text-red-500 mt-0.5" /> : <CheckCircle className="w-5 h-5 text-primary-500 mt-0.5" />}
+              <div className="flex-1 space-y-3">
+                <p className={`font-medium ${error ? 'text-red-500' : ''}`}>{error || status}</p>
+                {progress && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between text-sm text-surface-500">
+                      <span className="truncate">{progress.file_name}</span>
+                      <span>{percent.toFixed(2)}%</span>
+                    </div>
+                    <div className="h-3 bg-surface-200 dark:bg-surface-800 rounded-full overflow-hidden">
+                      <div className="h-full bg-primary-500 transition-all duration-300" style={{ width: `${percent}%` }} />
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+                      <InfoTile label="Downloaded" value={formatBytes(progress.downloaded_bytes)} />
+                      <InfoTile label="Total" value={formatBytes(progress.total_bytes)} />
+                      <InfoTile label="Speed" value={formatSpeed(progress.speed_bytes_per_sec)} />
+                      <InfoTile label="ETA" value={formatTime(eta)} />
+                      <InfoTile label="Remaining" value={formatBytes(remaining)} />
+                      <InfoTile label="Elapsed" value={formatTime(progress.elapsed_secs)} />
+                      <InfoTile label="Retries" value={String(progress.retries)} />
+                      <InfoTile label="Status" value={progress.status} />
+                    </div>
+                    <p className="text-xs text-surface-500 break-all">
+                      Raw bytes: {progress.downloaded_bytes.toLocaleString()} / {progress.total_bytes?.toLocaleString() || 'unknown'}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+
+        <div className="glass-panel rounded-xl p-5 border border-primary-300/30 bg-primary-50/70 dark:bg-primary-950/20 space-y-3">
+          <h2 className="font-semibold flex items-center gap-2"><Zap className="w-5 h-5 text-primary-500" /> Automatic optimization and quantization</h2>
+          <p className="text-sm text-surface-600 dark:text-surface-300">NexusAI keeps both small and enterprise-scale models in the catalog. For local GGUF models, the Runtime optimizer decides the launch plan automatically: full GPU offload first, calculated CPU + GPU split second, and CPU fallback last.</p>
+          <div className="grid md:grid-cols-4 gap-3 text-xs">
+            <InfoTile label="Q4_K_M" value="Best size/quality balance" />
+            <InfoTile label="Q5_K_M / Q6_K" value="Higher quality, heavier" />
+            <InfoTile label="Q8 / FP16" value="Very large hardware only" />
+            <InfoTile label="GPU layers -1" value="Automatic optimizer" />
+          </div>
+          <p className="text-xs text-surface-500">Large 70B-class entries stay available for organizations with qualified RAM/VRAM. If a device cannot load them, NexusAI should explain the fit issue instead of removing the option or crashing.</p>
+        </div>
+
+        <div className="glass-panel rounded-xl p-5 space-y-4">
+          <h2 className="font-semibold flex items-center gap-2"><HardDrive className="w-5 h-5 text-primary-500" /> Local model folder</h2>
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto] gap-3">
+            <input value={modelsDir} onChange={e => setModelsDir(e.target.value)} className="input-field" placeholder={pathPlaceholder(deploymentConfig, 'models')} />
+            <button onClick={chooseFolder} className="btn-secondary flex items-center gap-2"><FolderSearch className="w-4 h-4" /> Browse</button>
+            <button onClick={scanFolder} className="btn-secondary flex items-center gap-2"><Search className="w-4 h-4" /> Scan Folder</button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={importModel} className="btn-primary flex items-center gap-2"><HardDrive className="w-4 h-4" /> Import .gguf</button>
+            <p className="text-xs text-surface-500 mt-2">Importing the same file again will reuse the existing library entry instead of creating duplicates.</p>
+          </div>
+        </div>
+
+        <div className="glass-panel rounded-xl p-5 space-y-4">
+          <h2 className="font-semibold flex items-center gap-2"><LinkIcon className="w-5 h-5 text-primary-500" /> Download by direct GGUF URL</h2>
+          <p className="text-sm text-surface-500">Use a direct file URL, usually a Hugging Face link containing <code>/resolve/main/</code> and ending in <code>.gguf</code>.</p>
+          <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3">
+            <input value={directUrl} onChange={e => setDirectUrl(e.target.value)} className="input-field" placeholder="https://huggingface.co/.../resolve/main/model.gguf?download=true" />
+            <button onClick={() => startDownload(null)} disabled={!!downloadingId} className="btn-primary flex items-center gap-2 disabled:opacity-50">
+              <Download className="w-4 h-4" /> Download
+            </button>
+          </div>
+        </div>
+
+        {(activeTab === 'online-free' || activeTab === 'online-premium') && (
+          <div className="glass-panel rounded-xl overflow-hidden">
+            <div className="p-4 border-b border-surface-200 dark:border-surface-800">
+              <h2 className="font-semibold flex items-center gap-2"><Globe2 className="w-5 h-5 text-primary-500" /> {activeTab === 'online-free' ? 'Online Free / Free Tier Chat Models' : 'Online Premium Chat Models'}</h2>
+              <p className="text-sm text-surface-500">Bring your own API key. Keys are stored locally using the app vault. Select an online model with Use, then chat normally.</p>
+            </div>
+            <div className="p-4 grid lg:grid-cols-[320px_1fr] gap-4">
+              <div className="rounded-xl border border-surface-200 dark:border-surface-800 p-4 bg-surface-50 dark:bg-surface-950/40 space-y-4">
+                <div>
+                  <p className="font-semibold flex items-center gap-2"><KeyRound className="w-4 h-4 text-primary-500" /> API Keys</p>
+                  <p className="text-xs text-surface-500 mt-1">Configured: {configuredProviders.length ? configuredProviders.join(', ') : 'none yet'}</p>
+                </div>
+                {Array.from(new Set(ONLINE_CHAT_MODELS.filter(m => m.tier === (activeTab === 'online-free' ? 'free' : 'premium')).map(m => m.provider))).map(provider => {
+                  const model = ONLINE_CHAT_MODELS.find(m => m.provider === provider)!;
+                  return (
+                    <div key={provider} className="space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-sm font-medium">{model.providerName}</span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full ${configuredProviders.includes(provider) ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-surface-200 dark:bg-surface-800 text-surface-500'}`}>{configuredProviders.includes(provider) ? 'Saved' : 'Needed'}</span>
+                      </div>
+                      <input type="password" value={apiKeyInputs[provider] || ''} onChange={e => setApiKeyInputs(prev => ({ ...prev, [provider]: e.target.value }))} placeholder={`${model.providerName} API key`} className="input-field text-sm" />
+                      <div className="flex gap-2">
+                        <button onClick={() => saveProviderKey(provider)} className="btn-secondary text-xs flex-1">Save key</button>
+                        <button onClick={() => window.open(model.apiKeyUrl, '_blank')} className="btn-secondary text-xs">Get key</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="grid md:grid-cols-2 gap-4">
+                {(activeTab === 'online-free' ? onlineFreeModels : onlinePremiumModels).map(model => (
+                  <div key={model.id} className="rounded-xl border border-surface-200 dark:border-surface-800 p-4 bg-white/60 dark:bg-surface-950/40 hover:border-primary-400/50 transition-colors">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold">{model.name}</p>
+                        <p className="text-xs text-surface-500">{model.providerName} • {model.modelId}</p>
+                      </div>
+                      <span className={`text-[10px] uppercase tracking-wide px-2 py-1 rounded-full ${model.tier === 'free' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>{model.tier}</span>
+                    </div>
+                    <p className="text-sm text-surface-600 dark:text-surface-400 mt-3">{model.recommendedUse}</p>
+                    <div className="flex flex-wrap gap-1.5 mt-3">
+                      {model.categories.map(cat => <span key={cat} className="text-[10px] px-2 py-1 rounded-full bg-surface-100 dark:bg-surface-800 text-surface-500">{cat}</span>)}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-xs mt-4">
+                      <InfoTile label="Speed" value={model.speed} />
+                      <InfoTile label="Quality" value={model.quality} />
+                    </div>
+                    <button onClick={() => useOnlineChatModel(model)} className="btn-primary w-full mt-4">Use in Chat</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {activeTab === 'categories' && (
+          <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {CHAT_CATEGORIES.map(cat => (
+              <div key={cat.id} className="glass-panel rounded-xl p-5 border border-surface-200 dark:border-surface-800">
+                <div className="text-2xl mb-2">{cat.icon}</div>
+                <h3 className="font-semibold">{cat.label}</h3>
+                <p className="text-sm text-surface-500 mt-1">{cat.description}</p>
+                <p className="text-xs text-surface-400 mt-3">Offline: {OFFLINE_CHAT_CATALOG.filter(m => m.categories.includes(cat.id)).length} • Online: {ONLINE_CHAT_MODELS.filter(m => m.categories.includes(cat.id)).length}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="glass-panel rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-surface-200 dark:border-surface-800 flex items-center justify-between">
+            <div>
+              <h2 className="font-semibold">Local Model Library</h2>
+              <p className="text-sm text-surface-500">Models imported or found on this computer.</p>
+            </div>
+          </div>
+          {localModels.length === 0 ? (
+            <div className="p-6 text-center text-surface-500">No local models yet. Import a .gguf file or scan your model folder.</div>
+          ) : (
+            <table className="w-full">
+              <thead className="bg-surface-50 dark:bg-surface-900 border-b border-surface-200 dark:border-surface-800">
+                <tr>
+                  <th className="text-left px-4 py-3 text-sm font-medium text-surface-500">Name</th>
+                  <th className="text-left px-4 py-3 text-sm font-medium text-surface-500">Quant</th>
+                  <th className="text-left px-4 py-3 text-sm font-medium text-surface-500">Size</th>
+                  <th className="text-left px-4 py-3 text-sm font-medium text-surface-500">Path</th>
+                  <th className="text-right px-4 py-3 text-sm font-medium text-surface-500">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-surface-200 dark:divide-surface-800">
+                {localModels.map(model => (
+                  <tr key={model.id} className="hover:bg-surface-50 dark:hover:bg-surface-900/50 transition-colors">
+                    <td className="px-4 py-4 font-medium">{model.name}</td>
+                    <td className="px-4 py-4 text-sm">{model.quantization || 'Unknown'}</td>
+                    <td className="px-4 py-4 text-sm">{formatBytes(model.size_bytes)}</td>
+                    <td className="px-4 py-4 text-xs text-surface-500 max-w-sm truncate" title={model.path}>{model.path}</td>
+                    <td className="px-4 py-4 text-right space-x-2">
+                      <button onClick={() => selectModelForChat(model)} className={`px-3 py-1.5 rounded-lg text-sm ${currentModel === model.path ? 'bg-green-600 text-white' : 'bg-primary-600 hover:bg-primary-500 text-white'}`}>{currentModel === model.path ? 'Selected' : 'Use'}</button>
+                      <button onClick={() => handleDelete(model.id)} className="p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 transition-colors"><Trash2 className="w-4 h-4" /></button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+
+        <div className="glass-panel rounded-xl overflow-hidden">
+          <div className="p-4 border-b border-surface-200 dark:border-surface-800">
+            <h2 className="font-semibold">Recommended Downloads</h2>
+            <p className="text-sm text-surface-500">Start with TinyLlama, Phi-3 Mini, or Qwen small models before downloading larger models.</p>
+          </div>
+          <div className="relative flex-1 p-4">
+            <Search className="absolute left-7 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
+            <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="Search recommended models..." className="input-field pl-10" />
+          </div>
+          <table className="w-full">
+            <thead className="bg-surface-50 dark:bg-surface-900 border-y border-surface-200 dark:border-surface-800">
+              <tr>
+                <th className="text-left px-4 py-3 text-sm font-medium text-surface-500">Model</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-surface-500">Quant</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-surface-500">Size</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-surface-500">RAM</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-surface-500">Speed</th>
+                <th className="text-right px-4 py-3 text-sm font-medium text-surface-500">Action</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-surface-200 dark:divide-surface-800">
+              {filtered.map(model => (
+                <tr key={model.id} className="hover:bg-surface-50 dark:hover:bg-surface-900/50 transition-colors">
+                  <td className="px-4 py-4"><p className="font-medium">{model.name}</p><p className="text-xs text-surface-500">{model.params} parameters • {model.recommendedUse}</p></td>
+                  <td className="px-4 py-4"><span className="px-2 py-1 rounded-md bg-surface-100 dark:bg-surface-800 text-xs font-medium">{model.quant}</span></td>
+                  <td className="px-4 py-4 text-sm">{model.size}</td>
+                  <td className="px-4 py-4 text-sm">{model.ram}</td>
+                  <td className="px-4 py-4 text-sm"><div>{model.speed}</div><div className="text-xs text-surface-500">{model.quality}</div></td>
+                  <td className="px-4 py-4 text-right">
+                    <button onClick={() => startDownload(model)} disabled={!!downloadingId || !model.url} className="p-2 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800 text-primary-600 dark:text-primary-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" title={model.url ? 'Download with progress details' : 'No direct URL available. Paste a direct GGUF URL above.'}>
+                      <Download className={`w-4 h-4 ${downloadingId === model.id ? 'animate-pulse' : ''}`} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function InfoTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-lg bg-surface-100 dark:bg-surface-900 p-3">
+      <p className="text-xs text-surface-500 mb-1">{label}</p>
+      <p className="font-semibold truncate" title={value}>{value}</p>
+    </div>
+  );
+}

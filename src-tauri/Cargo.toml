@@ -1,0 +1,79 @@
+[package]
+name = "nexus-ai"
+version = "0.1.0"
+description = "Offline-first multi-LLM chat application"
+authors = ["NexusAI Team"]
+edition = "2021"
+rust-version = "1.70"
+
+[build-dependencies]
+tauri-build = { version = "1.5", features = [] }
+
+[dependencies]
+tauri = { version = "1.5", features = [ "window-hide", "window-unmaximize", "window-show", "window-start-dragging", "window-minimize", "window-close", "window-maximize", "window-unminimize", "shell-open", "path-all", "dialog-all"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.35", features = ["full", "process"] }
+sysinfo = "0.30"
+rusqlite = { version = "0.30", features = ["bundled"] }
+aes-gcm = "0.10"
+sha2 = "0.10"
+rand = "0.8"
+base64 = "0.21"
+anyhow = "1.0"
+thiserror = "1.0"
+reqwest = { version = "0.11", features = ["json", "stream"] }
+futures = "0.3"
+log = "0.4"
+env_logger = "0.10"
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
+dirs = "5.0"
+fs2 = "0.4"
+walkdir = "2.4"
+zip = "0.6"
+image = "0.24"
+async-trait = "0.1"
+pdf-extract = "0.7"
+rayon = "1.10"
+usearch = "2.17"
+ort = { version = "2.0.0-rc.12", default-features = false, features = ["std", "download-binaries", "ndarray", "tls-rustls"], optional = true }
+tokenizers = { version = "0.21", default-features = false, features = ["onig"], optional = true }
+ndarray = { version = "0.17", features = ["std"], optional = true }
+tree-sitter = { version = "0.24", optional = true }
+tree-sitter-rust = { version = "0.23", optional = true }
+tree-sitter-python = { version = "0.23", optional = true }
+tree-sitter-javascript = { version = "0.23", optional = true }
+tree-sitter-typescript = { version = "0.23", optional = true }
+tree-sitter-go = { version = "0.23", optional = true }
+tree-sitter-java = { version = "0.23", optional = true }
+tree-sitter-c = { version = "0.23", optional = true }
+tree-sitter-cpp = { version = "0.23", optional = true }
+tree-sitter-c-sharp = { version = "0.23", optional = true }
+streaming-iterator = { version = "0.1.9", optional = true }
+
+[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
+nvml-wrapper = "0.9"
+
+[features]
+default = ["custom-protocol", "onnx-reranker", "code-entities"]
+custom-protocol = ["tauri/custom-protocol"]
+onnx-reranker = ["dep:ort", "dep:tokenizers", "dep:ndarray"]
+code-entities = [
+  "dep:tree-sitter",
+  "dep:tree-sitter-rust",
+  "dep:tree-sitter-python",
+  "dep:tree-sitter-javascript",
+  "dep:tree-sitter-typescript",
+  "dep:tree-sitter-go",
+  "dep:tree-sitter-java",
+  "dep:tree-sitter-c",
+  "dep:tree-sitter-cpp",
+  "dep:tree-sitter-c-sharp",
+  "dep:streaming-iterator",
+]
+
+# Lighter debug info than the default (2) — significantly lowers rustc/LLVM memory at link time.
+[profile.dev]
+debug = 1
+incremental = true

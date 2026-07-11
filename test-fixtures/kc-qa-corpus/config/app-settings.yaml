@@ -1,0 +1,11 @@
+app_name: NexusAI
+environment: qa
+retrieval:
+  default_mode: hybrid_dense
+  top_k: 10
+storage:
+  data_root: D:/NexusAI
+  qa_corpus: D:/NexusAI/qa-corpus
+logging:
+  level: info
+  path: logs/

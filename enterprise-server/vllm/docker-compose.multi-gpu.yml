@@ -1,0 +1,38 @@
+services:
+  nexusai-vllm-multigpu:
+    image: vllm/vllm-openai:latest
+    container_name: nexusai-vllm-multigpu
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+      - NCCL_DEBUG=WARN
+    volumes:
+      - ./hf-cache:/root/.cache/huggingface
+    ipc: host
+    shm_size: "16gb"
+    command:
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --model
+      - ${MODEL_ID:-meta-llama/Llama-3.1-70B-Instruct}
+      - --served-model-name
+      - ${SERVED_MODEL_NAME:-nexusai-large}
+      - --tensor-parallel-size
+      - ${TENSOR_PARALLEL_SIZE:-2}
+      - --pipeline-parallel-size
+      - ${PIPELINE_PARALLEL_SIZE:-1}
+      - --max-model-len
+      - ${MAX_MODEL_LEN:-8192}
+      - --gpu-memory-utilization
+      - ${GPU_MEMORY_UTILIZATION:-0.90}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

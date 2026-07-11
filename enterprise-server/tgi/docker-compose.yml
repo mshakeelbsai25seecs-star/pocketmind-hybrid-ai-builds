@@ -1,0 +1,25 @@
+services:
+  nexusai-tgi:
+    image: ghcr.io/huggingface/text-generation-inference:latest
+    container_name: nexusai-tgi
+    restart: unless-stopped
+    ports:
+      - "${PORT:-8080}:80"
+    volumes:
+      - ./hf-cache:/data
+    environment:
+      - HUGGING_FACE_HUB_TOKEN=${HUGGING_FACE_HUB_TOKEN:-}
+    command:
+      - --model-id
+      - ${MODEL_ID:-Qwen/Qwen2.5-7B-Instruct}
+      - --max-input-tokens
+      - ${MAX_INPUT_TOKENS:-4096}
+      - --max-total-tokens
+      - ${MAX_TOTAL_TOKENS:-8192}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

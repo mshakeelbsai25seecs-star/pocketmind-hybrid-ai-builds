@@ -1,0 +1,83 @@
+[
+  {
+    "id": "escalation-general",
+    "patterns": [
+      "who do i escalate to",
+      "who should i escalate to",
+      "escalation contact",
+      "how do i escalate"
+    ],
+    "answer": "Follow your indexed escalation SOP: confirm severity, notify the on-call SOC lead, and escalate to tier 2 or management when SLA thresholds or business impact criteria are met. Use the exact contact tree in your company runbook.",
+    "source_hint": "escalation SOP / on-call runbook"
+  },
+  {
+    "id": "incident-response-policy",
+    "patterns": [
+      "what is the incident response policy",
+      "incident response policy",
+      "ir policy"
+    ],
+    "answer": "Your incident response policy should define severity classification, evidence preservation, containment approval, communication rules, and post-incident review. Retrieve the IR policy document from your indexed folder for authoritative steps.",
+    "source_hint": "incident response policy"
+  },
+  {
+    "id": "containment-approval",
+    "patterns": [
+      "do i need approval for containment",
+      "containment approval required",
+      "who approves containment"
+    ],
+    "answer": "Containment actions typically require explicit human approval per company SOP and FortiSOAR playbook design. Check your indexed playbook and IR policy for mandatory approver roles before blocking hosts, isolating users, or changing firewall policy.",
+    "source_hint": "containment playbook / IR SOP"
+  },
+  {
+    "id": "vpn-policy",
+    "patterns": [
+      "vpn policy",
+      "remote access policy",
+      "ssl vpn policy"
+    ],
+    "answer": "VPN and remote access policy should cover approved authentication methods (including MFA), acceptable use, logging requirements, and escalation for anomalous VPN logins. Search your indexed policy folder for the VPN/remote access standard.",
+    "source_hint": "VPN / remote access policy"
+  },
+  {
+    "id": "mfa-policy",
+    "patterns": [
+      "mfa policy",
+      "mfa requirements",
+      "multi-factor authentication policy"
+    ],
+    "answer": "MFA policy should state which accounts, admin interfaces, and remote access paths require multi-factor authentication and any approved factors. Refer to your indexed authentication or access control policy for exact requirements.",
+    "source_hint": "MFA / authentication policy"
+  },
+  {
+    "id": "phishing-response",
+    "patterns": [
+      "phishing procedure",
+      "how to handle phishing",
+      "phishing email response"
+    ],
+    "answer": "Phishing response typically includes user notification, message preservation, IOC extraction, mailbox search, blocking, and escalation if credentials may be compromised. Use your indexed phishing runbook for step-by-step actions.",
+    "source_hint": "phishing runbook / SOP"
+  },
+  {
+    "id": "evidence-preservation",
+    "patterns": [
+      "how to preserve evidence",
+      "evidence preservation",
+      "chain of custody"
+    ],
+    "answer": "Preserve original logs, timestamps, affected assets, and analyst actions with chain-of-custody notes per your investigation SOP. Avoid destructive containment until evidence snapshots are captured when policy requires it.",
+    "source_hint": "investigation / evidence SOP"
+  },
+  {
+    "id": "fortisiem-parser-help",
+    "patterns": [
+      "how to write a fortisiem parser",
+      "fortisiem parser guide",
+      "parser field mapping fortisiem"
+    ],
+    "answer": "FortiSIEM parsers map raw log lines to normalized fields for correlation. Document event type, timestamp, user, source, destination, action, and result fields. Use your indexed parser engineering guide and sample recognizers for ordering and test cases.",
+    "source_hint": "FortiSIEM parser documentation"
+  }
+]

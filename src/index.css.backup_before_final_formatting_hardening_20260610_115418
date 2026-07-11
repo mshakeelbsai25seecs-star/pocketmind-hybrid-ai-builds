@@ -1,0 +1,425 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-primary: 14 165 233;
+    --nexus-blue: 14 165 233;
+    --nexus-orange: 249 115 22;
+    --nexus-amber: 245 158 11;
+  }
+
+  html {
+    @apply antialiased;
+    overflow: hidden;
+  }
+
+  html, body, #root {
+    width: 100%;
+    height: 100%;
+  }
+
+  body {
+    @apply text-surface-900 dark:text-surface-100;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    overflow: hidden;
+    background:
+      radial-gradient(circle at 6% 8%, rgba(14, 165, 233, 0.18), transparent 30%),
+      radial-gradient(circle at 92% 8%, rgba(249, 115, 22, 0.16), transparent 28%),
+      radial-gradient(circle at 50% 100%, rgba(59, 130, 246, 0.10), transparent 34%),
+      linear-gradient(135deg, #fff7ed 0%, #f8fafc 36%, #eff6ff 100%);
+  }
+
+  .dark body {
+    background:
+      radial-gradient(circle at 8% 12%, rgba(14, 165, 233, 0.22), transparent 28%),
+      radial-gradient(circle at 92% 10%, rgba(249, 115, 22, 0.18), transparent 26%),
+      radial-gradient(circle at 50% 100%, rgba(59, 130, 246, 0.12), transparent 34%),
+      linear-gradient(135deg, #020617 0%, #07111f 48%, #0f172a 100%);
+  }
+
+  * {
+    min-width: 0;
+  }
+
+  img, video, canvas, svg {
+    max-width: 100%;
+  }
+
+  ::-webkit-scrollbar {
+    @apply w-2 h-2;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply rounded-full;
+    background: linear-gradient(180deg, rgba(14, 165, 233, 0.55), rgba(249, 115, 22, 0.55));
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: linear-gradient(180deg, rgba(14, 165, 233, 0.8), rgba(249, 115, 22, 0.8));
+  }
+
+  pre {
+    @apply bg-surface-950 text-surface-50 p-4 rounded-2xl overflow-x-auto my-3 max-w-full border border-white/10 shadow-xl;
+  }
+
+  code {
+    @apply font-mono text-sm;
+  }
+
+  p {
+    @apply mb-2;
+  }
+
+  ul, ol {
+    @apply pl-5 mb-2;
+  }
+
+  li {
+    @apply mb-1;
+  }
+
+  ::selection {
+    @apply bg-primary-200 dark:bg-primary-900 text-primary-900 dark:text-primary-100;
+  }
+}
+
+@layer components {
+  .app-gradient-bg {
+    background:
+      radial-gradient(circle at 7% 8%, rgba(14, 165, 233, 0.16), transparent 30%),
+      radial-gradient(circle at 92% 8%, rgba(249, 115, 22, 0.14), transparent 26%),
+      radial-gradient(circle at 68% 88%, rgba(245, 158, 11, 0.10), transparent 30%),
+      linear-gradient(135deg, rgba(255, 247, 237, 0.96), rgba(248, 250, 252, 0.98) 46%, rgba(239, 246, 255, 0.96));
+  }
+
+  .dark .app-gradient-bg {
+    background:
+      radial-gradient(circle at 7% 8%, rgba(14, 165, 233, 0.18), transparent 30%),
+      radial-gradient(circle at 92% 8%, rgba(249, 115, 22, 0.13), transparent 27%),
+      radial-gradient(circle at 68% 88%, rgba(59, 130, 246, 0.10), transparent 32%),
+      linear-gradient(135deg, rgba(2, 6, 23, 0.98), rgba(8, 15, 28, 0.98) 48%, rgba(15, 23, 42, 0.98));
+  }
+
+  .glass-panel {
+    @apply min-w-0 border backdrop-blur-2xl shadow-xl shadow-surface-900/5 dark:shadow-black/20;
+    background: linear-gradient(135deg, rgba(255,255,255,0.84), rgba(255,255,255,0.62));
+    border-color: rgba(255, 255, 255, 0.72);
+  }
+
+  .dark .glass-panel {
+    background: linear-gradient(135deg, rgba(15, 23, 42, 0.78), rgba(2, 6, 23, 0.62));
+    border-color: rgba(148, 163, 184, 0.16);
+  }
+
+  .premium-card {
+    @apply rounded-3xl border backdrop-blur-xl shadow-xl shadow-surface-900/5 dark:shadow-black/20 transition-all duration-300;
+    background: linear-gradient(135deg, rgba(255,255,255,0.88), rgba(240,249,255,0.68));
+    border-color: rgba(255, 255, 255, 0.72);
+  }
+
+  .dark .premium-card {
+    background: linear-gradient(135deg, rgba(15,23,42,0.82), rgba(8,15,28,0.66));
+    border-color: rgba(148, 163, 184, 0.16);
+  }
+
+  .premium-card:hover {
+    @apply -translate-y-0.5 shadow-2xl;
+    border-color: rgba(14, 165, 233, 0.38);
+  }
+
+  .gradient-text {
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(90deg, #0284c7, #f97316, #2563eb);
+  }
+
+  .nexus-pill {
+    @apply inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-bold tracking-wide;
+    background: linear-gradient(90deg, rgba(14,165,233,0.12), rgba(249,115,22,0.12));
+    color: rgb(3, 105, 161);
+    border: 1px solid rgba(14,165,233,0.20);
+  }
+
+  .dark .nexus-pill {
+    color: rgb(186, 230, 253);
+    border-color: rgba(125,211,252,0.24);
+  }
+
+  .btn-primary {
+    @apply px-4 py-2 text-white rounded-xl transition-all duration-200 font-bold shadow-lg active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+    background: linear-gradient(135deg, #0284c7 0%, #2563eb 45%, #f97316 100%);
+    box-shadow: 0 14px 30px rgba(14, 165, 233, 0.18), 0 10px 18px rgba(249, 115, 22, 0.10);
+  }
+
+  .btn-primary:hover {
+    filter: brightness(1.06) saturate(1.08);
+    box-shadow: 0 18px 40px rgba(14, 165, 233, 0.24), 0 12px 22px rgba(249, 115, 22, 0.16);
+  }
+
+  .btn-secondary {
+    @apply px-4 py-2 rounded-xl transition-all duration-200 font-semibold active:scale-[0.98] border;
+    background: rgba(255,255,255,0.72);
+    border-color: rgba(203, 213, 225, 0.70);
+    color: rgb(15, 23, 42);
+  }
+
+  .btn-secondary:hover {
+    background: rgba(240, 249, 255, 0.92);
+    border-color: rgba(14, 165, 233, 0.40);
+    box-shadow: 0 10px 24px rgba(14,165,233,0.10);
+  }
+
+  .dark .btn-secondary {
+    background: rgba(30, 41, 59, 0.72);
+    border-color: rgba(71, 85, 105, 0.72);
+    color: rgb(241, 245, 249);
+  }
+
+  .dark .btn-secondary:hover {
+    background: rgba(51, 65, 85, 0.85);
+    border-color: rgba(56, 189, 248, 0.38);
+  }
+
+  .input-field {
+    @apply w-full px-3 py-2 rounded-xl focus:outline-none transition-all duration-200 placeholder:text-surface-400 border;
+    background: rgba(255,255,255,0.78);
+    border-color: rgba(203, 213, 225, 0.85);
+  }
+
+  .input-field:focus {
+    border-color: rgba(14, 165, 233, 0.70);
+    box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.12), 0 0 0 7px rgba(249, 115, 22, 0.06);
+  }
+
+  .dark .input-field {
+    background: rgba(15, 23, 42, 0.78);
+    border-color: rgba(71, 85, 105, 0.82);
+  }
+
+  .sidebar-nav-scroll,
+  .sidebar-chat-scroll {
+    scrollbar-gutter: stable;
+  }
+
+  .sidebar-nav-scroll::-webkit-scrollbar,
+  .sidebar-chat-scroll::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .sidebar-nav-scroll::-webkit-scrollbar-thumb,
+  .sidebar-chat-scroll::-webkit-scrollbar-thumb {
+    background: linear-gradient(180deg, rgba(14,165,233,0.55), rgba(249,115,22,0.55));
+    border-radius: 999px;
+  }
+
+  .chat-message-surface {
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .composer-shell {
+    @apply rounded-3xl border shadow-2xl transition-all;
+    background: linear-gradient(135deg, rgba(255,255,255,0.88), rgba(240,249,255,0.78));
+    border-color: rgba(255,255,255,0.76);
+    box-shadow: 0 22px 50px rgba(2, 132, 199, 0.12), 0 10px 26px rgba(249, 115, 22, 0.08);
+  }
+
+  .dark .composer-shell {
+    background: linear-gradient(135deg, rgba(15,23,42,0.90), rgba(2,6,23,0.82));
+    border-color: rgba(148,163,184,0.16);
+    box-shadow: 0 22px 50px rgba(0,0,0,0.30);
+  }
+}
+
+@layer components {
+  .nexus-markdown {
+    @apply max-w-none text-[0.96rem] leading-7;
+  }
+
+  .nexus-markdown > :first-child {
+    margin-top: 0 !important;
+  }
+
+  .nexus-markdown > :last-child {
+    margin-bottom: 0 !important;
+  }
+
+  .nexus-markdown-assistant {
+    @apply text-surface-900 dark:text-surface-100;
+  }
+
+  .nexus-markdown-user {
+    @apply text-white;
+  }
+
+  .nexus-md-h1 {
+    @apply mt-2 mb-4 text-2xl sm:text-3xl font-black tracking-tight;
+    background: linear-gradient(90deg, #0284c7, #2563eb, #f97316);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  .nexus-md-h2 {
+    @apply mt-6 mb-3 text-xl sm:text-2xl font-extrabold tracking-tight text-sky-700 dark:text-sky-300;
+  }
+
+  .nexus-md-h2::before {
+    content: '';
+    @apply inline-block w-2.5 h-2.5 mr-2 rounded-full align-middle;
+    background: linear-gradient(135deg, #0ea5e9, #f97316);
+    box-shadow: 0 0 20px rgba(14,165,233,0.35);
+  }
+
+  .nexus-md-h3 {
+    @apply mt-5 mb-2 text-lg font-bold text-orange-600 dark:text-orange-300;
+  }
+
+  .nexus-md-h4 {
+    @apply mt-4 mb-2 text-base font-bold text-surface-800 dark:text-surface-200;
+  }
+
+  .nexus-md-p {
+    @apply my-2 text-surface-700 dark:text-surface-200;
+  }
+
+  .nexus-markdown-user .nexus-md-p,
+  .nexus-markdown-user .nexus-md-li,
+  .nexus-markdown-user .nexus-md-strong,
+  .nexus-markdown-user .nexus-md-em {
+    color: rgba(255,255,255,0.96);
+  }
+
+  .nexus-md-strong {
+    @apply font-extrabold text-surface-950 dark:text-white;
+  }
+
+  .nexus-md-em {
+    @apply text-surface-600 dark:text-surface-300;
+  }
+
+  .nexus-md-ul,
+  .nexus-md-ol {
+    @apply my-3 space-y-2 pl-0;
+  }
+
+  .nexus-md-ul {
+    @apply list-none;
+  }
+
+  .nexus-md-ol {
+    @apply list-decimal pl-6;
+  }
+
+  .nexus-md-li {
+    @apply relative text-surface-700 dark:text-surface-200;
+  }
+
+  .nexus-md-ul > .nexus-md-li {
+    @apply pl-7;
+  }
+
+  .nexus-md-ul > .nexus-md-li::before {
+    content: '';
+    @apply absolute left-1 top-[0.65rem] w-2 h-2 rounded-full;
+    background: linear-gradient(135deg, #0ea5e9, #f97316);
+    box-shadow: 0 0 14px rgba(249,115,22,0.30);
+  }
+
+  .nexus-md-ol > .nexus-md-li {
+    @apply pl-1;
+  }
+
+  .nexus-md-quote {
+    @apply my-4 rounded-2xl border-l-4 px-4 py-3 italic text-surface-700 dark:text-surface-200;
+    border-left-color: rgb(14 165 233);
+    background: linear-gradient(135deg, rgba(14,165,233,0.10), rgba(249,115,22,0.08));
+  }
+
+  .nexus-md-link {
+    @apply font-semibold text-sky-600 dark:text-sky-300 underline decoration-sky-300/70 underline-offset-4 hover:text-orange-500;
+  }
+
+  .nexus-inline-code {
+    @apply rounded-lg px-1.5 py-0.5 text-[0.88em] font-semibold;
+    color: rgb(3 105 161);
+    background: linear-gradient(135deg, rgba(14,165,233,0.12), rgba(249,115,22,0.10));
+    border: 1px solid rgba(14,165,233,0.18);
+  }
+
+  .dark .nexus-inline-code {
+    color: rgb(186 230 253);
+    background: linear-gradient(135deg, rgba(14,165,233,0.16), rgba(249,115,22,0.12));
+    border-color: rgba(125,211,252,0.18);
+  }
+
+  .nexus-code-shell {
+    @apply my-4 overflow-hidden rounded-2xl border shadow-xl max-w-full;
+    border-color: rgba(14,165,233,0.22);
+    background: rgba(2, 6, 23, 0.98);
+    box-shadow: 0 20px 50px rgba(2, 6, 23, 0.24), 0 10px 22px rgba(14,165,233,0.10);
+  }
+
+  .nexus-code-toolbar {
+    @apply flex items-center justify-between gap-3 px-4 py-2 border-b;
+    border-color: rgba(148,163,184,0.18);
+    background: linear-gradient(90deg, rgba(14,165,233,0.22), rgba(249,115,22,0.14));
+  }
+
+  .nexus-code-language {
+    @apply text-[11px] font-black uppercase tracking-[0.18em] text-sky-100;
+  }
+
+  .nexus-code-copy {
+    @apply inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold text-white transition-all;
+    background: rgba(255,255,255,0.12);
+    border: 1px solid rgba(255,255,255,0.14);
+  }
+
+  .nexus-code-copy:hover {
+    background: rgba(255,255,255,0.20);
+    transform: translateY(-1px);
+  }
+
+  .nexus-code-pre {
+    @apply m-0 max-w-full overflow-x-hidden rounded-none border-0 bg-surface-950 p-4 text-surface-50 shadow-none;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .nexus-code-pre code {
+    @apply block max-w-full text-[0.9rem] leading-6;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+  }
+
+  .nexus-md-table-wrap {
+    @apply my-4 max-w-full overflow-x-auto rounded-2xl border;
+    border-color: rgba(14,165,233,0.20);
+  }
+
+  .nexus-md-table {
+    @apply w-full border-collapse text-sm;
+  }
+
+  .nexus-md-th {
+    @apply px-3 py-2 text-left font-bold text-sky-700 dark:text-sky-200;
+    background: linear-gradient(90deg, rgba(14,165,233,0.12), rgba(249,115,22,0.10));
+  }
+
+  .nexus-md-td {
+    @apply border-t border-surface-200/70 dark:border-surface-800 px-3 py-2 text-surface-700 dark:text-surface-200;
+  }
+
+  .nexus-md-hr {
+    @apply my-5 border-0 h-px;
+    background: linear-gradient(90deg, transparent, rgba(14,165,233,0.6), rgba(249,115,22,0.45), transparent);
+  }
+}

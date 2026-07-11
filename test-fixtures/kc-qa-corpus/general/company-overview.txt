@@ -1,0 +1,3 @@
+Acme Corp operates in cybersecurity services and managed detection for mid-market enterprises.
+Headquarters: Austin, Texas. Founded 2012. The company ships NexusAI as an offline-first assistant
+for security teams who cannot send sensitive documents to cloud LLM providers.

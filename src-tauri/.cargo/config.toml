@@ -1,0 +1,9 @@
+# Reduce peak RAM during `tauri dev` / `cargo build` on memory-constrained machines.
+# Target dir on D: avoids filling the system drive and matches project docs.
+
+[build]
+jobs = 2
+target-dir = "D:/DevCache/Cargo/target/nexus-ai"
+
+[env]
+# Single-job override: set CARGO_BUILD_JOBS=1 in the shell before building if OOM persists.

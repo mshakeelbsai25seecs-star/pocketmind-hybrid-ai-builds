@@ -1,0 +1,49 @@
+# Dependencies & build
+node_modules/
+dist/
+src-tauri/target/
+.DS_Store
+Thumbs.db
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Editor / local tooling
+.cursor/
+.vscode/
+*.swp
+*.swo
+
+# Logs & archives
+*.log
+*.zip
+cargo-*.log
+cc*.log
+cc.log
+cc2.log
+cc3.log
+cargo_check.log
+cargo_check2.log
+cargo-check.log
+cargo-check2.log
+install_runtimes.log
+install_runtimes_cuda.log
+npm-build.log
+nexus-ai-deep-fixed.zip
+
+# Local backups / recovery artifacts (do not version)
+_backup_*/
+_recover_*
+_recover_commands.py
+_recover_commands_report.json
+_recover_out.txt
+
+# Runtime binaries / large local assets (keep out of git)
+bin/
+
+# OS / temp
+*.tmp
+*.temp
+.cache/
