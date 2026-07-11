@@ -149,6 +149,7 @@ pub fn hybrid_search_complete(
     let degradation = degradation_reasons(&pending, dense_pair_rerank_used);
     let mut hits = pending.hits;
     filter_meta_hits(&mut hits);
+    // Final neural priority: Qwen RANK (already applied upstream) → ONNX → phrase.
     let onnx_reranker_used = !neural_rerank_already_applied
         && config.enable_onnx_rerank
         && onnx_rerank_hits(

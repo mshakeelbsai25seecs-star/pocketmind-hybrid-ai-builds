@@ -699,7 +699,7 @@ pub async fn kc_hybrid_search(
         pending.rewrite.retrieval_query,
         summarize_hits(&pending.hits, 8)
     );
-    if retrieval_config.enable_onnx_rerank && !pending.hits.is_empty() {
+    if retrieval_config.enable_llama_rerank && !pending.hits.is_empty() {
         let db = state.db.lock().await;
         let llama_path = llama_rerank::resolve_llama_rerank_path(&db);
         drop(db);
@@ -722,7 +722,7 @@ pub async fn kc_hybrid_search(
                             "llama_rank",
                             KcStageStatus::Ok,
                             llama_timer.elapsed_ms(),
-                            format!("path={path}"),
+                            format!("priority=1 primary=qwen_gguf; path={path}"),
                             "",
                             &llama_in,
                             summarize_hits(&pending.hits, 8),
@@ -733,8 +733,8 @@ pub async fn kc_hybrid_search(
                             "llama_rank",
                             KcStageStatus::Skipped,
                             llama_timer.elapsed_ms(),
-                            format!("skipped path={path}"),
-                            "",
+                            format!("priority=1 primary=qwen_gguf skipped; path={path}"),
+                            "Falling back to ONNX / phrase rerank.",
                             &llama_in,
                             "skipped",
                         ));
@@ -744,8 +744,8 @@ pub async fn kc_hybrid_search(
                             "llama_rank",
                             KcStageStatus::Failed,
                             llama_timer.elapsed_ms(),
-                            format!("path={path}; error={err}"),
-                            "Install RANK-capable Qwen3-Reranker GGUF; check llama-server runtime and VRAM.",
+                            format!("priority=1 primary=qwen_gguf; path={path}; error={err}"),
+                            "Install RANK-capable Qwen3-Reranker GGUF; check llama-server runtime and VRAM. Falling back to ONNX / phrase.",
                             &llama_in,
                             format!("error={err}"),
                         ));
@@ -757,8 +757,8 @@ pub async fn kc_hybrid_search(
                     "llama_rank",
                     KcStageStatus::Skipped,
                     llama_timer.elapsed_ms(),
-                    "No Qwen3-Reranker GGUF resolved",
-                    "Place Qwen3-Reranker-4B-*.gguf under models/rerankers.",
+                    "priority=1 primary=qwen_gguf; No Qwen3-Reranker GGUF resolved",
+                    "Place Qwen3-Reranker-4B-*.gguf under models/rerankers. Falling back to ONNX / phrase.",
                     &llama_in,
                     "no_model_path",
                 ));
@@ -772,7 +772,7 @@ pub async fn kc_hybrid_search(
             if pending.hits.is_empty() {
                 "No hits to rerank"
             } else {
-                "Neural rerank disabled in config"
+                "Qwen/llama RANK disabled in retrieval config"
             },
             "",
             &llama_in,
@@ -796,7 +796,7 @@ pub async fn kc_hybrid_search(
             "onnx_or_phrase_rerank",
             KcStageStatus::Ok,
             complete_ms,
-            "ONNX or phrase rerank applied in complete",
+            "priority=2 fallback; ONNX or phrase rerank applied in complete",
             "",
             &pre_complete_hits,
             &post_complete_hits,
@@ -806,7 +806,7 @@ pub async fn kc_hybrid_search(
             "onnx_or_phrase_rerank",
             KcStageStatus::Skipped,
             complete_ms,
-            "Skipped; llama RANK already applied",
+            "Skipped; primary Qwen RANK already applied",
             "",
             &pre_complete_hits,
             "skipped",
@@ -816,8 +816,8 @@ pub async fn kc_hybrid_search(
             "onnx_or_phrase_rerank",
             KcStageStatus::Degraded,
             complete_ms,
-            "No neural/ONNX rerank applied (phrase fallback may still run)",
-            "Configure ONNX or Qwen3 RANK for stronger ranking.",
+            "No primary Qwen RANK or ONNX rerank applied (phrase fallback may still run)",
+            "Place Qwen3-Reranker GGUF under models/rerankers (primary), or configure ONNX as fallback.",
             &pre_complete_hits,
             &post_complete_hits,
         ));

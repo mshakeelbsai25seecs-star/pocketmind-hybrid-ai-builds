@@ -299,9 +299,9 @@ async fn run_production_search(
         }
     }
 
-    // Production parity with kc_hybrid_search: prefer llama RANK when GGUF is present.
+    // Production parity: Qwen RANK is the primary final reranker when GGUF is present.
     let mut llama_rerank_used = false;
-    if retrieval_config.enable_onnx_rerank && !pending.hits.is_empty() {
+    if retrieval_config.enable_llama_rerank && !pending.hits.is_empty() {
         let llama_path = {
             let guard = db.lock().await;
             crate::knowledge_chat::llama_rerank::resolve_llama_rerank_path(&guard)

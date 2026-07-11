@@ -1,9 +1,11 @@
 //! Qwen3-Reranker (and compatible llama.cpp RANK models) via a dedicated
 //! `llama-server` process with `--reranking --pooling rank`.
 //!
-//! Prefer this over the ONNX BGE cross-encoder when a properly converted
-//! Qwen3-Reranker GGUF is present. Community GGUFs missing `cls.output.weight`
-//! produce garbage scores — use an official convert_hf_to_gguf.py build.
+//! This is the **primary** final neural reranker for Knowledge Chat when a
+//! properly converted Qwen3-Reranker GGUF is present under `models/rerankers/`.
+//! ONNX cross-encoder and phrase/title boosts are fallbacks only.
+//! Community GGUFs missing `cls.output.weight` produce garbage scores — use an
+//! official convert_hf_to_gguf.py build.
 
 use crate::database::Database;
 use crate::deployment::load_deployment_config;
@@ -163,9 +165,14 @@ pub fn probe_qwen3_rerank_ggufs(models_dir: &str) -> Option<String> {
     None
 }
 
-/// Resolve the preferred llama.cpp reranker GGUF from settings / deployment.
-/// Always falls back to probing `models/rerankers` so an empty or ONNX-only
-/// configured path still picks up a Qwen3-Reranker GGUF when present.
+/// Resolve the primary llama.cpp RANK GGUF (Qwen3-Reranker) from settings /
+/// deployment. Priority:
+/// 1. Configured path when it is an existing RANK `.gguf`
+/// 2. Probe `models/rerankers` for known Qwen3-Reranker filenames
+///
+/// An empty or ONNX-only configured path still picks up a Qwen GGUF when present
+/// so the primary reranker is never skipped solely because the setting points at
+/// a secondary ONNX model.
 pub fn resolve_llama_rerank_path(db: &Database) -> Option<String> {
     let deploy = load_deployment_config(db);
     let setting: Option<String> = db
@@ -191,6 +198,7 @@ pub fn resolve_llama_rerank_path(db: &Database) -> Option<String> {
             return Some(path);
         }
     }
+    // Prefer discovering Qwen even when settings still point at an ONNX file.
     probe_qwen3_rerank_ggufs(&deploy.models_dir)
 }
 
@@ -430,6 +438,26 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(tmp.join("rerankers")).unwrap();
         assert!(probe_qwen3_rerank_ggufs(tmp.to_str().unwrap()).is_none());
+        let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn probe_prefers_known_qwen3_candidate_first() {
+        let tmp = std::env::temp_dir().join(format!(
+            "nexus-rerank-probe-order-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let rerankers = tmp.join("rerankers");
+        std::fs::create_dir_all(&rerankers).unwrap();
+        // Secondary-looking name should lose to the preferred Q4_K_M candidate.
+        std::fs::write(rerankers.join("qwen3-reranker-custom.gguf"), b"x").unwrap();
+        std::fs::write(rerankers.join("Qwen3-Reranker-4B-Q4_K_M.gguf"), b"x").unwrap();
+        let found = probe_qwen3_rerank_ggufs(tmp.to_str().unwrap()).unwrap();
+        assert!(
+            found.ends_with("Qwen3-Reranker-4B-Q4_K_M.gguf"),
+            "expected preferred Q4_K_M candidate, got {found}"
+        );
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

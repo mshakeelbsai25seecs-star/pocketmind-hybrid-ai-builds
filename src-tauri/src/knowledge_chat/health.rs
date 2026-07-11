@@ -218,7 +218,7 @@ pub fn system_readiness(db: &Database) -> AppResult<KcSystemReadiness> {
         && std::path::Path::new(&llama_rerank_model_path).is_file();
     if !llama_rerank_configured {
         warnings.push(
-            "No Qwen3-Reranker GGUF found. Place Qwen3-Reranker-4B-Q4_K_M.gguf (or f16/Q8) under models/rerankers. Search will fall back to dense-pair / ONNX / phrase rerank.".to_string(),
+            "Primary reranker (Qwen3-Reranker GGUF) not found. Place Qwen3-Reranker-4B-Q4_K_M.gguf (or f16/Q8) under models/rerankers. Search falls back to dense-pair / ONNX / phrase.".to_string(),
         );
     }
 

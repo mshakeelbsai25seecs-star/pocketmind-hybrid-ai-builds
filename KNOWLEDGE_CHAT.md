@@ -156,7 +156,7 @@ Default mode: **`hybrid_dense`** (falls back to `hybrid_lexical` if dense unavai
 | Dense vector cosine | Semantic similarity via local nomic-embed GGUF (candidate pool only) |
 | Query decomposition | Multi-part sub-queries merged and deduped |
 | RRF fusion | Combines ranked lists without score-scale issues |
-| Reranker | Phrase/title boosts on fused candidates |
+| Reranker | **Primary:** Qwen3-Reranker GGUF (llama.cpp RANK) when present; then ONNX cross-encoder; then phrase/title boosts |
 | MMR re-ranking | Reduces redundant chunks from the same file |
 | Confidence gate | `high` / `medium` / `low` / `none` + `answer_mode` (`found`, `partial`, `not_found`) |
 

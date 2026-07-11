@@ -31,7 +31,7 @@
 |------|-------------|--------|
 | B1 | Exact dense prefetch on server / small collections | In progress |
 | B2 | Larger prefetch pool (100) on server profile | In progress |
-| B3 | ONNX cross-encoder as sole neural reranker | Done |
+| B3 | Qwen3-Reranker GGUF (llama.cpp RANK) as primary neural reranker; ONNX/phrase fallbacks | Done |
 | B4 | ColBERT for code partition | Planned |
 | B5 | Remove hash vectors from index (FTS-only lexical) | Planned |
 
@@ -73,7 +73,7 @@
 ## Deployment checklist (70B server)
 1. Settings → Security → **Server** deployment profile
 2. Load Qwen2.5-70B (or Llama 3.3 70B) as active model
-3. Enable ONNX reranker (`bge-reranker-v2-m3`)
+3. Place primary Qwen3-Reranker GGUF under `models/rerankers/` (ONNX `bge-reranker-v2-m3` remains a fallback)
 4. Enable HyDE + LLM query expand for vague questions
 5. Rebuild collection index after Phase A changes
 6. Run eval suite (`kc_run_eval`) and check recall@5 ≥ 85%

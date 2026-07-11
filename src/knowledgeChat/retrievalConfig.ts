@@ -21,6 +21,9 @@ export interface RetrievalConfigView {
   onnxBlendSelf: number;
   onnxBlendNew: number;
   enableDensePairRerank: boolean;
+  /** Primary final reranker: Qwen3-Reranker GGUF via llama.cpp RANK. */
+  enableLlamaRerank: boolean;
+  /** Secondary neural fallback when Qwen RANK did not apply. */
   enableOnnxRerank: boolean;
 }
 
@@ -37,6 +40,7 @@ const DEMO_RETRIEVAL_CONFIG: RetrievalConfigView = {
   onnxBlendSelf: 0.4,
   onnxBlendNew: 0.6,
   enableDensePairRerank: true,
+  enableLlamaRerank: true,
   enableOnnxRerank: true,
 };
 
@@ -60,7 +64,10 @@ export function describeRetrievalConfig(config: RetrievalConfigView): string {
     `RRF k=${config.rrfK}`,
     `pool≤${config.rerankPoolLimit}`,
     config.enableDensePairRerank ? `dense-pair top-${config.densePairRerankTopN}` : 'dense-pair off',
-    config.enableOnnxRerank ? `final-rerank top-${config.onnxRerankTopN}` : 'final-rerank off',
+    config.enableLlamaRerank
+      ? `qwen-rank(primary) top-${config.onnxRerankTopN}`
+      : 'qwen-rank off',
+    config.enableOnnxRerank ? `onnx/phrase(fallback) top-${config.onnxRerankTopN}` : 'onnx fallback off',
   ];
   return stages.join(' · ');
 }
