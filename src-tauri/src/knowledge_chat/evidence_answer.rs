@@ -245,20 +245,53 @@ pub fn extract_json_error_message(excerpt: &str, code: &str) -> Option<String> {
 }
 
 pub fn extract_env_var_name(excerpt: &str) -> Option<String> {
-    for token in excerpt.split(|c: char| !c.is_ascii_uppercase() && c != '_') {
-        if token.len() >= 4
-            && token.contains('_')
-            && token.chars().all(|c| c.is_ascii_uppercase() || c == '_')
-            && token.starts_with("NEXUS_")
-        {
-            return Some(token.to_string());
+    // Prefer quoted string literals (actual env keys), not DEFAULT_* constants.
+    if let Some(token) = first_quoted_screaming_snake(excerpt) {
+        return Some(token);
+    }
+    for needle in ["environ.get(", "os.environ.get(", "getenv(", "os.getenv("] {
+        if let Some(idx) = excerpt.find(needle) {
+            let after = &excerpt[idx + needle.len()..];
+            if let Some(token) = first_screaming_snake_in(after) {
+                return Some(token);
+            }
         }
     }
-    for token in excerpt.split(|c: char| !c.is_ascii_uppercase() && c != '_') {
-        if token.len() >= 4
-            && token.contains('_')
-            && token.chars().all(|c| c.is_ascii_uppercase() || c == '_')
-        {
+    first_screaming_snake_in(excerpt)
+}
+
+fn is_screaming_snake(token: &str) -> bool {
+    token.len() >= 4
+        && token.contains('_')
+        && token.chars().all(|c| c.is_ascii_uppercase() || c == '_')
+}
+
+fn first_quoted_screaming_snake(text: &str) -> Option<String> {
+    let bytes = text.as_bytes();
+    let mut i = 0usize;
+    while i < bytes.len() {
+        let quote = bytes[i];
+        if quote == b'"' || quote == b'\'' {
+            i += 1;
+            let start = i;
+            while i < bytes.len() && bytes[i] != quote {
+                i += 1;
+            }
+            if i > start {
+                let token = &text[start..i];
+                if is_screaming_snake(token) {
+                    return Some(token.to_string());
+                }
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+fn first_screaming_snake_in(text: &str) -> Option<String> {
+    for token in text.split(|c: char| !c.is_ascii_uppercase() && c != '_') {
+        if is_screaming_snake(token) {
             return Some(token.to_string());
         }
     }

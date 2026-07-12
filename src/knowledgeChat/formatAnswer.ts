@@ -162,11 +162,29 @@ export function formatKnowledgeAnswer(
       || 'I could not find enough evidence in the selected folder index to answer this question reliably.';
   }
 
+  // Reject citation-only stubs (e.g. "[Source: file | function X]" with no answer body).
+  if (isCitationOnlyStub(out)) {
+    return options.notFoundFallback
+      || 'I could not find enough evidence in the selected folder index to answer this question reliably.';
+  }
+
   if (options.question && isConciseQuestion(options.question) && !isStructuredKnowledgeAnswer(out)) {
     out = truncateToConcise(out, 420);
   }
 
   return out;
+}
+
+/** True when the text is essentially just a [Source: …] tag (no real answer). */
+export function isCitationOnlyStub(text: string): boolean {
+  const stripped = text
+    .replace(/\[\s*Source:[^\]]+\]/gi, '')
+    .replace(/^##\s+(?:Answer|Evidence|Explanation)\s*$/gim, '')
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/^\s*>\s*.*$/gm, '')
+    .replace(/\*{1,2}/g, '')
+    .trim();
+  return stripped.length < 12;
 }
 
 function normalizeStructuredAnswerMarkdown(text: string): string {

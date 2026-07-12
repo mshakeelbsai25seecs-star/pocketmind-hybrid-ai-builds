@@ -32,6 +32,14 @@ pub fn extract_entities_heuristic(
             i += 1;
             continue;
         }
+        // Skip nested non-callable assignments (e.g. `const content = input.trim()` inside a fn).
+        if kind == CodeEntityKind::Const {
+            let indent = line.chars().take_while(|c| c.is_whitespace()).count();
+            if indent > 0 && !trimmed_is_export(line) {
+                i += 1;
+                continue;
+            }
+        }
 
         let end_line = if line.contains('{') {
             find_block_end(&lines, i)
@@ -167,7 +175,11 @@ fn infer_name_and_kind(signature: &str, extension: &str) -> (String, CodeEntityK
         return (extract_after_keyword(trimmed, "function"), CodeEntityKind::Function);
     }
     if trimmed.starts_with("const ") || trimmed.contains(" const ") {
-        return (extract_after_keyword(trimmed, "const"), CodeEntityKind::Const);
+        let name = extract_after_keyword(trimmed, "const");
+        if const_initializer_is_callable(trimmed) {
+            return (name, CodeEntityKind::Function);
+        }
+        return (name, CodeEntityKind::Const);
     }
     if trimmed.starts_with("func ") {
         return (extract_after_keyword(trimmed, "func"), CodeEntityKind::Function);
@@ -176,6 +188,17 @@ fn infer_name_and_kind(signature: &str, extension: &str) -> (String, CodeEntityK
         return (extract_after_keyword(trimmed, "fun"), CodeEntityKind::Function);
     }
     (extract_first_identifier(trimmed), CodeEntityKind::Function)
+}
+
+fn trimmed_is_export(line: &str) -> bool {
+    line.trim_start().starts_with("export ")
+}
+
+fn const_initializer_is_callable(signature: &str) -> bool {
+    let lower = signature.to_lowercase();
+    lower.contains("=>")
+        || lower.contains("= function")
+        || lower.contains("= async function")
 }
 
 fn extract_after_keyword(line: &str, keyword: &str) -> String {
@@ -262,8 +285,13 @@ mod tests {
         let source = include_str!("../../../test-fixtures/kc-qa-corpus/code/ChatView.tsx");
         let entities = extract_entities_heuristic(source, "tsx", Some("ChatView.tsx"));
         let handle_send = entities.iter().find(|e| e.name == "handleSend").expect("handleSend");
+        assert_eq!(handle_send.kind, CodeEntityKind::Function);
         assert!(handle_send.line_start <= 10);
         assert!(handle_send.line_end >= 15);
         assert!(handle_send.body.contains("setInput('')"));
+        assert!(
+            entities.iter().all(|e| e.name != "content"),
+            "nested local `content` must not be extracted"
+        );
     }
 }

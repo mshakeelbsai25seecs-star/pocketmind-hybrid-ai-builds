@@ -218,21 +218,75 @@ fn extract_error_code_answer(query: &str, hit: &KcSearchHit) -> Option<Extracted
 fn extract_env_var_answer(query: &str, hit: &KcSearchHit) -> Option<Extracted> {
     let excerpt = excerpt_text(hit);
     let excerpt_lower = excerpt.to_lowercase();
-    if !excerpt_lower.contains("environ") && !excerpt_lower.contains("_env") {
+    if !excerpt_lower.contains("environ") && !excerpt_lower.contains("_env") && !excerpt_lower.contains("getenv")
+    {
         return None;
     }
     let var = extract_env_var_name(&excerpt)?;
-    let default_note = if excerpt_lower.contains("30") {
-        " The default is 30 seconds if unset or invalid."
+    let role = if query.to_lowercase().contains("timeout") || var.to_lowercase().contains("timeout") {
+        "controls the API timeout"
     } else {
-        " It falls back to a default if unset or invalid."
+        "is read from the environment"
+    };
+    let default_note = match extract_env_default_literal(&excerpt, &var) {
+        Some(default) => format!(" The default is `{default}` if unset or invalid."),
+        None => " It falls back to a default if unset or invalid.".to_string(),
     };
     Some(Extracted {
-        text: format!(
-            "The environment variable `{var}` controls the API timeout.{default_note}"
-        ),
+        text: format!("The environment variable `{var}` {role}.{default_note}"),
         confidence: 0.75,
     })
+}
+
+/// Pull the default from `environ.get("VAR", "30")` / `getenv("VAR", "30")` when present,
+/// or from a nearby `DEFAULT_* = N` / "default … N" line.
+fn extract_env_default_literal(excerpt: &str, var: &str) -> Option<String> {
+    let patterns = [
+        format!("environ.get(\"{var}\""),
+        format!("environ.get('{var}'"),
+        format!("getenv(\"{var}\""),
+        format!("getenv('{var}'"),
+        format!("os.getenv(\"{var}\""),
+        format!("os.getenv('{var}'"),
+    ];
+    for pattern in &patterns {
+        if let Some(idx) = excerpt.find(pattern) {
+            let tail = &excerpt[idx + pattern.len()..];
+            if let Some(comma) = tail.find(',') {
+                let after = tail[comma + 1..].trim_start();
+                let quote = after.chars().next()?;
+                if quote == '"' || quote == '\'' {
+                    let inner = &after[1..];
+                    let end = inner.find(quote)?;
+                    let value = inner[..end].trim();
+                    if !value.is_empty() {
+                        return Some(value.to_string());
+                    }
+                }
+            }
+        }
+    }
+    extract_nearby_default_number(excerpt)
+}
+
+fn extract_nearby_default_number(excerpt: &str) -> Option<String> {
+    for line in excerpt.lines() {
+        let lower = line.to_lowercase();
+        if !(lower.contains("default") || line.contains("DEFAULT_") || lower.contains("fall back")) {
+            continue;
+        }
+        for token in line.split(|c: char| !c.is_ascii_digit()) {
+            if token.is_empty() || token.len() > 5 {
+                continue;
+            }
+            if let Ok(n) = token.parse::<u32>() {
+                if (1..=86_400).contains(&n) {
+                    return Some(token.to_string());
+                }
+            }
+        }
+    }
+    None
 }
 
 fn extract_runbook_step_answer(_query: &str, hit: &KcSearchHit) -> Option<Extracted> {
@@ -468,6 +522,11 @@ pub fn try_list_symbols_in_file_answer(query: &str, hits: &[KcSearchHit]) -> Opt
     }
 
     symbols.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+    let lead = symbols
+        .iter()
+        .map(|(name, _, _)| format!("`{name}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
     let body = symbols
         .iter()
         .map(|(name, kind, line)| {
@@ -485,9 +544,14 @@ pub fn try_list_symbols_in_file_answer(query: &str, hits: &[KcSearchHit]) -> Opt
         .find(|h| h.chunk.file_name.eq_ignore_ascii_case(&file_hint))
         .or_else(|| hits.first())?;
     let confidence = source.chunk.source_confidence.unwrap_or(0.55).max(0.72);
+    let kind_word = if prefers_callable_symbols(query) {
+        "functions"
+    } else {
+        "symbols"
+    };
     Some(StructuredAnswer {
         intent: QueryIntent::ListSymbolsInFile,
-        answer_text: format!("Symbols in `{file_hint}`:\n{body}"),
+        answer_text: format!("`{file_hint}` defines these {kind_word}: {lead}.\n\n{body}"),
         confidence,
         source_file: source.chunk.file_name.clone(),
         line_start: source.chunk.line_start,
@@ -508,26 +572,74 @@ fn is_callable_entity_kind(kind: &str) -> bool {
 }
 
 /// Drop mis-tagged locals (e.g. `const content = input.trim()` indexed as function).
+///
+/// Important: do **not** treat any `=>` / `function` anywhere in the excerpt as proof —
+/// parent function bodies / context_text often contain arrows and would falsely keep
+/// nested assignments like `content`.
 fn looks_like_real_callable(name: &str, kind: &str, body: &str) -> bool {
     if !is_callable_entity_kind(kind) {
         return false;
     }
-    let body_l = body.to_lowercase();
-    if body_l.contains("=>")
-        || body_l.contains("function ")
-        || body_l.contains("function(")
-        || body_l.contains("def ")
-        || body_l.contains("async def ")
-        || body_l.contains(" fn ")
-        || body_l.starts_with("fn ")
-        || body_l.starts_with("pub fn ")
-        || body_l.starts_with("async ")
-        || body_l.contains("class ")
-    {
-        return true;
+    if let Some(decl) = declaration_line_for_symbol(body, name) {
+        return declaration_looks_callable(&decl);
     }
-    // No callable syntax in excerpt — keep CamelCase / snake_case names only.
-    name.chars().any(|c| c.is_uppercase()) || name.contains('_')
+    // No declaration line for this name — only keep CamelCase / snake_case symbols
+    // when the first non-empty line itself looks like a callable definition.
+    let name_ok = name.chars().any(|c| c.is_uppercase()) || name.contains('_');
+    if !name_ok {
+        return false;
+    }
+    body.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .is_some_and(declaration_looks_callable)
+}
+
+fn declaration_line_for_symbol(body: &str, name: &str) -> Option<String> {
+    let name_l = name.to_lowercase();
+    for line in body.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        if is_symbol_declaration_line(trimmed, &name_l) {
+            return Some(trimmed.to_string());
+        }
+    }
+    None
+}
+
+fn is_symbol_declaration_line(line: &str, name_l: &str) -> bool {
+    let lower = line.to_lowercase();
+    let markers = [
+        format!("const {name_l}"),
+        format!("let {name_l}"),
+        format!("var {name_l}"),
+        format!("function {name_l}"),
+        format!("async function {name_l}"),
+        format!("def {name_l}"),
+        format!("async def {name_l}"),
+        format!("fn {name_l}"),
+        format!("class {name_l}"),
+    ];
+    markers.iter().any(|m| lower.contains(m.as_str()))
+}
+
+fn declaration_looks_callable(line: &str) -> bool {
+    let l = line.to_lowercase();
+    l.contains("=>")
+        || l.contains("function ")
+        || l.contains("function(")
+        || l.contains("async function")
+        || l.starts_with("def ")
+        || l.contains(" async def ")
+        || l.starts_with("async def ")
+        || l.contains(" fn ")
+        || l.starts_with("fn ")
+        || l.starts_with("pub fn ")
+        || l.starts_with("pub(crate) fn ")
+        || l.contains(" class ")
+        || l.starts_with("class ")
 }
 
 fn extract_defs_from_text(text: &str) -> Vec<(String, String, Option<i32>)> {
@@ -836,12 +948,6 @@ fn summarize_code_body(body: &str, symbol: &str) -> String {
     if lower.contains("environ") && (lower.contains("api_timeout") || lower.contains("_timeout")) {
         return summarize_env_timeout_function(body);
     }
-    if lower.contains("setinput") && lower.contains("trim") {
-        return "validates and trims the input, clears the text field, and sends the message to the backend.".to_string();
-    }
-    if lower.contains("add_message") || lower.contains("invoke") {
-        return "sends the user message via a Tauri invoke call and starts generation.".to_string();
-    }
     if let Some(summary) = summarize_from_def_body(body, symbol) {
         return summary;
     }
@@ -1077,6 +1183,52 @@ mod tests {
         assert!(
             !answer.answer_text.contains("`content`"),
             "must not list nested/non-callable const as a function"
+        );
+    }
+
+    #[test]
+    fn qa_list_symbols_skips_content_when_parent_body_has_arrow() {
+        // context_text / parent excerpt often contains `=>` from handleSend; that must not
+        // keep a mis-tagged `content` entity.
+        let parent_body = r#"const handleSend = async () => {
+  if (!input.trim()) return;
+  const content = input.trim();
+  setInput('');
+};"#;
+        let hits = vec![
+            hit(
+                "ChatView.tsx",
+                "code",
+                "const handleSend = async () => { const content = input.trim(); }",
+                0.9,
+                Some(("function", "handleSend")),
+                Some((10, 16)),
+            ),
+            hit(
+                "ChatView.tsx",
+                "code",
+                parent_body,
+                0.88,
+                Some(("function", "content")),
+                Some((12, 12)),
+            ),
+            hit(
+                "ChatView.tsx",
+                "code",
+                "const handleCopy = async (text) => {}",
+                0.85,
+                Some(("function", "handleCopy")),
+                Some((25, 27)),
+            ),
+        ];
+        let answer =
+            try_structured_answer("What functions are defined in ChatView.tsx?", &hits).unwrap();
+        assert!(answer.answer_text.contains("handleSend"));
+        assert!(answer.answer_text.contains("handleCopy"));
+        assert!(
+            !answer.answer_text.contains("`content`"),
+            "parent arrow in excerpt must not keep local `content`: {}",
+            answer.answer_text
         );
     }
 

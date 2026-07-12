@@ -74,4 +74,17 @@ const listShredGuard = formatKnowledgeAnswer(
 assert(listShredGuard.includes('## Evidence'), 'list-style restructure must not shred structured answers');
 assert(listShredGuard.includes('policy_one = True'), 'structured evidence fences must survive list questions');
 
+const citationStub = formatKnowledgeAnswer(
+  '[Source: ChatView.tsx | function handleSend]',
+  [{ file_name: 'ChatView.tsx', sectionLabel: 'function handleSend', line_start: 10, line_end: 16 }],
+  {
+    skipQualityGate: true,
+    notFoundFallback: 'I could not find enough evidence in the selected folder index to answer this question reliably.',
+  },
+);
+assert(
+  citationStub.includes('could not find enough evidence'),
+  'citation-only stubs must not be published as answers',
+);
+
 console.log('formatAnswer.selftest: ok');
