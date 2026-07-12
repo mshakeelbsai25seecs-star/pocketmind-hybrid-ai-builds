@@ -4,7 +4,7 @@ config = {
     "build": {
         "beforeDevCommand": "npm run dev",
         "beforeBuildCommand": "npm run build",
-        "devPath": "http://localhost:5173",
+        "devPath": "http://127.0.0.1:5173",
         "distDir": "../dist"
     },
     "tauri": {

@@ -10,6 +10,9 @@ export default defineConfig({
     },
   },
   server: {
+    // Bind IPv4 explicitly. On Windows, Vite's default `localhost` often listens on
+    // [::1] only while Tauri/WebView2 may resolve `localhost` to 127.0.0.1 → blank white window.
+    host: "127.0.0.1",
     port: 5173,
     strictPort: true,
   },
