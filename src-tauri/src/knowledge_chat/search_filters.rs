@@ -149,4 +149,12 @@ mod tests {
         assert_eq!(f2.doc_types.as_deref(), Some(["code".to_string()].as_slice()));
         let _ = f;
     }
+
+    #[test]
+    fn trailing_sentence_period_does_not_scope_to_fake_file() {
+        assert!(derive_search_filters(
+            "What Rust function validates JWT tokens? I need a function name."
+        )
+        .is_none());
+    }
 }

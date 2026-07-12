@@ -354,10 +354,21 @@ function extractFileHint(question: string): string | null {
   for (const token of question.split(/\s+/)) {
     if (token.includes('.') && /[a-zA-Z]/.test(token)) {
       const cleaned = token.replace(/^[^a-zA-Z0-9._-]+|[^a-zA-Z0-9._-]+$/g, '');
-      if (cleaned.includes('.')) return cleaned;
+      if (looksLikeFilename(cleaned)) return cleaned;
     }
   }
   return null;
+}
+
+/** True for `ChatView.tsx` / `config_loader.py`, false for sentence tails like `name.` */
+function looksLikeFilename(name: string): boolean {
+  const dot = name.lastIndexOf('.');
+  if (dot <= 0 || dot >= name.length - 1) return false;
+  const stem = name.slice(0, dot);
+  const ext = name.slice(dot + 1);
+  if (!ext || ext.length > 12) return false;
+  if (!/^[a-zA-Z0-9]+$/.test(ext)) return false;
+  return /[a-zA-Z0-9]/.test(stem);
 }
 
 function isListSymbolsQuestion(q: string): boolean {

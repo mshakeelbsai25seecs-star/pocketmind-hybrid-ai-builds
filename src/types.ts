@@ -388,6 +388,8 @@ export interface EnterpriseServerConfig {
   code_embedding_model: string;
   knowledge_embedding_model: string;
   embeddings_base_url: string;
+  /** Knowledge Chat runs on the org Full Server RAG gateway (thin client). */
+  server_rag_enabled?: boolean;
 }
 
 export interface EnterpriseModelInfo {

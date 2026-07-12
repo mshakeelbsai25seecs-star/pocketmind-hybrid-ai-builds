@@ -64,6 +64,7 @@ const KEY_ENTERPRISE_EMBEDDINGS_ENABLED: &str = "enterprise.embeddings_enabled";
 const KEY_ENTERPRISE_CODE_EMBED_MODEL: &str = "enterprise.code_embedding_model";
 const KEY_ENTERPRISE_KNOWLEDGE_EMBED_MODEL: &str = "enterprise.knowledge_embedding_model";
 const KEY_ENTERPRISE_EMBED_BASE_URL: &str = "enterprise.embeddings_base_url";
+const KEY_ENTERPRISE_SERVER_RAG: &str = "enterprise.server_rag_enabled";
 
 fn parse_remote_model(value: Option<&String>) -> AppResult<(String, String)> {
     let raw = value.map(|v| v.as_str()).unwrap_or("").trim();
@@ -1474,6 +1475,9 @@ pub struct EnterpriseServerConfig {
     /// Optional separate base URL for embeddings; defaults to `base_url` when empty.
     #[serde(default)]
     pub embeddings_base_url: String,
+    /// When true, Knowledge Chat uses the org gateway (`/v1/knowledge/*`) instead of local RAG.
+    #[serde(default)]
+    pub server_rag_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1533,6 +1537,11 @@ pub async fn get_enterprise_server_config(state: State<'_, AppState>) -> AppResu
         .get_setting(KEY_ENTERPRISE_EMBED_BASE_URL)
         .map_err(|e| AppError::DatabaseError(e.to_string()))?
         .unwrap_or_default();
+    let server_rag_enabled = db
+        .get_setting(KEY_ENTERPRISE_SERVER_RAG)
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
     Ok(EnterpriseServerConfig {
         base_url,
         selected_model,
@@ -1541,7 +1550,13 @@ pub async fn get_enterprise_server_config(state: State<'_, AppState>) -> AppResu
         code_embedding_model,
         knowledge_embedding_model,
         embeddings_base_url,
+        server_rag_enabled,
     })
+}
+
+#[tauri::command]
+pub async fn get_enterprise_server_token(state: State<'_, AppState>) -> AppResult<String> {
+    resolve_enterprise_api_key(&state, None).await
 }
 
 #[tauri::command]
@@ -1554,6 +1569,7 @@ pub async fn save_enterprise_server_config(
     code_embedding_model: Option<String>,
     knowledge_embedding_model: Option<String>,
     embeddings_base_url: Option<String>,
+    server_rag_enabled: Option<bool>,
 ) -> AppResult<EnterpriseServerConfig> {
     let normalized_url = normalize_enterprise_base_url(&base_url);
     if normalized_url.is_empty() {
@@ -1584,6 +1600,10 @@ pub async fn save_enterprise_server_config(
         let trimmed = embed_url.trim();
         let normalized_embed = if trimmed.is_empty() { String::new() } else { normalize_enterprise_base_url(trimmed) };
         db.set_setting(KEY_ENTERPRISE_EMBED_BASE_URL, &normalized_embed)
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    }
+    if let Some(enabled) = server_rag_enabled {
+        db.set_setting(KEY_ENTERPRISE_SERVER_RAG, if enabled { "1" } else { "0" })
             .map_err(|e| AppError::DatabaseError(e.to_string()))?;
     }
     if let Some(key) = api_key {
@@ -1624,6 +1644,11 @@ pub async fn save_enterprise_server_config(
             .get_setting(KEY_ENTERPRISE_EMBED_BASE_URL)
             .map_err(|e| AppError::DatabaseError(e.to_string()))?
             .unwrap_or_default(),
+        server_rag_enabled: db
+            .get_setting(KEY_ENTERPRISE_SERVER_RAG)
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false),
     };
     drop(db);
     record_audit(

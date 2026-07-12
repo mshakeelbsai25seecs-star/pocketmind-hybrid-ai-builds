@@ -1,0 +1,79 @@
+# CPU fallback overlay — merge with the primary compose file:
+#   docker compose -f docker-compose.yml -f docker-compose.cpu.yml up -d
+
+services:
+  llm:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    deploy:
+      resources: {}
+    command:
+      - -m
+      - ${LLM_MODEL_PATH:-/models/llm/Qwen2.5-7B-Instruct-Q4_K_M.gguf}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - -c
+      - ${CTX_SIZE:-8192}
+      - -ngl
+      - "0"
+      - -t
+      - ${THREADS:-8}
+
+  embed-code:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    deploy:
+      resources: {}
+    command:
+      - -m
+      - ${CODE_EMBED_MODEL_PATH:-/models/embeddings/Qwen3-Embedding-8B-Q4_K_M.gguf}
+      - --embeddings
+      - --pooling
+      - last
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8001"
+      - -c
+      - ${EMBED_CTX_SIZE:-8192}
+      - -t
+      - ${THREADS:-8}
+
+  embed-knowledge:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    deploy:
+      resources: {}
+    command:
+      - -m
+      - ${KNOWLEDGE_EMBED_MODEL_PATH:-/models/embeddings/bge-m3-Q4_K_M.gguf}
+      - --embeddings
+      - --pooling
+      - mean
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8002"
+      - -c
+      - ${EMBED_CTX_SIZE:-8192}
+      - -t
+      - ${THREADS:-8}
+
+  rerank:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    deploy:
+      resources: {}
+    command:
+      - -m
+      - ${RERANK_MODEL_PATH:-/models/rerankers/Qwen3-Reranker-4B-Q4_K_M.gguf}
+      - --reranking
+      - --pooling
+      - rank
+      - --embedding
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8003"
+      - -c
+      - ${EMBED_CTX_SIZE:-8192}
+      - -t
+      - ${THREADS:-8}

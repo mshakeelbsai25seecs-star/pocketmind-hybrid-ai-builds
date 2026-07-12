@@ -283,13 +283,31 @@ pub fn extract_error_code(query: &str) -> Option<String> {
 pub fn extract_file_hint(query: &str) -> Option<String> {
     for token in query.split_whitespace() {
         if token.contains('.') && token.chars().any(|c| c.is_alphabetic()) {
-            let cleaned = token.trim_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '_' && c != '-');
-            if cleaned.contains('.') {
+            let cleaned = token
+                .trim_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '_' && c != '-');
+            if looks_like_filename(cleaned) {
                 return Some(cleaned.to_string());
             }
         }
     }
     None
+}
+
+/// True for `ChatView.tsx` / `config_loader.py`, false for sentence tails like `name.`
+fn looks_like_filename(name: &str) -> bool {
+    let Some((stem, ext)) = name.rsplit_once('.') else {
+        return false;
+    };
+    if stem.is_empty() || ext.is_empty() {
+        return false;
+    }
+    if !(1..=12).contains(&ext.len()) {
+        return false;
+    }
+    if !ext.chars().all(|c| c.is_ascii_alphanumeric()) {
+        return false;
+    }
+    stem.chars().any(|c| c.is_alphanumeric())
 }
 
 pub fn extract_camel_symbols(query: &str) -> Vec<String> {
@@ -465,5 +483,23 @@ mod tests {
     fn extracts_snake_case_symbols() {
         let symbols = extract_snake_case_symbols("explain load_api_timeout in config_loader.py");
         assert!(symbols.iter().any(|s| s == "load_api_timeout"));
+    }
+
+    #[test]
+    fn file_hint_ignores_trailing_sentence_period() {
+        assert_eq!(
+            extract_file_hint(
+                "What Rust function validates JWT tokens? I need a function name."
+            ),
+            None
+        );
+        assert_eq!(
+            extract_file_hint("What does handleSend do in ChatView.tsx?"),
+            Some("ChatView.tsx".to_string())
+        );
+        assert_eq!(
+            extract_file_hint("imports in config_loader.py"),
+            Some("config_loader.py".to_string())
+        );
     }
 }

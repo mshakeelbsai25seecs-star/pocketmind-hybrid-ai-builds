@@ -12,6 +12,11 @@ import {
   humanError,
 } from '../../knowledgeChat/api';
 import {
+  loadServerRagCredentials,
+  serverRagChat,
+  type ServerRagCredentials,
+} from '../../knowledgeChat/serverRag';
+import {
   KC_GENERATION_DEFAULTS,
   KC_NOT_FOUND_MESSAGE,
   buildCitationHits,
@@ -272,6 +277,7 @@ export default function KnowledgeChatPanel() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [conversationLoading, setConversationLoading] = useState(false);
+  const [serverRagCreds, setServerRagCreds] = useState<ServerRagCredentials | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const generationRef = useRef(0);
   const sendInFlightRef = useRef(false);
@@ -294,7 +300,22 @@ export default function KnowledgeChatPanel() {
     [collections, activeCollectionId],
   );
 
-  const chatReady = Boolean(activeCollection?.status === 'ready' && currentModel);
+  const serverRagMode = Boolean(serverRagCreds);
+  const chatReady = serverRagMode
+    ? Boolean(activeCollection?.status === 'ready')
+    : Boolean(activeCollection?.status === 'ready' && currentModel);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadServerRagCredentials()
+      .then(creds => {
+        if (!cancelled) setServerRagCreds(creds);
+      })
+      .catch(() => {
+        if (!cancelled) setServerRagCreds(null);
+      });
+    return () => { cancelled = true; };
+  }, []);
   const knowledgeChatMode: KcKnowledgeChatMode = productConfig?.knowledge_chat_mode === 'codebase_explorer'
     ? 'codebase_explorer'
     : 'folder_qa';
@@ -330,8 +351,8 @@ export default function KnowledgeChatPanel() {
         const id = await invoke<string>('create_conversation', {
           title: `Knowledge Chat: ${activeCollection?.name || 'Collection'}`,
           characterId: null,
-          modelId: currentModel,
-          mode: 'knowledge',
+          modelId: serverRagMode ? 'enterprise:server-rag' : currentModel,
+          mode: serverRagMode ? 'knowledge-server-rag' : 'knowledge',
         });
         if (cancelled) return;
         setConversationId(id);
@@ -343,7 +364,7 @@ export default function KnowledgeChatPanel() {
       }
     })();
     return () => { cancelled = true; };
-  }, [activeCollection?.id, activeCollection?.name, chatReady, currentModel]);
+  }, [activeCollection?.id, activeCollection?.name, chatReady, currentModel, serverRagMode]);
 
   const stopGeneration = async () => {
     generationRef.current += 1;
@@ -411,7 +432,8 @@ export default function KnowledgeChatPanel() {
 
   const sendMessage = async () => {
     const question = input.trim();
-    if (!question || !conversationId || !currentModel || !activeCollection || !chatReady) return;
+    if (!question || !conversationId || !activeCollection || !chatReady) return;
+    if (!serverRagMode && !currentModel) return;
     if (sendInFlightRef.current || isGenerating) return;
 
     const generationId = ++generationRef.current;
@@ -425,7 +447,9 @@ export default function KnowledgeChatPanel() {
     setLastHits([]);
     setLastSearch(null);
     setIsGenerating(true);
-    setGenerationStatus('Retrieving relevant indexed snippets...');
+    setGenerationStatus(serverRagMode
+      ? 'Asking organization Server RAG gateway...'
+      : 'Retrieving relevant indexed snippets...');
     const answerStartedAt = performance.now();
     let retrievalMs: number | undefined;
 
@@ -455,12 +479,45 @@ export default function KnowledgeChatPanel() {
     const assistantMsgId = await invoke<string>('add_message', {
       conversationId,
       role: 'assistant',
-      content: 'Searching indexed folder...',
+      content: serverRagMode ? 'Querying organization knowledge gateway...' : 'Searching indexed folder...',
       metadata: null,
     });
-    setMessages(prev => [...prev, createLocalMessage(assistantMsgId, conversationId, 'assistant', 'Searching indexed folder...')]);
+    setMessages(prev => [...prev, createLocalMessage(
+      assistantMsgId,
+      conversationId,
+      'assistant',
+      serverRagMode ? 'Querying organization knowledge gateway...' : 'Searching indexed folder...',
+    )]);
 
     try {
+      // Server RAG thin client: skip local hybrid_search / embed; gateway returns answer+sources.
+      if (serverRagCreds && serverRagMode) {
+        const result = await serverRagChat(serverRagCreds, activeCollection.id, question);
+        if (isStale()) return;
+        retrievalMs = performance.now() - answerStartedAt;
+        const sources: SourceSummary[] = (result.sources || []).map((src, idx) => ({
+          rank: idx + 1,
+          file_name: src.file_name,
+          file_path: src.relative_path,
+          title: src.title,
+          snippet: src.snippet,
+          source_confidence: src.score,
+        }));
+        setNotice('Answered via organization Server RAG gateway.');
+        const metadata = JSON.stringify({
+          mode: 'server_rag',
+          collection_id: result.collection_id,
+          sources,
+          timing: snapshotTiming(),
+        });
+        await invoke('update_message', { id: assistantMsgId, content: result.answer, metadata });
+        setMessages(prev => prev.map(item => item.id === assistantMsgId
+          ? { ...item, content: result.answer, metadata }
+          : item));
+        setLastHits([]);
+        return;
+      }
+
       const rewrite = await kcPrepareSearchQuery(question);
       let searchQuery = question;
       if (productConfig?.enable_llm_query_expand && rewrite.vague && currentModel) {
@@ -1078,7 +1135,15 @@ export default function KnowledgeChatPanel() {
 
       {!chatReady && (
         <div className="rounded-2xl border border-amber-200/70 dark:border-amber-900 bg-amber-50/85 dark:bg-amber-950/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200 mb-4">
-          Select a ready collection and a local model before chatting. Build the index in the panel above first.
+          {serverRagMode
+            ? 'Select a ready collection from the organization Server RAG gateway.'
+            : 'Select a ready collection and a local model before chatting. Build the index in the panel above first.'}
+        </div>
+      )}
+
+      {serverRagMode && chatReady && (
+        <div className="mb-4 rounded-2xl border border-sky-200/70 dark:border-sky-900 bg-sky-50/85 dark:bg-sky-950/20 px-4 py-3 text-sm text-sky-800 dark:text-sky-200">
+          Server RAG mode — questions go to the organization gateway (Bearer token). Local embed/search are skipped.
         </div>
       )}
 

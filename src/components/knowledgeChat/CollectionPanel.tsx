@@ -19,6 +19,7 @@ import {
   kcValidateEmbeddingModel,
   humanError,
 } from '../../knowledgeChat/api';
+import { loadServerRagCredentials, serverRagListCollections } from '../../knowledgeChat/serverRag';
 import { normalizeDisplayPath } from '../../platformPaths';
 import { useKnowledgeChatStore } from '../../knowledgeChat/store';
 import { useAppStore } from '../../store';
@@ -161,6 +162,22 @@ export default function CollectionPanel() {
     let cancelled = false;
     (async () => {
       try {
+        const serverCreds = await loadServerRagCredentials();
+        if (serverCreds) {
+          const items = await serverRagListCollections(serverCreds);
+          if (cancelled) return;
+          setCollections(items);
+          const persistedId = useKnowledgeChatStore.getState().activeCollectionId;
+          const validPersisted = persistedId && items.some(item => item.id === persistedId);
+          if (validPersisted) {
+            setActiveCollectionId(persistedId);
+          } else if (items[0]) {
+            setActiveCollectionId(items[0].id);
+          }
+          setNotice('Server RAG mode: collections loaded from the organization gateway.');
+          return;
+        }
+
         // Do not auto-index/embed on mount — use Scan Folder / Build Index (or kc_ensure_qa_corpus) manually.
         const items = await kcListCollections();
 
@@ -215,7 +232,7 @@ export default function CollectionPanel() {
       }
     })();
     return () => { cancelled = true; };
-  }, [deploymentConfig?.embeddingModelPath, setActiveCollectionId, setCollections, setEmbeddingModelPath, setError]);
+  }, [deploymentConfig?.embeddingModelPath, setActiveCollectionId, setCollections, setEmbeddingModelPath, setError, setNotice]);
 
   useEffect(() => {
     const unlisten = listen<KcIndexProgress>('kc-index-progress', (event) => {

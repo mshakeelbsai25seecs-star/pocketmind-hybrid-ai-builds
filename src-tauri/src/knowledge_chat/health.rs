@@ -214,8 +214,9 @@ pub fn system_readiness(db: &Database) -> AppResult<KcSystemReadiness> {
     }
 
     let llama_rerank_model_path = llama_rerank::resolve_llama_rerank_path(db).unwrap_or_default();
-    let llama_rerank_configured = !llama_rerank_model_path.is_empty()
-        && std::path::Path::new(&llama_rerank_model_path).is_file();
+    let llama_rerank_configured = llama_rerank_model_path.starts_with("remote:")
+        || (!llama_rerank_model_path.is_empty()
+            && std::path::Path::new(&llama_rerank_model_path).is_file());
     if !llama_rerank_configured {
         warnings.push(
             "Primary reranker (Qwen3-Reranker GGUF) not found. Place Qwen3-Reranker-4B-Q4_K_M.gguf (or f16/Q8) under models/rerankers. Search falls back to dense-pair / ONNX / phrase.".to_string(),

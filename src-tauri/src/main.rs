@@ -71,6 +71,7 @@ fn main() {
             commands::get_api_key_providers,
             commands::get_enterprise_server_config,
             commands::save_enterprise_server_config,
+            commands::get_enterprise_server_token,
             commands::clear_enterprise_server_key,
             commands::list_enterprise_server_models,
             commands::test_enterprise_server_connection,

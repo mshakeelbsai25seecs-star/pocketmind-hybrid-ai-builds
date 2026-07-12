@@ -70,7 +70,7 @@
       }
     },
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' https:; img-src 'self' blob: data: https:; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; connect-src 'self' http: https:; img-src 'self' blob: data: https:; style-src 'self' 'unsafe-inline'"
     },
     "updater": {
       "active": false

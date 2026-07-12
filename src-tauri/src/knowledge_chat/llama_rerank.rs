@@ -54,6 +54,9 @@ impl KcRerankPool {
 
     /// Score query/document pairs. Returns relevance scores in `[0, 1]` aligned
     /// with `documents`, or an error if the server cannot start / respond.
+    ///
+    /// When `NEXUS_RERANK_URL` is set (e.g. `http://rerank:8003`), posts to that
+    /// base URL's `/v1/rerank` and never spawns a local llama-server.
     pub async fn score(
         &self,
         model_path: &str,
@@ -62,6 +65,13 @@ impl KcRerankPool {
     ) -> AppResult<Vec<f64>> {
         if documents.is_empty() {
             return Ok(Vec::new());
+        }
+        if let Some(remote_base) = remote_rerank_base_url() {
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(180))
+                .build()
+                .map_err(|e| AppError::InferenceError(format!("Failed to create remote rerank client: {e}")))?;
+            return post_rerank(&client, &remote_base, query, documents).await;
         }
         let model_path = normalize_model_path(model_path)?;
         let mut guard = self.session.lock().await;
@@ -121,6 +131,17 @@ fn normalize_model_path(model_path: &str) -> AppResult<String> {
     Ok(path.to_string_lossy().to_string())
 }
 
+/// Prefer a remote llama.cpp rerank server when `NEXUS_RERANK_URL` is set.
+pub fn remote_rerank_base_url() -> Option<String> {
+    let raw = std::env::var("NEXUS_RERANK_URL").ok()?;
+    let trimmed = raw.trim().trim_end_matches('/').to_string();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed)
+    }
+}
+
 /// True when the configured path looks like a llama.cpp RANK GGUF (Qwen3-Reranker).
 pub fn is_llama_rerank_model(path: &str) -> bool {
     let lower = path.to_ascii_lowercase();
@@ -167,13 +188,17 @@ pub fn probe_qwen3_rerank_ggufs(models_dir: &str) -> Option<String> {
 
 /// Resolve the primary llama.cpp RANK GGUF (Qwen3-Reranker) from settings /
 /// deployment. Priority:
-/// 1. Configured path when it is an existing RANK `.gguf`
-/// 2. Probe `models/rerankers` for known Qwen3-Reranker filenames
+/// 1. Remote `NEXUS_RERANK_URL` (returns a sentinel path; no local GGUF required)
+/// 2. Configured path when it is an existing RANK `.gguf`
+/// 3. Probe `models/rerankers` for known Qwen3-Reranker filenames
 ///
 /// An empty or ONNX-only configured path still picks up a Qwen GGUF when present
 /// so the primary reranker is never skipped solely because the setting points at
 /// a secondary ONNX model.
 pub fn resolve_llama_rerank_path(db: &Database) -> Option<String> {
+    if let Some(url) = remote_rerank_base_url() {
+        return Some(format!("remote:{url}"));
+    }
     let deploy = load_deployment_config(db);
     let setting: Option<String> = db
         .conn()
@@ -459,5 +484,17 @@ mod tests {
             "expected preferred Q4_K_M candidate, got {found}"
         );
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn remote_rerank_url_parsed() {
+        std::env::remove_var("NEXUS_RERANK_URL");
+        assert!(remote_rerank_base_url().is_none());
+        std::env::set_var("NEXUS_RERANK_URL", "http://rerank:8003/");
+        assert_eq!(
+            remote_rerank_base_url().as_deref(),
+            Some("http://rerank:8003")
+        );
+        std::env::remove_var("NEXUS_RERANK_URL");
     }
 }

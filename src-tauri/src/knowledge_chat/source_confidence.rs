@@ -212,15 +212,7 @@ pub fn generation_allowed(hits: &[KcSearchHit], min_confidence: f64, min_sources
 }
 
 fn extract_file_hint(query: &str) -> Option<String> {
-    for token in query.split_whitespace() {
-        if token.contains('.') && token.chars().any(|c| c.is_alphabetic()) {
-            let cleaned = token.trim_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '_' && c != '-');
-            if cleaned.contains('.') {
-                return Some(cleaned.to_string());
-            }
-        }
-    }
-    None
+    crate::knowledge_chat::query_intent::extract_file_hint(query)
 }
 
 fn is_symbol_question(query: &str) -> bool {

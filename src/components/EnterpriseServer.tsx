@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '../store';
 import { Conversation, EnterpriseEmbeddingProbe, EnterpriseModelInfo, EnterpriseServerConfig, EnterpriseServerTestResult } from '../types';
+import { probeServerRag } from '../knowledgeChat/serverRag';
 
 function humanError(err: unknown): string {
   if (!err) return 'Unknown error';
@@ -38,6 +39,8 @@ export default function EnterpriseServer() {
   const [knowledgeEmbedModel, setKnowledgeEmbedModel] = useState('');
   const [embeddingsBaseUrl, setEmbeddingsBaseUrl] = useState('');
   const [embeddingProbes, setEmbeddingProbes] = useState<EnterpriseEmbeddingProbe[]>([]);
+  const [serverRagEnabled, setServerRagEnabled] = useState(false);
+  const [serverRagReachable, setServerRagReachable] = useState<boolean | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -52,6 +55,7 @@ export default function EnterpriseServer() {
         setCodeEmbedModel(config.code_embedding_model || '');
         setKnowledgeEmbedModel(config.knowledge_embedding_model || '');
         setEmbeddingsBaseUrl(config.embeddings_base_url || '');
+        setServerRagEnabled(Boolean(config.server_rag_enabled));
       } catch (err) {
         if (!cancelled) setError(humanError(err));
       }
@@ -62,7 +66,7 @@ export default function EnterpriseServer() {
 
   const serverReady = useMemo(() => Boolean(baseUrl.trim() && selectedModel.trim()), [baseUrl, selectedModel]);
 
-  const saveConfig = async (opts?: { selected?: string }) => {
+  const saveConfig = async (opts?: { selected?: string; serverRag?: boolean }) => {
     const config = await invoke<EnterpriseServerConfig>('save_enterprise_server_config', {
       baseUrl,
       apiKey: apiKey.trim() ? apiKey.trim() : null,
@@ -71,6 +75,7 @@ export default function EnterpriseServer() {
       codeEmbeddingModel: codeEmbedModel.trim(),
       knowledgeEmbeddingModel: knowledgeEmbedModel.trim(),
       embeddingsBaseUrl: embeddingsBaseUrl.trim(),
+      serverRagEnabled: opts?.serverRag ?? serverRagEnabled,
     });
     setBaseUrl(config.base_url);
     setSelectedModel(config.selected_model || opts?.selected || selectedModel);
@@ -79,6 +84,7 @@ export default function EnterpriseServer() {
     setCodeEmbedModel(config.code_embedding_model || '');
     setKnowledgeEmbedModel(config.knowledge_embedding_model || '');
     setEmbeddingsBaseUrl(config.embeddings_base_url || '');
+    setServerRagEnabled(Boolean(config.server_rag_enabled));
     if (apiKey.trim()) setApiKey('');
     return config;
   };
@@ -99,6 +105,18 @@ export default function EnterpriseServer() {
       setEmbeddingProbes(result.embedding_probes || []);
       setStatus(result.message);
       if (!selectedModel && result.models?.[0]?.id) setSelectedModel(result.models[0].id);
+
+      const tokenForProbe = apiKey.trim()
+        || (apiKeySaved ? await invoke<string>('get_enterprise_server_token').catch(() => '') : '');
+      if (tokenForProbe) {
+        const ragOk = await probeServerRag(baseUrl, tokenForProbe);
+        setServerRagReachable(ragOk);
+        if (ragOk && !serverRagEnabled) {
+          setStatus(prev => `${prev || result.message} Knowledge API reachable — you can enable Server RAG.`);
+        }
+      } else {
+        setServerRagReachable(null);
+      }
     } catch (err) {
       setError(humanError(err));
       setStatus(null);
@@ -273,6 +291,45 @@ export default function EnterpriseServer() {
               <button onClick={copyReport} className="btn-secondary">
                 <Copy className="w-4 h-4" /> {copied ? 'Copied' : 'Copy report'}
               </button>
+            </div>
+
+            <div className="rounded-2xl border border-surface-200 dark:border-surface-800 bg-surface-50/70 dark:bg-surface-900/50 p-4 space-y-3">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={serverRagEnabled}
+                  onChange={async e => {
+                    const next = e.target.checked;
+                    setServerRagEnabled(next);
+                    try {
+                      await saveConfig({ serverRag: next });
+                      setStatus(next
+                        ? 'Server RAG enabled — Knowledge Chat will use the organization gateway.'
+                        : 'Server RAG disabled — Knowledge Chat uses local indexing again.');
+                    } catch (err) {
+                      setServerRagEnabled(!next);
+                      setError(humanError(err));
+                    }
+                  }}
+                  className="h-4 w-4 rounded border-surface-300"
+                />
+                <span className="text-sm font-bold text-surface-700 dark:text-surface-200">
+                  Server RAG (Knowledge Chat on org gateway)
+                </span>
+              </label>
+              <p className="text-xs text-surface-500">
+                Thin client mode: the desktop app sends questions and a Bearer token only.
+                Collections, embeddings, rerank, and answers run on the Full Server RAG stack
+                (<code className="mx-1">/v1/knowledge/*</code>). Leave off to keep local Knowledge Chat.
+              </p>
+              {serverRagReachable === true && (
+                <div className="text-xs text-emerald-700 dark:text-emerald-300">Knowledge API reachable on this endpoint.</div>
+              )}
+              {serverRagReachable === false && (
+                <div className="text-xs text-amber-700 dark:text-amber-300">
+                  Knowledge API not detected — point Org Server URL at the gateway (port 8080) after setup.sh.
+                </div>
+              )}
             </div>
 
             <div className="rounded-2xl border border-surface-200 dark:border-surface-800 bg-surface-50/70 dark:bg-surface-900/50 p-4 space-y-3">
