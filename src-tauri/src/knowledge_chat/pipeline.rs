@@ -11,7 +11,9 @@ use crate::knowledge_chat::embedding_profiles::{self, EmbeddingProfileId};
 use crate::knowledge_chat::embeddings;
 use crate::knowledge_chat::path_guard;
 use crate::knowledge_chat::partitions::KcSearchScope;
-use crate::knowledge_chat::query_intent::{classify_query_intent, is_code_symbol_question, QueryIntent};
+use crate::knowledge_chat::query_intent::{
+    classify_query_intent, is_code_oriented_intent, is_code_symbol_question, QueryIntent,
+};
 use crate::knowledge_chat::remote_embeddings::{self, RemoteEmbedConfig};
 use crate::knowledge_chat::runtime::KcEmbedPool;
 use crate::knowledge_chat::types::KcPartitionConfig;
@@ -30,8 +32,17 @@ pub fn resolve_scope_for_accuracy(
     request_scope: Option<KcSearchScope>,
     query: &str,
 ) -> (KcSearchScope, Option<String>) {
+    resolve_scope_for_accuracy_with_intent(request_scope, query, None)
+}
+
+/// Same as [`resolve_scope_for_accuracy`], but honors an optional Stage-A intent override.
+pub fn resolve_scope_for_accuracy_with_intent(
+    request_scope: Option<KcSearchScope>,
+    query: &str,
+    intent_override: Option<QueryIntent>,
+) -> (KcSearchScope, Option<String>) {
     let requested = resolve_scope(request_scope);
-    let intent = classify_query_intent(query);
+    let intent = intent_override.unwrap_or_else(|| classify_query_intent(query));
     let q = query.to_lowercase();
 
     let needs_non_code = matches!(
@@ -39,7 +50,7 @@ pub fn resolve_scope_for_accuracy(
         QueryIntent::Timeline | QueryIntent::RunbookStep | QueryIntent::ErrorCode
     ) || (matches!(intent, QueryIntent::General) && !is_code_symbol_question(&q));
 
-    let needs_code = matches!(intent, QueryIntent::CodeSymbol | QueryIntent::EnvVar);
+    let needs_code = is_code_oriented_intent(intent);
 
     if needs_non_code && matches!(requested, KcSearchScope::Code) {
         return (

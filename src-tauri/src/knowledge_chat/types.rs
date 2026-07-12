@@ -306,6 +306,10 @@ pub struct KcSearchRequest {
     /// User-selected scope (code / docs / both). Defaults to `both`.
     #[serde(default)]
     pub search_scope: Option<KcSearchScope>,
+    /// Optional Stage-A intent from the client (LLM / veto / rules). When set,
+    /// search uses it for scope, filters, MMR, and `detected_intent`.
+    #[serde(default)]
+    pub intent_override: Option<QueryIntent>,
     /// Per-partition query vectors, keyed by partition id. Populated server-side
     /// after embedding the query with each active partition's model; never sent
     /// by the frontend.
@@ -367,14 +371,12 @@ pub struct KcSearchResult {
     pub detected_intent: Option<QueryIntent>,
     #[serde(default)]
     pub intent_confidence: Option<f64>,
-    /// Compact cheatsheet block for LLM routing (demo folders).
+    /// Stage-B answer strategy intent (may differ from search/detected intent).
     #[serde(default)]
-    pub demo_cheatsheet_block: Option<String>,
-    /// Relative paths pinned by demo cheatsheet for file attachment.
+    pub answer_intent: Option<QueryIntent>,
+    /// Origin of the effective intent: `llm`, `rules`, or `veto`.
     #[serde(default)]
-    pub demo_pinned_paths: Vec<String>,
-    #[serde(default)]
-    pub demo_cheatsheet_active: bool,
+    pub intent_source: Option<String>,
     /// Tree-sitter entity bodies for symbols named in the query, ordered by match
     /// priority. Source of truth for extractive code-symbol answers.
     #[serde(default)]

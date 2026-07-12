@@ -1,5 +1,6 @@
 use crate::knowledge_chat::query_intent::{
-    classify_query_intent, extract_camel_symbols, extract_error_code, extract_file_hint, QueryIntent,
+    classify_query_intent, extract_camel_symbols, extract_error_code, extract_file_hint,
+    is_file_imports_question, is_list_symbols_question, is_locate_definition_question, QueryIntent,
 };
 
 #[derive(Debug, Clone)]
@@ -47,13 +48,46 @@ fn score_intent_confidence(query: &str, intent: QueryIntent) -> f64 {
             if q.contains("what should i do") || q.contains("what do i do") {
                 score += 0.20;
             }
+            if q.contains("who approves") || q.contains("password reset") {
+                score += 0.25;
+            }
         }
         QueryIntent::Timeline => {
             if q.contains("how long") || q.contains("how many days") {
                 score += 0.30;
             }
+            if (q.contains("how many") && q.contains("day")) || q.contains("business day") {
+                score += 0.30;
+            }
+            if q.contains("onboarding") {
+                score += 0.15;
+            }
         }
-        QueryIntent::CodeSymbol => {
+        QueryIntent::ListSymbolsInFile => {
+            if is_list_symbols_question(&q) {
+                score += 0.25;
+            }
+            if extract_file_hint(query).is_some() {
+                score += 0.20;
+            }
+        }
+        QueryIntent::FileImports => {
+            if is_file_imports_question(&q) {
+                score += 0.30;
+            }
+            if extract_file_hint(query).is_some() {
+                score += 0.15;
+            }
+        }
+        QueryIntent::LocateDefinition => {
+            if is_locate_definition_question(&q) {
+                score += 0.25;
+            }
+            if !extract_camel_symbols(query).is_empty() || extract_file_hint(query).is_some() {
+                score += 0.15;
+            }
+        }
+        QueryIntent::ExplainSymbol => {
             if !extract_camel_symbols(query).is_empty() {
                 score += 0.25;
             }
@@ -62,6 +96,9 @@ fn score_intent_confidence(query: &str, intent: QueryIntent) -> f64 {
             }
             if q.contains("explain") || q.contains("what does") || q.contains("walk me through") {
                 score += 0.10;
+            }
+            if q.contains("function") || q.contains("jwt") || q.contains("responsible") {
+                score += 0.15;
             }
         }
         QueryIntent::General => {}
@@ -86,9 +123,23 @@ mod tests {
     }
 
     #[test]
-    fn paraphrase_code_symbol_confidence() {
+    fn paraphrase_explain_symbol_confidence() {
         let c = classify_with_confidence("Explain handleSend in ChatView.tsx");
-        assert_eq!(c.intent, QueryIntent::CodeSymbol);
+        assert_eq!(c.intent, QueryIntent::ExplainSymbol);
+        assert!(c.confidence >= 0.55);
+    }
+
+    #[test]
+    fn list_symbols_confidence() {
+        let c = classify_with_confidence("What functions are defined in ChatView.tsx?");
+        assert_eq!(c.intent, QueryIntent::ListSymbolsInFile);
+        assert!(c.confidence >= 0.55);
+    }
+
+    #[test]
+    fn locate_definition_confidence() {
+        let c = classify_with_confidence("Where is handleSend defined?");
+        assert_eq!(c.intent, QueryIntent::LocateDefinition);
         assert!(c.confidence >= 0.55);
     }
 }

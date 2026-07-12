@@ -254,7 +254,7 @@ fn collect_pinned_file_evidence(
                 line_end: 0,
                 entity_kind: Some("file".to_string()),
                 entity_name: Some(trimmed.to_string()),
-                source_type: "cheatsheet_pin".to_string(),
+                source_type: "pinned_file".to_string(),
                 parse_mode: None,
             });
         }

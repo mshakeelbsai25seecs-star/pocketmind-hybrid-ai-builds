@@ -246,6 +246,13 @@ fn sync_qa_corpus(source: &Path, dest: &Path, force: bool) -> std::io::Result<us
             copied += 1;
         }
     }
+    // Remove legacy demo cheatsheet artifacts that may remain from older syncs.
+    for stale in ["demo_cheatsheet.json", "demo_cheatsheet.template.json"] {
+        let path = dest.join(stale);
+        if path.is_file() {
+            let _ = std::fs::remove_file(&path);
+        }
+    }
     Ok(copied)
 }
 

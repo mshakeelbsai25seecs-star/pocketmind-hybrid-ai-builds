@@ -1,4 +1,5 @@
 import type { KcGroundedContext, KcGroundedContextSource, KcSearchHit, KcSearchResult, QueryIntent } from './types';
+import { normalizeQueryIntent } from './types';
 import { extractQuerySymbols } from './fileSelection';
 import { tryExtractiveFromAttachedSources } from './prompts';
 
@@ -20,7 +21,13 @@ export function isWeakStructuredCodeAnswer(text: string): boolean {
 export function resolveStructuredAnswer(searchResult: KcSearchResult): string | null {
   const answer = searchResult.structured_answer;
   if (!answer || answer.confidence < MIN_STRUCTURED_CONFIDENCE) return null;
-  if (answer.intent === 'code_symbol' && isWeakStructuredCodeAnswer(answer.answer_text)) return null;
+  const intent = normalizeQueryIntent(answer.intent) ?? answer.intent;
+  if (
+    (intent === 'explain_symbol' || intent === 'code_symbol')
+    && isWeakStructuredCodeAnswer(answer.answer_text)
+  ) {
+    return null;
+  }
   return answer.answer_text.trim() || null;
 }
 

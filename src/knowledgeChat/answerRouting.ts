@@ -1,5 +1,6 @@
 import type { ProductConfig } from '../productConfig';
 import type { KcGroundedContextSource, KcSearchHit, KcSearchResult, QueryIntent } from './types';
+import { effectiveAnswerIntent, normalizeQueryIntent } from './types';
 import { buildExplainFallbackFromAttached, resolveStructuredAnswer } from './evidenceAnswer';
 import { tryExtractiveCodeSymbolAnswer } from './prompts';
 import {
@@ -33,22 +34,49 @@ export function isWeakGrounding(
   return top < minGeneration || !allowGeneration;
 }
 
+function allowsExplainExtractive(intent: QueryIntent): boolean {
+  return intent === 'explain_symbol';
+}
+
+function allowsSpecialistExtractive(intent: QueryIntent): boolean {
+  return intent === 'explain_symbol'
+    || intent === 'list_symbols_in_file'
+    || intent === 'locate_definition'
+    || intent === 'file_imports'
+    || intent === 'env_var'
+    || intent === 'error_code'
+    || intent === 'runbook_step'
+    || intent === 'timeline';
+}
+
 export function resolveAnswerFallback(
   searchResult: KcSearchResult,
   question: string,
   contextHits: KcSearchHit[],
   attachedSources?: KcGroundedContextSource[] | null,
 ): string | null {
-  return resolveStructuredAnswer(searchResult)
-    || tryExtractiveCodeSymbolAnswer(
+  const intent = effectiveAnswerIntent(searchResult);
+  // general: never force a false extractive specialist
+  if (intent === 'general') {
+    return searchResult.grounded_context?.evidence_answer?.trim() || null;
+  }
+
+  const structured = resolveStructuredAnswer(searchResult);
+  if (structured) return structured;
+
+  if (allowsExplainExtractive(intent)) {
+    return tryExtractiveCodeSymbolAnswer(
       question,
       contextHits,
       searchResult.symbol_entities,
       attachedSources,
     )
-    || buildExplainFallbackFromAttached(question, attachedSources)
-    || searchResult.grounded_context?.evidence_answer?.trim()
-    || null;
+      || buildExplainFallbackFromAttached(question, attachedSources)
+      || searchResult.grounded_context?.evidence_answer?.trim()
+      || null;
+  }
+
+  return searchResult.grounded_context?.evidence_answer?.trim() || null;
 }
 
 export function shouldUseLlmSynthesis(
@@ -57,13 +85,18 @@ export function shouldUseLlmSynthesis(
   productConfig: ProductConfig | null | undefined,
   question = '',
 ): boolean {
+  const intent = effectiveAnswerIntent(searchResult);
   if (resolveStructuredAnswer(searchResult)) return false;
-  if (question && tryExtractiveCodeSymbolAnswer(
-    question,
-    contextHits,
-    searchResult.symbol_entities,
-    searchResult.grounded_context?.sources,
-  )) {
+  if (
+    allowsExplainExtractive(intent)
+    && question
+    && tryExtractiveCodeSymbolAnswer(
+      question,
+      contextHits,
+      searchResult.symbol_entities,
+      searchResult.grounded_context?.sources,
+    )
+  ) {
     return false;
   }
   if (!contextHits.length) return false;
@@ -81,13 +114,25 @@ export function resolveAnswerRoute(
   contextHits: KcSearchHit[],
   productConfig: ProductConfig | null | undefined,
 ): AnswerRoute {
-  if (resolveStructuredAnswer(searchResult)) return 'structured';
-  if (tryExtractiveCodeSymbolAnswer(
-    question,
-    contextHits,
-    searchResult.symbol_entities,
-    searchResult.grounded_context?.sources,
-  )) {
+  const intent = effectiveAnswerIntent(searchResult);
+
+  if (resolveStructuredAnswer(searchResult) && allowsSpecialistExtractive(intent)) {
+    return 'structured';
+  }
+  // Structured may still win for general numbered-list answers.
+  if (resolveStructuredAnswer(searchResult) && intent === 'general') {
+    return 'structured';
+  }
+
+  if (
+    allowsExplainExtractive(intent)
+    && tryExtractiveCodeSymbolAnswer(
+      question,
+      contextHits,
+      searchResult.symbol_entities,
+      searchResult.grounded_context?.sources,
+    )
+  ) {
     return 'extractive';
   }
 
@@ -109,7 +154,8 @@ export function resolveAnswerRoute(
 }
 
 export function isStructuredIntent(intent: QueryIntent | null | undefined): boolean {
-  return !!intent && intent !== 'general';
+  const normalized = normalizeQueryIntent(intent || null);
+  return !!normalized && normalized !== 'general';
 }
 
 export { MIN_LLM_BUNDLE_CONFIDENCE, MAX_WHOLE_FILE_BYTES, bundleHitsForLlm, hasBundledSources };

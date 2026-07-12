@@ -11,26 +11,43 @@ use crate::knowledge_chat::types::{KcSearchHit, StructuredAnswer};
 const MIN_STRUCTURED_CONFIDENCE: f64 = 0.5;
 
 pub fn try_structured_answer(query: &str, hits: &[KcSearchHit]) -> Option<StructuredAnswer> {
+    try_structured_answer_with_intent(query, hits, None)
+}
+
+pub fn try_structured_answer_with_intent(
+    query: &str,
+    hits: &[KcSearchHit],
+    intent_override: Option<QueryIntent>,
+) -> Option<StructuredAnswer> {
     if hits.is_empty() {
         return None;
     }
 
-    if let Some(answer) = try_file_imports_answer(query, hits) {
-        return Some(answer);
-    }
+    let intent = intent_override.unwrap_or_else(|| classify_query_intent(query));
 
-    if let Some(answer) = try_numbered_list_answer(query, hits) {
-        return Some(answer);
-    }
-
-    let intent = classify_query_intent(query);
-    if intent == QueryIntent::General {
-        return None;
-    }
-
-    // Explain/describe code questions need the LLM + whole-file context, not prefix stubs.
-    if intent == QueryIntent::CodeSymbol && is_explain_code_question(query) {
-        return None;
+    match intent {
+        QueryIntent::FileImports => {
+            return try_file_imports_answer(query, hits);
+        }
+        QueryIntent::ListSymbolsInFile => {
+            return try_list_symbols_in_file_answer(query, hits);
+        }
+        QueryIntent::LocateDefinition => {
+            return try_locate_definition_answer(query, hits);
+        }
+        QueryIntent::General => {
+            if let Some(answer) = try_numbered_list_answer(query, hits) {
+                return Some(answer);
+            }
+            return None;
+        }
+        QueryIntent::ExplainSymbol => {
+            // Explain/describe code questions need the LLM + whole-file context, not prefix stubs.
+            if is_explain_code_question(query) {
+                return None;
+            }
+        }
+        _ => {}
     }
 
     let ranked = rank_hits_for_intent(query, intent, hits);
@@ -41,14 +58,17 @@ pub fn try_structured_answer(query: &str, hits: &[KcSearchHit]) -> Option<Struct
         QueryIntent::EnvVar => extract_env_var_answer(query, hit)?,
         QueryIntent::RunbookStep => extract_runbook_step_answer(query, hit)?,
         QueryIntent::Timeline => extract_timeline_answer(query, hit)?,
-        QueryIntent::CodeSymbol => {
+        QueryIntent::ExplainSymbol => {
             let extracted = extract_code_symbol_answer(query, hits)?;
             if extracted.text.trim().is_empty() || is_weak_code_explanation(&extracted.text) {
                 return None;
             }
             extracted
         }
-        QueryIntent::General => return None,
+        QueryIntent::ListSymbolsInFile
+        | QueryIntent::LocateDefinition
+        | QueryIntent::FileImports
+        | QueryIntent::General => return None,
     };
 
     let confidence = hit
@@ -126,7 +146,10 @@ fn score_hit_for_intent(query: &str, intent: QueryIntent, hit: &KcSearchHit) -> 
                 score += 0.20;
             }
         }
-        QueryIntent::CodeSymbol => {
+        QueryIntent::ExplainSymbol
+        | QueryIntent::ListSymbolsInFile
+        | QueryIntent::LocateDefinition
+        | QueryIntent::FileImports => {
             if let Some(hint) = extract_file_hint(query) {
                 if file.eq_ignore_ascii_case(&hint) {
                     score += 0.25;
@@ -313,10 +336,6 @@ fn extract_enumeration_count(q: &str) -> Option<usize> {
 
 /// Answer "what are the imports in config_loader.py" from module preamble or file header.
 pub fn try_file_imports_answer(query: &str, hits: &[KcSearchHit]) -> Option<StructuredAnswer> {
-    let q = query.to_lowercase();
-    if !q.contains("import") {
-        return None;
-    }
     let file_hint = extract_file_hint(query)?;
 
     for hit in hits {
@@ -335,13 +354,251 @@ pub fn try_file_imports_answer(query: &str, hits: &[KcSearchHit]) -> Option<Stru
             .join("\n");
         let confidence = hit.chunk.source_confidence.unwrap_or(0.55).max(0.72);
         return Some(StructuredAnswer {
-            intent: QueryIntent::CodeSymbol,
+            intent: QueryIntent::FileImports,
             answer_text: format!("Imports in `{file_hint}`:\n{body}"),
             confidence,
             source_file: hit.chunk.file_name.clone(),
             line_start: hit.chunk.line_start,
             line_end: hit.chunk.line_end,
         });
+    }
+    None
+}
+
+/// List functions/classes/exports in a named file from entity hits (not explain one symbol).
+pub fn try_list_symbols_in_file_answer(query: &str, hits: &[KcSearchHit]) -> Option<StructuredAnswer> {
+    let file_hint = extract_file_hint(query)?;
+    let file_lower = file_hint.to_lowercase();
+    let mut symbols: Vec<(String, String, Option<i32>)> = Vec::new();
+
+    for hit in hits {
+        let name_match = hit.chunk.file_name.eq_ignore_ascii_case(&file_hint)
+            || hit
+                .chunk
+                .file_path
+                .to_lowercase()
+                .ends_with(&file_lower)
+            || hit
+                .chunk
+                .file_name
+                .to_lowercase()
+                .contains(file_lower.rsplit_once('.').map(|(s, _)| s).unwrap_or(&file_lower));
+        if !name_match {
+            continue;
+        }
+        if let (Some(kind), Some(name)) = (&hit.chunk.entity_kind, &hit.chunk.entity_name) {
+            let kind_l = kind.to_lowercase();
+            let name_l = name.to_lowercase();
+            if kind_l == "module" || name_l == "module_preamble" || name_l == "file" {
+                continue;
+            }
+            if symbols
+                .iter()
+                .any(|(n, _, _)| n.eq_ignore_ascii_case(name))
+            {
+                continue;
+            }
+            symbols.push((name.clone(), kind.clone(), hit.chunk.line_start));
+        }
+    }
+
+    if symbols.len() < 2 {
+        for hit in hits {
+            if !hit.chunk.file_name.eq_ignore_ascii_case(&file_hint)
+                && !hit.chunk.file_path.to_lowercase().ends_with(&file_lower)
+            {
+                continue;
+            }
+            for (name, kind, line) in extract_defs_from_text(&excerpt_text(hit)) {
+                if symbols
+                    .iter()
+                    .any(|(n, _, _)| n.eq_ignore_ascii_case(&name))
+                {
+                    continue;
+                }
+                symbols.push((name, kind, line));
+            }
+        }
+    }
+
+    if symbols.is_empty() {
+        return None;
+    }
+
+    symbols.sort_by(|a, b| a.0.to_lowercase().cmp(&b.0.to_lowercase()));
+    let body = symbols
+        .iter()
+        .map(|(name, kind, line)| {
+            let anchor = line
+                .filter(|l| *l > 0)
+                .map(|l| format!(" (L{l})"))
+                .unwrap_or_default();
+            format!("- `{name}` ({kind}){anchor}")
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let source = hits
+        .iter()
+        .find(|h| h.chunk.file_name.eq_ignore_ascii_case(&file_hint))
+        .or_else(|| hits.first())?;
+    let confidence = source.chunk.source_confidence.unwrap_or(0.55).max(0.72);
+    Some(StructuredAnswer {
+        intent: QueryIntent::ListSymbolsInFile,
+        answer_text: format!("Symbols in `{file_hint}`:\n{body}"),
+        confidence,
+        source_file: source.chunk.file_name.clone(),
+        line_start: source.chunk.line_start,
+        line_end: source.chunk.line_end,
+    })
+}
+
+fn extract_defs_from_text(text: &str) -> Vec<(String, String, Option<i32>)> {
+    let mut out = Vec::new();
+    for (idx, line) in text.lines().enumerate() {
+        let trimmed = line.trim();
+        let line_no = Some((idx as i32) + 1);
+        if let Some(rest) = trimmed.strip_prefix("def ") {
+            let name = rest
+                .split(|c: char| c == '(' || c.is_whitespace())
+                .next()
+                .unwrap_or("")
+                .trim();
+            if name.len() > 1 {
+                out.push((name.to_string(), "function".into(), line_no));
+            }
+        } else if let Some(rest) = trimmed.strip_prefix("async def ") {
+            let name = rest
+                .split(|c: char| c == '(' || c.is_whitespace())
+                .next()
+                .unwrap_or("")
+                .trim();
+            if name.len() > 1 {
+                out.push((name.to_string(), "function".into(), line_no));
+            }
+        } else if let Some(rest) = trimmed.strip_prefix("class ") {
+            let name = rest
+                .split(|c: char| c == '(' || c == ':' || c == '{' || c.is_whitespace())
+                .next()
+                .unwrap_or("")
+                .trim();
+            if name.len() > 1 {
+                out.push((name.to_string(), "class".into(), line_no));
+            }
+        } else if trimmed.contains("function ") {
+            if let Some(pos) = trimmed.find("function ") {
+                let rest = &trimmed[pos + "function ".len()..];
+                let name = rest
+                    .split(|c: char| c == '(' || c.is_whitespace())
+                    .next()
+                    .unwrap_or("")
+                    .trim();
+                if name.len() > 1 && name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '$')
+                {
+                    out.push((name.to_string(), "function".into(), line_no));
+                }
+            }
+        } else if trimmed.starts_with("const ") || trimmed.starts_with("let ") || trimmed.starts_with("export ")
+        {
+            // const handleSend = ... / export function foo
+            if trimmed.contains(" = ") || trimmed.contains("=>") {
+                let after = trimmed
+                    .trim_start_matches("export ")
+                    .trim_start_matches("async ")
+                    .trim_start_matches("const ")
+                    .trim_start_matches("let ")
+                    .trim_start_matches("var ");
+                let name = after
+                    .split(|c: char| c == '=' || c == ':' || c == '(' || c.is_whitespace())
+                    .next()
+                    .unwrap_or("")
+                    .trim();
+                if name.len() > 2
+                    && name.chars().next().is_some_and(|c| c.is_alphabetic() || c == '_')
+                    && name.chars().any(|c| c.is_uppercase() || c == '_')
+                {
+                    out.push((name.to_string(), "function".into(), line_no));
+                }
+            }
+        } else if trimmed.starts_with("fn ") || trimmed.starts_with("pub fn ") || trimmed.starts_with("pub(crate) fn ")
+        {
+            let rest = trimmed
+                .trim_start_matches("pub(crate) ")
+                .trim_start_matches("pub ")
+                .trim_start_matches("fn ");
+            let name = rest
+                .split(|c: char| c == '(' || c == '<' || c.is_whitespace())
+                .next()
+                .unwrap_or("")
+                .trim();
+            if name.len() > 1 {
+                out.push((name.to_string(), "function".into(), line_no));
+            }
+        }
+    }
+    out
+}
+
+/// Short locate answer: path + symbol line from best code hit.
+pub fn try_locate_definition_answer(query: &str, hits: &[KcSearchHit]) -> Option<StructuredAnswer> {
+    let mut symbols = extract_camel_symbols(query);
+    symbols.extend(extract_snake_case_symbols(query));
+    let ranked = rank_hits_for_intent(query, QueryIntent::LocateDefinition, hits);
+
+    for hit in &ranked {
+        if let Some(name) = &hit.chunk.entity_name {
+            if symbols.is_empty() || symbols.iter().any(|s| s.eq_ignore_ascii_case(name)) {
+                let anchor = match (hit.chunk.line_start, hit.chunk.line_end) {
+                    (Some(s), Some(e)) if s > 0 && e > s => format!(" (L{s}–L{e})"),
+                    (Some(s), _) if s > 0 => format!(" (L{s})"),
+                    _ => String::new(),
+                };
+                let kind = hit
+                    .chunk
+                    .entity_kind
+                    .as_deref()
+                    .unwrap_or("symbol");
+                let confidence = hit.chunk.source_confidence.unwrap_or(0.6).max(0.75);
+                return Some(StructuredAnswer {
+                    intent: QueryIntent::LocateDefinition,
+                    answer_text: format!(
+                        "`{name}` ({kind}) is defined in `{}`{anchor}.",
+                        hit.chunk.file_name
+                    ),
+                    confidence,
+                    source_file: hit.chunk.file_name.clone(),
+                    line_start: hit.chunk.line_start,
+                    line_end: hit.chunk.line_end,
+                });
+            }
+        }
+    }
+
+    // Fallback: first hit that mentions a queried symbol in body.
+    for symbol in &symbols {
+        for hit in &ranked {
+            let body = excerpt_text(hit);
+            if body.contains(symbol) || body.to_lowercase().contains(&symbol.to_lowercase()) {
+                let anchor = hit
+                    .chunk
+                    .line_start
+                    .filter(|s| *s > 0)
+                    .map(|s| format!(" (L{s})"))
+                    .unwrap_or_default();
+                let confidence = hit.chunk.source_confidence.unwrap_or(0.55).max(0.70);
+                return Some(StructuredAnswer {
+                    intent: QueryIntent::LocateDefinition,
+                    answer_text: format!(
+                        "`{symbol}` appears in `{}`{anchor}.",
+                        hit.chunk.file_name
+                    ),
+                    confidence,
+                    source_file: hit.chunk.file_name.clone(),
+                    line_start: hit.chunk.line_start,
+                    line_end: hit.chunk.line_end,
+                });
+            }
+        }
     }
     None
 }
@@ -414,7 +671,7 @@ fn extract_code_symbol_answer(query: &str, hits: &[KcSearchHit]) -> Option<Extra
     }
     let file_hint = extract_file_hint(query);
     let ranked = {
-        let intent = QueryIntent::CodeSymbol;
+        let intent = QueryIntent::ExplainSymbol;
         rank_hits_for_intent(query, intent, hits)
     };
 
@@ -763,5 +1020,50 @@ mod tests {
         )];
         let answer = try_file_imports_answer("what are the imports in config_loader.py", &hits).unwrap();
         assert!(answer.answer_text.contains("import os"));
+        assert_eq!(answer.intent, QueryIntent::FileImports);
+    }
+
+    #[test]
+    fn qa_list_symbols_in_file() {
+        let hits = vec![
+            hit(
+                "ChatView.tsx",
+                "code",
+                "const handleSend = async () => {}",
+                0.9,
+                Some(("function", "handleSend")),
+                Some((10, 16)),
+            ),
+            hit(
+                "ChatView.tsx",
+                "code",
+                "function renderMessages() {}",
+                0.85,
+                Some(("function", "renderMessages")),
+                Some((20, 30)),
+            ),
+        ];
+        let answer =
+            try_structured_answer("What functions are defined in ChatView.tsx?", &hits).unwrap();
+        assert_eq!(answer.intent, QueryIntent::ListSymbolsInFile);
+        assert!(answer.answer_text.contains("handleSend"));
+        assert!(answer.answer_text.contains("renderMessages"));
+        assert!(!answer.answer_text.to_lowercase().contains("validates and trims"));
+    }
+
+    #[test]
+    fn qa_locate_definition() {
+        let hits = vec![hit(
+            "ChatView.tsx",
+            "code",
+            "const handleSend = async () => {}",
+            0.9,
+            Some(("function", "handleSend")),
+            Some((10, 16)),
+        )];
+        let answer = try_structured_answer("Where is handleSend defined?", &hits).unwrap();
+        assert_eq!(answer.intent, QueryIntent::LocateDefinition);
+        assert!(answer.answer_text.contains("ChatView.tsx"));
+        assert!(answer.answer_text.contains("handleSend"));
     }
 }

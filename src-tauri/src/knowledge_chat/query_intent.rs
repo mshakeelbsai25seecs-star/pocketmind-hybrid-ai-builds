@@ -1,36 +1,134 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+use serde::{Deserialize, Deserializer, Serialize};
+
+/// Closed-enum query / answer intents (snake_case wire format).
+/// Legacy `code_symbol` deserializes as [`QueryIntent::ExplainSymbol`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QueryIntent {
-    CodeSymbol,
-    ErrorCode,
+    ExplainSymbol,
+    ListSymbolsInFile,
+    LocateDefinition,
+    FileImports,
     EnvVar,
+    ErrorCode,
     RunbookStep,
     Timeline,
     General,
 }
 
-pub fn classify_query_intent(query: &str) -> QueryIntent {
+impl<'de> Deserialize<'de> for QueryIntent {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let raw = String::deserialize(deserializer)?;
+        Ok(parse_query_intent_label(&raw).unwrap_or(QueryIntent::General))
+    }
+}
+
+/// Parse a snake_case intent label; maps legacy `code_symbol` → `explain_symbol`.
+pub fn parse_query_intent_label(raw: &str) -> Option<QueryIntent> {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "explain_symbol" | "code_symbol" => Some(QueryIntent::ExplainSymbol),
+        "list_symbols_in_file" => Some(QueryIntent::ListSymbolsInFile),
+        "locate_definition" => Some(QueryIntent::LocateDefinition),
+        "file_imports" => Some(QueryIntent::FileImports),
+        "env_var" => Some(QueryIntent::EnvVar),
+        "error_code" => Some(QueryIntent::ErrorCode),
+        "runbook_step" => Some(QueryIntent::RunbookStep),
+        "timeline" => Some(QueryIntent::Timeline),
+        "general" => Some(QueryIntent::General),
+        _ => None,
+    }
+}
+
+pub fn query_intent_label(intent: QueryIntent) -> &'static str {
+    match intent {
+        QueryIntent::ExplainSymbol => "explain_symbol",
+        QueryIntent::ListSymbolsInFile => "list_symbols_in_file",
+        QueryIntent::LocateDefinition => "locate_definition",
+        QueryIntent::FileImports => "file_imports",
+        QueryIntent::EnvVar => "env_var",
+        QueryIntent::ErrorCode => "error_code",
+        QueryIntent::RunbookStep => "runbook_step",
+        QueryIntent::Timeline => "timeline",
+        QueryIntent::General => "general",
+    }
+}
+
+/// Code-oriented intents that share CodeSymbol-like scope / MMR / filters.
+pub fn is_code_oriented_intent(intent: QueryIntent) -> bool {
+    matches!(
+        intent,
+        QueryIntent::ExplainSymbol
+            | QueryIntent::ListSymbolsInFile
+            | QueryIntent::LocateDefinition
+            | QueryIntent::FileImports
+            | QueryIntent::EnvVar
+    )
+}
+
+/// High-precision rule vetoes that beat the LLM when ultra-clear.
+pub fn veto_query_intent(query: &str) -> Option<QueryIntent> {
     let q = query.to_lowercase();
 
     if extract_error_code(query).is_some() || q.contains("error code") {
-        return QueryIntent::ErrorCode;
+        return Some(QueryIntent::ErrorCode);
     }
 
     if q.contains("environment variable")
         || q.contains("env var")
-        || q.contains("environ")
-        || query
-            .split_whitespace()
-            .any(|w| w.chars().filter(|c| c.is_ascii_uppercase() || *c == '_').count() >= 4 && w.contains('_'))
+        || query.split_whitespace().any(|w| w.starts_with("NEXUS_"))
     {
-        return QueryIntent::EnvVar;
+        return Some(QueryIntent::EnvVar);
     }
+
+    // /what functions|methods|classes are (defined|exported) in .+\.(tsx?|py|rs)/i
+    if regex_list_symbols_veto(&q) {
+        return Some(QueryIntent::ListSymbolsInFile);
+    }
+
+    None
+}
+
+fn regex_list_symbols_veto(q: &str) -> bool {
+    let has_list_verb = (q.contains("what functions")
+        || q.contains("what methods")
+        || q.contains("what classes")
+        || q.contains("which functions")
+        || q.contains("which methods")
+        || q.contains("which classes")
+        || q.contains("list functions")
+        || q.contains("list methods")
+        || q.contains("list classes")
+        || q.contains("list the functions")
+        || q.contains("list the methods")
+        || q.contains("list the classes")
+        || q.contains("exports from")
+        || q.contains("what are the exports"))
+        && (q.contains("defined in")
+            || q.contains("exported in")
+            || q.contains("exported from")
+            || q.contains(" in ")
+            || q.contains(" from "));
+
+    if !has_list_verb && !is_list_symbols_question(q) {
+        return false;
+    }
+    extract_file_hint(q).is_some()
+}
+
+pub fn classify_query_intent(query: &str) -> QueryIntent {
+    if let Some(v) = veto_query_intent(query) {
+        return v;
+    }
+
+    let q = query.to_lowercase();
 
     if q.contains("first step")
         || q.contains("what should i do")
         || q.contains("what do i do")
         || q.contains("how do i respond")
         || q.contains("how should i")
+        || q.contains("who approves")
+        || q.contains("password reset")
         || (q.contains("vpn") && q.contains("alert"))
     {
         return QueryIntent::RunbookStep;
@@ -38,21 +136,94 @@ pub fn classify_query_intent(query: &str) -> QueryIntent {
 
     if q.contains("how long")
         || q.contains("how many days")
+        || (q.contains("how many") && q.contains("day"))
         || q.contains("duration")
         || q.contains("take to")
         || q.contains("onboarding")
+        || q.contains("business day")
     {
         return QueryIntent::Timeline;
     }
 
-    if is_code_symbol_question(&q)
+    if is_list_symbols_question(&q) && extract_file_hint(query).is_some() {
+        return QueryIntent::ListSymbolsInFile;
+    }
+
+    if is_file_imports_question(&q) {
+        return QueryIntent::FileImports;
+    }
+
+    if is_locate_definition_question(&q) {
+        return QueryIntent::LocateDefinition;
+    }
+
+    if is_explain_symbol_question(&q)
         || extract_camel_symbols(query).iter().any(|s| s.len() > 4)
         || extract_snake_case_symbols(query).iter().any(|s| s.len() > 4)
+        || is_named_function_lookup(&q)
     {
-        return QueryIntent::CodeSymbol;
+        return QueryIntent::ExplainSymbol;
     }
 
     QueryIntent::General
+}
+
+fn is_named_function_lookup(q: &str) -> bool {
+    (q.contains("function") || q.contains("method") || q.contains("class"))
+        && (q.contains("validat")
+            || q.contains("jwt")
+            || q.contains("token")
+            || q.contains("which")
+            || q.contains("what rust")
+            || q.contains("what python")
+            || q.contains("what ts"))
+}
+
+pub fn is_list_symbols_question(q: &str) -> bool {
+    let q = q.to_lowercase();
+    q.contains("functions defined in")
+        || q.contains("methods defined in")
+        || q.contains("classes defined in")
+        || q.contains("functions in")
+        || q.contains("methods in")
+        || q.contains("classes in")
+        || q.contains("exports from")
+        || q.contains("what functions")
+        || q.contains("what methods")
+        || q.contains("what classes")
+        || q.contains("which functions")
+        || q.contains("which methods")
+        || q.contains("which classes")
+        || q.contains("list functions")
+        || q.contains("list methods")
+        || q.contains("list classes")
+        || q.contains("list the symbols")
+        || q.contains("list symbols")
+        || (q.contains("what are the")
+            && (q.contains("function") || q.contains("method") || q.contains("class") || q.contains("export"))
+            && extract_file_hint(&q).is_some()
+            && !q.contains("import"))
+}
+
+pub fn is_file_imports_question(q: &str) -> bool {
+    let q = q.to_lowercase();
+    (q.contains("import") || q.contains("imports"))
+        && extract_file_hint(&q).is_some()
+        && !is_list_symbols_question(&q)
+}
+
+pub fn is_locate_definition_question(q: &str) -> bool {
+    let q = q.to_lowercase();
+    q.contains("where is")
+        || q.contains("where are")
+        || q.contains("which file")
+        || q.contains("what file")
+        || q.contains("defined in which")
+        || (q.contains("where") && (q.contains("defined") || q.contains("declared") || q.contains("located")))
+}
+
+pub fn is_explain_symbol_question(q: &str) -> bool {
+    is_code_symbol_question(q) && !is_list_symbols_question(q) && !is_file_imports_question(q)
 }
 
 pub fn intent_match_strength(query: &str, intent: QueryIntent) -> f64 {
@@ -136,7 +307,12 @@ pub fn extract_snake_case_symbols(query: &str) -> Vec<String> {
         .collect()
 }
 
+/// Legacy helper: true for explain / show / describe style code questions (not list/imports).
 pub fn is_code_symbol_question(q: &str) -> bool {
+    let q = q.to_lowercase();
+    if is_list_symbols_question(&q) || is_file_imports_question(&q) {
+        return false;
+    }
     q.contains("what does")
         || q.contains("how does")
         || q.contains("explain")
@@ -144,10 +320,8 @@ pub fn is_code_symbol_question(q: &str) -> bool {
         || q.contains("walk me through")
         || q.contains("show me")
         || q.contains("what is the logic")
-        || q.contains("how does")
         || q.contains("what happens when")
         || q.contains("purpose of")
-        || (q.contains("import") && extract_file_hint(q).is_some())
 }
 
 #[cfg(test)]
@@ -158,7 +332,7 @@ mod tests {
     fn classifies_qa_intents() {
         assert_eq!(
             classify_query_intent("What does handleSend do in ChatView.tsx?"),
-            QueryIntent::CodeSymbol
+            QueryIntent::ExplainSymbol
         );
         assert_eq!(
             classify_query_intent("What environment variable controls the API timeout?"),
@@ -182,20 +356,66 @@ mod tests {
     fn classifies_code_symbol_paraphrases() {
         assert_eq!(
             classify_query_intent("Explain handleSend in ChatView.tsx"),
-            QueryIntent::CodeSymbol
+            QueryIntent::ExplainSymbol
         );
         assert_eq!(
             classify_query_intent("Walk me through handleSend"),
-            QueryIntent::CodeSymbol
+            QueryIntent::ExplainSymbol
         );
     }
 
     #[test]
-    fn classifies_imports_question_as_code_symbol() {
+    fn classifies_imports_question_as_file_imports() {
         assert_eq!(
             classify_query_intent("what are the imports in config_loader.py"),
-            QueryIntent::CodeSymbol
+            QueryIntent::FileImports
         );
+    }
+
+    #[test]
+    fn classifies_list_symbols_in_file() {
+        assert_eq!(
+            classify_query_intent("What functions are defined in ChatView.tsx?"),
+            QueryIntent::ListSymbolsInFile
+        );
+        assert_eq!(
+            classify_query_intent("list the methods in config_loader.py"),
+            QueryIntent::ListSymbolsInFile
+        );
+    }
+
+    #[test]
+    fn classifies_locate_definition() {
+        assert_eq!(
+            classify_query_intent("Where is handleSend defined?"),
+            QueryIntent::LocateDefinition
+        );
+        assert_eq!(
+            classify_query_intent("which file defines load_api_timeout"),
+            QueryIntent::LocateDefinition
+        );
+    }
+
+    #[test]
+    fn veto_forces_list_and_error() {
+        assert_eq!(
+            veto_query_intent("What functions are defined in ChatView.tsx?"),
+            Some(QueryIntent::ListSymbolsInFile)
+        );
+        assert_eq!(
+            veto_query_intent("What does error code E-402 mean?"),
+            Some(QueryIntent::ErrorCode)
+        );
+    }
+
+    #[test]
+    fn legacy_code_symbol_deserializes_as_explain() {
+        let intent: QueryIntent =
+            serde_json::from_str("\"code_symbol\"").expect("deserialize code_symbol");
+        assert_eq!(intent, QueryIntent::ExplainSymbol);
+        let labeled: QueryIntent =
+            serde_json::from_str("\"explain_symbol\"").expect("deserialize explain_symbol");
+        assert_eq!(labeled, QueryIntent::ExplainSymbol);
     }
 
     #[test]

@@ -143,11 +143,3 @@ export function boostSelectedPathsFromQuery(
 export function mergeSelectedPaths(...groups: string[][]): string[] {
   return [...new Set(groups.flat().filter(Boolean))];
 }
-
-export function pinPathsFromDemoSearch(demoPinnedPaths: string[] | undefined): string[] {
-  return [...new Set((demoPinnedPaths ?? []).filter(Boolean))];
-}
-
-export function shouldSkipCatalogFilePick(demoPinnedPaths: string[] | undefined): boolean {
-  return (demoPinnedPaths?.length ?? 0) > 0;
-}

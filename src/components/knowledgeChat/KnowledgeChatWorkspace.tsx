@@ -23,10 +23,10 @@ export default function KnowledgeChatWorkspace() {
           {qaActive && (
             <div className="rounded-xl border border-primary-200/80 dark:border-primary-800/60 bg-primary-50/70 dark:bg-primary-950/30 px-4 py-3">
               <p className="text-sm font-semibold text-primary-900 dark:text-primary-100">
-                Demo mode: cheatsheet-guided answers for the QA test corpus.
+                QA test corpus selected
               </p>
               <p className="mt-1 text-xs text-primary-800/90 dark:text-primary-200/90">
-                Folder: D:\NexusAI\qa-corpus (auto-indexed on launch). Answers use one-line summary, file citations, and explanation.
+                Folder: D:\NexusAI\qa-corpus (auto-indexed on launch). Ask grounded questions with cited answers from the indexed files.
               </p>
               <ul className="mt-2 text-xs text-surface-700 dark:text-surface-300 list-disc pl-5 space-y-1">
                 {QA_SAMPLE_QUESTIONS.map(question => (

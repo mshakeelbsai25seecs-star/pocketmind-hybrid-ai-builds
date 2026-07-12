@@ -291,9 +291,10 @@ export interface KcSearchResult {
   structured_answer?: StructuredAnswer | null;
   detected_intent?: QueryIntent | null;
   intent_confidence?: number | null;
-  demo_cheatsheet_block?: string | null;
-  demo_pinned_paths?: string[];
-  demo_cheatsheet_active?: boolean;
+  /** Stage-B answer strategy intent (may differ from search/detected intent). */
+  answer_intent?: QueryIntent | null;
+  /** Origin of the effective intent: `llm` | `rules` | `veto` | `override`. */
+  intent_source?: IntentSource | null;
   /** Tree-sitter entity bodies for symbols named in the query (extractive ground truth). */
   symbol_entities?: KcSymbolEntity[];
   /** True when sibling child hits were collapsed into parent bodies. */
@@ -339,16 +340,52 @@ export interface KcSymbolEntity {
   body: string;
 }
 
+export type IntentSource = 'llm' | 'rules' | 'veto' | 'override';
+
+/** Closed-enum intents (snake_case). Legacy `code_symbol` normalizes to `explain_symbol`. */
 export type QueryIntent =
-  | 'code_symbol'
-  | 'error_code'
+  | 'explain_symbol'
+  | 'list_symbols_in_file'
+  | 'locate_definition'
+  | 'file_imports'
   | 'env_var'
+  | 'error_code'
   | 'runbook_step'
   | 'timeline'
   | 'general';
 
+const QUERY_INTENT_SET = new Set<string>([
+  'explain_symbol',
+  'list_symbols_in_file',
+  'locate_definition',
+  'file_imports',
+  'env_var',
+  'error_code',
+  'runbook_step',
+  'timeline',
+  'general',
+]);
+
+/** Map legacy `code_symbol` → `explain_symbol`; reject unknown labels. */
+export function normalizeQueryIntent(raw: string | null | undefined): QueryIntent | null {
+  if (!raw) return null;
+  const key = raw.trim().toLowerCase();
+  if (key === 'code_symbol') return 'explain_symbol';
+  if (QUERY_INTENT_SET.has(key)) return key as QueryIntent;
+  return null;
+}
+
+export function effectiveAnswerIntent(result: {
+  answer_intent?: QueryIntent | null;
+  detected_intent?: QueryIntent | null;
+}): QueryIntent {
+  return normalizeQueryIntent(result.answer_intent)
+    ?? normalizeQueryIntent(result.detected_intent)
+    ?? 'general';
+}
+
 export interface StructuredAnswer {
-  intent: QueryIntent;
+  intent: QueryIntent | 'code_symbol';
   answer_text: string;
   confidence: number;
   source_file: string;
@@ -390,6 +427,8 @@ export interface KcSearchRequest {
   query_dense_vector?: number[];
   filters?: KcSearchFilters;
   search_scope?: KcSearchScope;
+  /** Stage-A intent override for scope / filters / MMR / detected_intent. */
+  intent_override?: QueryIntent;
 }
 
 export interface KcEmbedTextsRequest {

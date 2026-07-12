@@ -144,7 +144,7 @@ export default function SecuritySettingsPanel() {
             onChange={e => update('knowledge_chat_mode', e.target.value as ProductConfig['knowledge_chat_mode'])}
             className="input-field w-full max-w-md"
           >
-            <option value="folder_qa">Folder Q&amp;A — cheatsheet-guided document answers</option>
+            <option value="folder_qa">Folder Q&amp;A — grounded document answers</option>
             <option value="codebase_explorer">Codebase Explorer — repo map + symbol-first code retrieval</option>
           </select>
           <p className="mt-1 text-xs text-surface-500">

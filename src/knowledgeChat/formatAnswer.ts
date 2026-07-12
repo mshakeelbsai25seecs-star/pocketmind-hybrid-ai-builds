@@ -16,8 +16,6 @@ export type FormatAnswerOptions = {
   skipQualityGate?: boolean;
   /** Prefer this citation when the answer body has no [Source: …] tag. */
   preferredCitation?: CitationHit;
-  /** Demo cheatsheet mode: enforce one-line Answer + line citations. */
-  demoMode?: boolean;
   /**
    * Content was already passed through `formatKnowledgeAnswer` at publish time.
    * Use a light display pass so fenced evidence / appendix is not re-processed.
@@ -131,12 +129,7 @@ export function formatKnowledgeAnswer(
   }
 
   out = stripMetaCommentary(out);
-  // Demo compacting must see ## Answer before the redundant heading is stripped.
-  if (options.demoMode) {
-    out = enforceDemoAnswerShape(out);
-  } else {
-    out = normalizeStructuredAnswerMarkdown(out);
-  }
+  out = normalizeStructuredAnswerMarkdown(out);
   out = stripProseSourceArtifacts(out);
   out = transformOutsideFencedCode(out, normalizeListItems);
   out = normalizeShorthandCitations(out, citationHits);
@@ -201,31 +194,6 @@ function normalizeStructuredAnswerMarkdown(text: string): string {
   });
 
   return out.replace(/\n{3,}/g, '\n\n').trim();
-}
-
-function enforceDemoAnswerShape(text: string): string {
-  // Compact the answer body before ## Answer is stripped by normalizeStructuredAnswerMarkdown.
-  let out = unescapeLlmLiterals(text);
-  const answerMatch = out.match(/^##\s+Answer\s*\n+([\s\S]*?)(?=\n##\s+(?:Evidence|Explanation)\b|$)/im);
-  if (answerMatch) {
-    const body = answerMatch[1].replace(/\s+/g, ' ').trim();
-    const firstSentence = body.match(/^[^.!?]+[.!?]/)?.[0]?.trim() || body.split(/\n/)[0]?.trim() || body;
-    out = out.replace(answerMatch[0], `## Answer\n\n${firstSentence}`);
-  } else {
-    // Already stripped: compact the leading prose before Evidence/Explanation.
-    const split = out.split(/(?=\n##\s+(?:Evidence|Explanation)\b)/i);
-    if (split.length > 1 && split[0].trim()) {
-      const body = split[0].replace(/\s+/g, ' ').trim();
-      const firstSentence = body.match(/^[^.!?]+[.!?]/)?.[0]?.trim() || body;
-      out = `${firstSentence}${split.slice(1).join('')}`;
-    }
-  }
-  if (!/^##\s+Evidence\b/im.test(out) && /\[Source:[^\]]+\]/i.test(out)) {
-    const cite = out.match(/\[Source:[^\]]+\]/i)?.[0] || '';
-    const body = out.replace(/\[Source:[^\]]+\]/gi, '').trim();
-    out = `## Answer\n\n${body}\n\n## Evidence\n\n${cite}`;
-  }
-  return normalizeStructuredAnswerMarkdown(out);
 }
 
 function stripMultiSourceNoise(text: string): string {

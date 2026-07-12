@@ -418,8 +418,11 @@ pub async fn kc_hybrid_search(
     let collection_root = collection.root_path.clone();
 
     let scope_timer = StageTimer::start();
-    let (scope, scope_widen_notice) =
-        pipeline::resolve_scope_for_accuracy(request.search_scope, request.query.trim());
+    let (scope, scope_widen_notice) = pipeline::resolve_scope_for_accuracy_with_intent(
+        request.search_scope,
+        request.query.trim(),
+        request.intent_override,
+    );
     let scope_ms = scope_timer.elapsed_ms();
     let scope_in = format!("query={original_query:?}; requested_scope={requested_scope}");
     if let Some(ref notice) = scope_widen_notice {

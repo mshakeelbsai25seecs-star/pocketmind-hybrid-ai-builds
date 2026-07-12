@@ -130,20 +130,3 @@ export function buildBundledGroundedPrompt(question: string, contextBlock: strin
     contextBlock.trim(),
   ].join('\n');
 }
-
-export function buildDemoGroundedPrompt(
-  question: string,
-  cheatsheetBlock: string,
-  contextBlock: string,
-): string {
-  return [
-    'DEMO FOLDER CHEATSHEET',
-    cheatsheetBlock.trim(),
-    '',
-    'QUESTION',
-    question.trim(),
-    '',
-    'ATTACHED SOURCE FILES',
-    contextBlock.trim(),
-  ].join('\n');
-}

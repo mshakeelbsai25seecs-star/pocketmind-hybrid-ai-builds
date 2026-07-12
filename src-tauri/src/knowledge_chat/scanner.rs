@@ -46,6 +46,9 @@ const IGNORE_FILE_NAMES: &[&str] = &[
     ".DS_Store",
     "Thumbs.db",
     "desktop.ini",
+    // Legacy demo routing artifact — never index even if left on disk.
+    "demo_cheatsheet.json",
+    "demo_cheatsheet.template.json",
 ];
 
 const EXTENSIONLESS_SUPPORTED: &[&str] = &[
@@ -87,7 +90,10 @@ fn should_ignore_dir(name: &str) -> bool {
 }
 
 fn should_ignore_file_name(name: &str) -> bool {
-    IGNORE_FILE_NAMES.iter().any(|item| *item == name)
+    let lower = name.to_ascii_lowercase();
+    IGNORE_FILE_NAMES
+        .iter()
+        .any(|item| item.eq_ignore_ascii_case(&lower) || *item == name)
 }
 
 fn canonical_path_string(path: &Path) -> String {

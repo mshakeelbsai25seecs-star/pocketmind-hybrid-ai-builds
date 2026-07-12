@@ -10,7 +10,6 @@ pub mod compress;
 pub mod context_assembly;
 pub mod context_bundle;
 pub mod cross_rerank;
-pub mod demo_cheatsheet;
 pub mod db;
 pub mod db_entities;
 pub mod dense_ann;

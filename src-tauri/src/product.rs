@@ -17,7 +17,6 @@ const KEY_ENABLE_CONTEXTUAL_INDEXING: &str = "product.enable_contextual_indexing
 const KEY_ENABLE_SEMANTIC_CHUNKING: &str = "product.enable_semantic_chunking";
 const KEY_ENABLE_EXACT_DENSE: &str = "product.enable_exact_dense_search";
 const KEY_ENABLE_LLM_CONTEXTUAL_SUMMARIES: &str = "product.enable_llm_contextual_summaries";
-const KEY_KC_DEMO_CHEATSHEET: &str = "product.knowledge_chat_demo_cheatsheet";
 const KEY_KC_MODE: &str = "product.knowledge_chat_mode";
 
 pub const KC_EVIDENCE_MODE_CONCISE: &str = "concise";
@@ -58,10 +57,7 @@ pub struct ProductConfig {
     /// When true, enrich contextual index prefixes with one-line summaries (deterministic or LLM).
     #[serde(default)]
     pub enable_llm_contextual_summaries: bool,
-    /// When true, load demo_cheatsheet.json from collection root to guide file pinning + LLM routing.
-    #[serde(default = "default_true")]
-    pub knowledge_chat_demo_cheatsheet: bool,
-    /// `folder_qa` is cheatsheet-guided document QA; `codebase_explorer` adds repo map + symbol-first retrieval.
+    /// `folder_qa` is document-oriented grounded RAG; `codebase_explorer` adds repo map + symbol-first retrieval.
     #[serde(default = "default_kc_mode")]
     pub knowledge_chat_mode: String,
 }
@@ -108,7 +104,6 @@ impl Default for ProductConfig {
             enable_semantic_chunking: true,
             enable_exact_dense_search: true,
             enable_llm_contextual_summaries: false,
-            knowledge_chat_demo_cheatsheet: false,
             knowledge_chat_mode: KC_MODE_FOLDER_QA.to_string(),
         }
     }
@@ -203,11 +198,6 @@ pub fn load_product_config(db: &Database) -> ProductConfig {
             KEY_ENABLE_LLM_CONTEXTUAL_SUMMARIES,
             defaults.enable_llm_contextual_summaries,
         ),
-        knowledge_chat_demo_cheatsheet: read_bool(
-            db,
-            KEY_KC_DEMO_CHEATSHEET,
-            defaults.knowledge_chat_demo_cheatsheet,
-        ),
         knowledge_chat_mode: db
             .get_setting(KEY_KC_MODE)
             .ok()
@@ -299,11 +289,6 @@ pub fn save_product_config(db: &Database, config: &ProductConfig) -> AppResult<(
     db.set_setting(
         KEY_ENABLE_LLM_CONTEXTUAL_SUMMARIES,
         if config.enable_llm_contextual_summaries { "1" } else { "0" },
-    )
-    .map_err(|e| AppError::DatabaseError(e.to_string()))?;
-    db.set_setting(
-        KEY_KC_DEMO_CHEATSHEET,
-        if config.knowledge_chat_demo_cheatsheet { "1" } else { "0" },
     )
     .map_err(|e| AppError::DatabaseError(e.to_string()))?;
     db.set_setting(KEY_KC_MODE, &config.knowledge_chat_mode)

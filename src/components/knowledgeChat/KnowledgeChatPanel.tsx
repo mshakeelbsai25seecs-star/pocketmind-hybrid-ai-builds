@@ -28,7 +28,6 @@ import { buildCodebaseExplorerContext } from '../../knowledgeChat/codebaseExplor
 import {
   buildBundledGroundedPrompt,
   buildBundledLlmContext,
-  buildDemoGroundedPrompt,
   bundleHitsForLlm,
 } from '../../knowledgeChat/contextBundler';
 import {
@@ -38,8 +37,6 @@ import {
   mergeSelectedPaths,
   parseSelectedFilePaths,
   pathsFromRetrievalHits,
-  pinPathsFromDemoSearch,
-  shouldSkipCatalogFilePick,
 } from '../../knowledgeChat/fileSelection';
 import {
   mergeAnswerWithEvidence,
@@ -67,12 +64,13 @@ import {
 } from '../../knowledgeChat/extractivePrefer';
 import { runtimeLimitsForConfig } from '../../knowledgeChat/deploymentProfile';
 import { expandVagueQueryWithLlm } from '../../knowledgeChat/queryRewrite';
+import { classifyAnswerIntent, classifyRulesAnswerIntent, classifyRulesSearchIntent, classifySearchIntent } from '../../knowledgeChat/intentClassify';
 import { useKnowledgeChatStore } from '../../knowledgeChat/store';
 import { SOC_LOW_CONFIDENCE_BLOCKED_MESSAGE, saveProductConfig, type KcKnowledgeChatMode } from '../../productConfig';
 import MessageSources, { type SourceSummary } from './MessageSources';
 import type { KcAnswerMode, KcPipelineTrace, KcRetrievalConfidence, KcSearchHit, KcSearchResult, KcSearchScope } from '../../knowledgeChat/types';
-import { KC_RETRIEVAL_MODE_LABELS } from '../../knowledgeChat/types';
-import { mergeAnswerStagesIntoTrace, stageStatusLabel } from '../../knowledgeChat/pipelineTrace';
+import { effectiveAnswerIntent, KC_RETRIEVAL_MODE_LABELS } from '../../knowledgeChat/types';
+import { mergeAnswerStagesIntoTrace, mergeIntentStagesIntoTrace, stageStatusLabel } from '../../knowledgeChat/pipelineTrace';
 
 const KC_SEARCH_SCOPE_OPTIONS: KcSearchScope[] = [
   'all', 'code', 'documentation', 'runbooks', 'logs_data', 'general', 'docs', 'both',
@@ -104,6 +102,15 @@ function partitionsSearchedLabel(partitions?: string[]): string {
 import { formatKnowledgeAnswer, retrievalStatusLabel, unescapeLlmLiterals } from '../../knowledgeChat/formatAnswer';
 import type { CitationHit } from '../../knowledgeChat/formatAnswer';
 import KnowledgeMarkdown from './KnowledgeMarkdown';
+// TODO(overnight-eval): REMOVE — delete overnightEval import + all overnight wiring below
+import {
+  OVERNIGHT_BETWEEN_DELAY_MS,
+  OVERNIGHT_QUESTIONS,
+  OVERNIGHT_START_DELAY_MS,
+  isOvernightEvalEnabled,
+  sleep,
+  type OvernightEvalProgress,
+} from '../../knowledgeChat/overnightEval';
 
 type GenerationResponsePayload = {
   text: string;
@@ -276,6 +283,11 @@ export default function KnowledgeChatPanel() {
   const [conversationLoading, setConversationLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const generationRef = useRef(0);
+  const sendInFlightRef = useRef(false);
+  // TODO(overnight-eval): REMOVE — overnight auto-queue state/refs
+  const [overnightProgress, setOvernightProgress] = useState<OvernightEvalProgress | null>(null);
+  const overnightStartedRef = useRef(false);
+  const sendMessageRef = useRef<(overrideQuestion?: string) => Promise<void>>(async () => undefined);
 
   const { currentModel, defaultParams, productConfig, setProductConfig } = useAppStore();
   const {
@@ -351,6 +363,7 @@ export default function KnowledgeChatPanel() {
     try {
       await invoke('stop_generation');
     } finally {
+      sendInFlightRef.current = false;
       setIsGenerating(false);
       setGenerationStatus(null);
     }
@@ -409,14 +422,18 @@ export default function KnowledgeChatPanel() {
     return streamingText.trim();
   };
 
-  const sendMessage = async () => {
-    const question = input.trim();
-    if (!question || !conversationId || !currentModel || !activeCollection || !chatReady || isGenerating) return;
+  const sendMessage = async (overrideQuestion?: string) => {
+    const question = (typeof overrideQuestion === 'string' ? overrideQuestion : input).trim();
+    if (!question || !conversationId || !currentModel || !activeCollection || !chatReady) return;
+    // Prefer in-flight ref over isGenerating state so overnight await chaining is not blocked by a stale render.
+    if (sendInFlightRef.current) return;
+    if (typeof overrideQuestion !== 'string' && isGenerating) return;
 
     const generationId = ++generationRef.current;
     const activeConversationId = conversationId;
     const isStale = () => generationRef.current !== generationId || activeConversationId !== conversationId;
 
+    sendInFlightRef.current = true;
     setError(null);
     setNotice(null);
     setInput('');
@@ -473,14 +490,41 @@ export default function KnowledgeChatPanel() {
       const denseAvailable = activeCollection.dense_status === 'ready' && activeCollection.dense_chunk_count > 0;
       const mode = pickRetrievalMode(denseAvailable, retrievalMode);
 
+      // Stage A — query-only search intent (LLM primary, veto/rules backup).
+      const searchIntentResult = currentModel
+        ? await classifySearchIntent(question, currentModel, defaultParams)
+        : { intent: classifyRulesSearchIntent(question), source: 'rules' as const };
+      if (isStale()) return;
+
       let searchResult = await kcHybridSearch({
         collection_id: activeCollection.id,
         query: searchQuery,
         mode,
         top_k: topK,
         search_scope: searchScope,
+        intent_override: searchIntentResult.intent,
       });
       if (isStale()) return;
+
+      // Stage B — answer intent from question + top snippets.
+      const answerIntentResult = currentModel
+        ? await classifyAnswerIntent(question, searchResult.hits.slice(0, 8), currentModel, defaultParams)
+        : { intent: classifyRulesAnswerIntent(question, searchResult.hits), source: 'rules' as const };
+      if (isStale()) return;
+
+      searchResult = {
+        ...searchResult,
+        detected_intent: searchResult.detected_intent || searchIntentResult.intent,
+        answer_intent: answerIntentResult.intent,
+        intent_source: answerIntentResult.source,
+        pipeline_trace: mergeIntentStagesIntoTrace(searchResult.pipeline_trace, {
+          question,
+          searchIntent: searchIntentResult.intent,
+          searchSource: searchIntentResult.source,
+          answerIntent: answerIntentResult.intent,
+          answerSource: answerIntentResult.source,
+        }),
+      };
 
       const appendSearchNotices = (result: KcSearchResult) => {
         if (result.dense_pair_rerank_used) {
@@ -554,31 +598,43 @@ export default function KnowledgeChatPanel() {
       let grounded = searchResult.grounded_context;
       const evidenceMode = productConfig?.knowledge_chat_evidence_mode ?? 'concise';
       let answerRoute = resolveAnswerRoute(searchResult, question, contextHits, productConfig);
-      let extractivePreview = resolveBestExtractiveAnswer(
-        question,
-        contextHits,
-        searchResult.symbol_entities,
-        searchResult.grounded_context?.sources,
-      );
+      const answerIntent = () => effectiveAnswerIntent(searchResult);
+      let extractivePreview = answerIntent() === 'explain_symbol'
+        ? resolveBestExtractiveAnswer(
+          question,
+          contextHits,
+          searchResult.symbol_entities,
+          searchResult.grounded_context?.sources,
+        )
+        : null;
       let structuredAnswer = resolveStructuredAnswer(searchResult);
       let correctiveRetrievalUsed = false;
 
       const applySearchState = (next: KcSearchResult) => {
-        searchResult = next;
-        contextHits = filterHitsForContext(next.hits, question);
+        // Preserve Stage A/B intent fields across corrective re-search.
+        searchResult = {
+          ...next,
+          answer_intent: next.answer_intent || searchResult.answer_intent,
+          intent_source: next.intent_source || searchResult.intent_source,
+          detected_intent: next.detected_intent || searchResult.detected_intent,
+          pipeline_trace: next.pipeline_trace || searchResult.pipeline_trace,
+        };
+        contextHits = filterHitsForContext(searchResult.hits, question);
         bundledHits = bundleHitsForLlm(contextHits);
         citationHitsForAnswer = buildCitationHits(bundledHits.length ? bundledHits : contextHits);
         setLastHits(contextHits);
-        setLastSearch(next);
-        grounded = next.grounded_context;
-        answerRoute = resolveAnswerRoute(next, question, contextHits, productConfig);
-        extractivePreview = resolveBestExtractiveAnswer(
-          question,
-          contextHits,
-          next.symbol_entities,
-          next.grounded_context?.sources,
-        );
-        structuredAnswer = resolveStructuredAnswer(next);
+        setLastSearch(searchResult);
+        grounded = searchResult.grounded_context;
+        answerRoute = resolveAnswerRoute(searchResult, question, contextHits, productConfig);
+        extractivePreview = answerIntent() === 'explain_symbol'
+          ? resolveBestExtractiveAnswer(
+            question,
+            contextHits,
+            searchResult.symbol_entities,
+            searchResult.grounded_context?.sources,
+          )
+          : null;
+        structuredAnswer = resolveStructuredAnswer(searchResult);
       };
 
       /** Cap at one extra retrieval. Skip when extractive/structured already won. */
@@ -601,6 +657,7 @@ export default function KnowledgeChatPanel() {
           mode,
           top_k: topK,
           search_scope: searchScope,
+          intent_override: searchIntentResult.intent,
         });
         if (isStale()) return true;
         appendSearchNotices(second);
@@ -609,12 +666,14 @@ export default function KnowledgeChatPanel() {
         } else {
           // Still adopt second-pass extractive/evidence if the first pass had none.
           const secondHits = filterHitsForContext(second.hits, question);
-          const secondExtractive = resolveBestExtractiveAnswer(
-            question,
-            secondHits,
-            second.symbol_entities,
-            second.grounded_context?.sources,
-          );
+          const secondExtractive = answerIntent() === 'explain_symbol'
+            ? resolveBestExtractiveAnswer(
+              question,
+              secondHits,
+              second.symbol_entities,
+              second.grounded_context?.sources,
+            )
+            : null;
           if (secondExtractive || resolveStructuredAnswer(second)) {
             applySearchState(second);
           }
@@ -631,14 +690,13 @@ export default function KnowledgeChatPanel() {
         if (isStale()) return;
       }
 
-      const formatAnswer = (text: string, skipQualityGate = false, demoMode = false) => formatKnowledgeAnswer(
+      const formatAnswer = (text: string, skipQualityGate = false) => formatKnowledgeAnswer(
         text,
         citationHitsForAnswer,
         {
           question,
           notFoundFallback: KC_NOT_FOUND_MESSAGE,
           skipQualityGate,
-          demoMode,
           preferredCitation: searchResult.structured_answer
             ? {
               file_name: searchResult.structured_answer.source_file,
@@ -762,9 +820,7 @@ export default function KnowledgeChatPanel() {
           if (fallback) return { text: formatAnswer(fallback, true) };
         }
 
-        const demoActive = searchResult.demo_cheatsheet_active === true;
-        const demoPinnedPaths = pinPathsFromDemoSearch(searchResult.demo_pinned_paths);
-        const systemPrompt = systemPromptForQuestion(question, searchResult.answer_mode, demoActive);
+        const systemPrompt = systemPromptForQuestion(question, searchResult.answer_mode);
 
         const retrievalPool = bundledHits.length ? bundledHits : contextHits;
         let contextBlock = '';
@@ -777,21 +833,18 @@ export default function KnowledgeChatPanel() {
         if (searchContextReady) {
           contextBlock = grounded!.context_block;
           attachedSources = grounded!.sources;
-          setGenerationStatus(demoActive
-            ? 'Using cheatsheet-guided evidence from search...'
-            : 'Using indexed evidence from search...');
+          setGenerationStatus('Using indexed evidence from search...');
         } else {
           setGenerationStatus('Reading indexed folder catalog...');
           const catalog = await kcBuildFileCatalog(activeCollection.id);
           if (isStale()) return { text: '' };
 
           let selectedPaths = mergeSelectedPaths(
-            demoPinnedPaths,
             pathsFromRetrievalHits(retrievalPool, catalog),
             boostSelectedPathsFromQuery(question, catalog, retrievalPool),
           );
 
-          if (!selectedPaths.length && !shouldSkipCatalogFilePick(demoPinnedPaths)) {
+          if (!selectedPaths.length) {
             setGenerationStatus('Selecting relevant files...');
             const selectionPrompt = buildFileSelectionPrompt(question, catalog, retrievalPool);
             const selectionRaw = await streamGenerate(
@@ -821,15 +874,19 @@ export default function KnowledgeChatPanel() {
 
         // After files are attached, rebuild extractive — this is the handleSend path:
         // exact function body present, but Tree-sitter/chunk extractive missed earlier.
-        const extractiveFromAttached = resolveBestExtractiveAnswer(
-          question,
-          contextHits,
-          searchResult.symbol_entities,
-          attachedSources,
-        );
-        if (shouldSkipLlmForExtractive(question, extractiveFromAttached)) {
-          extractivePreview = extractiveFromAttached;
-          return { text: formatAnswer(extractiveFromAttached!, true) };
+        // Only for explain_symbol — list/locate/imports use structured specialists instead.
+        let extractiveFromAttached: string | null = null;
+        if (effectiveAnswerIntent(searchResult) === 'explain_symbol') {
+          extractiveFromAttached = resolveBestExtractiveAnswer(
+            question,
+            contextHits,
+            searchResult.symbol_entities,
+            attachedSources,
+          );
+          if (shouldSkipLlmForExtractive(question, extractiveFromAttached)) {
+            extractivePreview = extractiveFromAttached;
+            return { text: formatAnswer(extractiveFromAttached!, true) };
+          }
         }
 
         if (!contextBlock.trim()) {
@@ -845,9 +902,7 @@ export default function KnowledgeChatPanel() {
         }
         if (isStale()) return { text: '' };
 
-        const groundedPrompt = demoActive && searchResult.demo_cheatsheet_block?.trim()
-          ? buildDemoGroundedPrompt(question, searchResult.demo_cheatsheet_block, contextBlock)
-          : buildBundledGroundedPrompt(question, contextBlock);
+        const groundedPrompt = buildBundledGroundedPrompt(question, contextBlock);
 
         setGenerationStatus('Generating grounded answer...');
 
@@ -873,7 +928,7 @@ export default function KnowledgeChatPanel() {
         }
         if (isStale()) return { text: '' };
 
-        let finalText = formatAnswer(draftAnswer || KC_NOT_FOUND_MESSAGE, true, demoActive);
+        let finalText = formatAnswer(draftAnswer || KC_NOT_FOUND_MESSAGE, true);
         const groundedOk = groundingCheck(finalText, contextHits, question, 0.35, attachedSources);
         const bestExtractive = extractiveFromAttached
           || extractivePreview
@@ -978,10 +1033,65 @@ export default function KnowledgeChatPanel() {
         ? { ...item, content: `**Grounded chat failed:** ${msg}` }
         : item));
     } finally {
+      sendInFlightRef.current = false;
       setIsGenerating(false);
       setGenerationStatus(null);
     }
   };
+
+  sendMessageRef.current = sendMessage;
+
+  // TODO(overnight-eval): REMOVE — auto-ask 5 code questions overnight, then stop
+  useEffect(() => {
+    if (!isOvernightEvalEnabled()) return;
+    if (!chatReady || !conversationId || conversationLoading) return;
+    if (overnightStartedRef.current) return;
+    overnightStartedRef.current = true;
+
+    let cancelled = false;
+    const total = OVERNIGHT_QUESTIONS.length;
+
+    (async () => {
+      console.info('[overnight-eval] Starting queue of', total, 'questions');
+      setOvernightProgress({ completed: 0, total, running: true, asking: 1 });
+      await sleep(OVERNIGHT_START_DELAY_MS);
+      for (let i = 0; i < total; i++) {
+        if (cancelled) return;
+        const question = OVERNIGHT_QUESTIONS[i];
+        setOvernightProgress({ completed: i, total, running: true, asking: i + 1 });
+        console.info(`[overnight-eval] Asking ${i + 1}/${total}:`, question);
+        try {
+          await sendMessageRef.current(question);
+        } catch (err) {
+          console.error(`[overnight-eval] Question ${i + 1} failed; continuing`, err);
+        }
+        if (cancelled) return;
+        const completed = i + 1;
+        setOvernightProgress({
+          completed,
+          total,
+          running: completed < total,
+          asking: completed < total ? completed + 1 : null,
+        });
+        if (completed < total) {
+          await sleep(OVERNIGHT_BETWEEN_DELAY_MS);
+        }
+      }
+      if (!cancelled) {
+        console.info('[overnight-eval] Queue finished');
+        setOvernightProgress({ completed: total, total, running: false, asking: null });
+      }
+    })().catch(err => {
+      console.error('[overnight-eval] Queue aborted', err);
+      if (!cancelled) {
+        setOvernightProgress(prev => (prev ? { ...prev, running: false, asking: null } : null));
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [chatReady, conversationId, conversationLoading]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -1005,7 +1115,7 @@ export default function KnowledgeChatPanel() {
             onChange={e => void setKnowledgeChatMode(e.target.value as KcKnowledgeChatMode)}
             className="input-field text-sm"
             aria-label="Knowledge Chat mode"
-            title="Folder Q&A uses cheatsheet-guided retrieval; Codebase Explorer adds a repo map and symbol-first code retrieval."
+            title="Folder Q&A uses grounded retrieval; Codebase Explorer adds a repo map and symbol-first code retrieval."
           >
             <option value="folder_qa">Folder Q&amp;A</option>
             <option value="codebase_explorer">Codebase Explorer</option>
@@ -1038,6 +1148,22 @@ export default function KnowledgeChatPanel() {
       {!chatReady && (
         <div className="rounded-2xl border border-amber-200/70 dark:border-amber-900 bg-amber-50/85 dark:bg-amber-950/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200 mb-4">
           Select a ready collection and a local model before chatting. Build the index in the panel above first.
+        </div>
+      )}
+
+      {/* TODO(overnight-eval): REMOVE — temporary overnight progress banner */}
+      {overnightProgress && (
+        <div className="mb-4 rounded-2xl border border-orange-300/80 dark:border-orange-800 bg-orange-50/90 dark:bg-orange-950/30 px-4 py-3 text-sm text-orange-900 dark:text-orange-100">
+          <span className="font-semibold">Overnight eval (TEMP):</span>{' '}
+          {overnightProgress.completed}/{overnightProgress.total}
+          {overnightProgress.running && overnightProgress.asking != null
+            ? ` — asking #${overnightProgress.asking}`
+            : overnightProgress.completed >= overnightProgress.total
+              ? ' — done'
+              : ''}
+          <span className="block text-xs mt-1 opacity-80">
+            REMOVE AFTER OVERNIGHT EVAL — disable via OVERNIGHT_AUTO_EVAL or localStorage kc-overnight-eval=0
+          </span>
         </div>
       )}
 
@@ -1173,7 +1299,7 @@ export default function KnowledgeChatPanel() {
           disabled={!chatReady || isGenerating || conversationLoading}
         />
         <div className="flex sm:flex-col gap-2">
-          <button type="button" onClick={sendMessage} disabled={!chatReady || isGenerating || conversationLoading || !input.trim()} className="btn-primary flex items-center justify-center gap-2">
+          <button type="button" onClick={() => void sendMessage()} disabled={!chatReady || isGenerating || conversationLoading || !input.trim()} className="btn-primary flex items-center justify-center gap-2">
             {isGenerating ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
             Ask
           </button>

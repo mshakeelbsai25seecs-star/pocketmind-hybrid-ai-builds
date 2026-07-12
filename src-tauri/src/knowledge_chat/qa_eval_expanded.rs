@@ -148,19 +148,25 @@ mod tests {
     fn qa_intent_classifier_recall_gate() {
         let questions = qa_all_eval_questions();
         assert!(!questions.is_empty());
+        let mut misses = Vec::new();
         let structured = questions
             .iter()
             .filter(|q| {
                 let c = classify_with_confidence(q);
-                c.intent != QueryIntent::General && c.confidence >= 0.55
+                let ok = c.intent != QueryIntent::General && c.confidence >= 0.55;
+                if !ok {
+                    misses.push(format!("{q:?} -> {:?} conf={:.2}", c.intent, c.confidence));
+                }
+                ok
             })
             .count();
         let rate = structured as f64 / questions.len() as f64;
         assert!(
             rate >= 0.85,
-            "intent recall {:.0}% below 85% gate ({structured}/{})",
+            "intent recall {:.0}% below 85% gate ({structured}/{}) misses: {}",
             rate * 100.0,
-            questions.len()
+            questions.len(),
+            misses.join(" | ")
         );
     }
 

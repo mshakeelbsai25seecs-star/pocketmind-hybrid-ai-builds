@@ -1,6 +1,6 @@
 //! Codebase Explorer mode: repo map + symbol-first retrieval over the same local index.
 //!
-//! Unlike Knowledge Chat (cheatsheet-guided document QA), this mode is tuned for
+//! Unlike Folder Q&A (document-oriented grounded RAG), this mode is tuned for
 //! engineering questions like "what does handleSend do?" or "where is hybrid search?".
 //! It builds a compact repo map from the file catalog plus Tree-sitter symbols, and
 //! hard-pins matching code entities (whole function/class bodies) ahead of chunk RAG.

@@ -80,6 +80,7 @@ pub async fn run_eval(
                     query_dense_vector: None,
                     filters: None,
                     search_scope: Some(scope),
+                    intent_override: None,
                     partition_query_vectors: Vec::new(),
                 },
             )?
@@ -263,6 +264,7 @@ async fn run_production_search(
         query_dense_vector: None,
         filters: None,
         search_scope: Some(scope),
+        intent_override: None,
         partition_query_vectors: embeds.vectors,
     };
 

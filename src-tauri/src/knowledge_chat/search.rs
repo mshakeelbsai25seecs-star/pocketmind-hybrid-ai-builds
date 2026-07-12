@@ -14,21 +14,21 @@ use crate::knowledge_chat::rerank::rerank_hits;
 use crate::knowledge_chat::partitions::{KcPartitionId, KcSearchScope};
 use crate::knowledge_chat::parent_merge::auto_merge_parent_hits;
 use crate::knowledge_chat::retrieval_config::RetrievalConfig;
-use crate::knowledge_chat::search_filters::{derive_search_filters, filters_are_empty};
+use crate::knowledge_chat::search_filters::{derive_search_filters_with_intent, filters_are_empty};
 use crate::knowledge_chat::types::{
     KcAnswerMode, KcChunkRecord, KcCollectionStatus, KcIntentMatch, KcQueryRewriteResult,
     KcRetrievalConfidence, KcRetrievalMode, KcSearchFilters, KcSearchHit, KcSearchRequest, KcSearchResult,
     KC_FTS_RESULT_LIMIT,
 };
 use crate::knowledge_chat::context_assembly::build_grounded_context;
-use crate::knowledge_chat::demo_cheatsheet::{self, DemoCheatsheetMatch};
 use crate::knowledge_chat::evidence_answer::{build_evidence_items, format_evidence_answer};
 use crate::knowledge_chat::query_intent::{
-    classify_query_intent, extract_error_code, extract_file_hint, QueryIntent,
+    classify_query_intent, extract_error_code, extract_file_hint, is_code_oriented_intent,
+    QueryIntent,
 };
 use crate::knowledge_chat::intent_classifier::classify_with_confidence;
 use crate::knowledge_chat::source_confidence::apply_source_confidence;
-use crate::knowledge_chat::structured_answer::try_structured_answer;
+use crate::knowledge_chat::structured_answer::{try_structured_answer_with_intent};
 use crate::product;
 use std::collections::{HashMap, HashSet};
 
@@ -93,7 +93,9 @@ pub fn hybrid_search_begin(db: &Database, request: KcSearchRequest) -> AppResult
     let mut auto_filters_applied = None;
     let mut request = request;
     if filters_are_empty(&request.filters) {
-        if let Some(derived) = derive_search_filters(&query) {
+        if let Some(derived) =
+            derive_search_filters_with_intent(&query, request.intent_override)
+        {
             auto_filters_applied = Some(derived.clone());
             request.filters = Some(derived);
         }
@@ -183,26 +185,11 @@ pub fn hybrid_search_complete(
     )
     .unwrap_or_default();
 
-    let mut demo_match = DemoCheatsheetMatch {
-        entries: Vec::new(),
-        pinned_paths: Vec::new(),
-        prompt_block: String::new(),
-    };
-    let mut demo_cheatsheet_active = false;
-    if product_cfg.knowledge_chat_demo_cheatsheet {
-        if let Some(sheet) =
-            demo_cheatsheet::load_cheatsheet_for_collection(&collection.name, &collection.root_path)
-        {
-            demo_match = demo_cheatsheet::match_cheatsheet(&pending.query, &sheet);
-            demo_cheatsheet_active = !demo_match.entries.is_empty();
-        }
-    }
-
     let mut grounded_context = build_grounded_context(
         &collection.name,
         &collection.root_path,
         &hits,
-        &demo_match.pinned_paths,
+        &[],
         min_context,
         min_generation,
         None,
@@ -216,11 +203,22 @@ pub fn hybrid_search_complete(
     }
 
     let structured_answer = if !hits.is_empty() {
-        try_structured_answer(&retrieval_query, &hits)
+        try_structured_answer_with_intent(
+            &retrieval_query,
+            &hits,
+            pending.request.intent_override,
+        )
     } else {
         None
     };
-    let intent_classification = classify_with_confidence(&retrieval_query);
+    let intent_classification = if let Some(override_intent) = pending.request.intent_override {
+        crate::knowledge_chat::intent_classifier::IntentClassification {
+            intent: override_intent,
+            confidence: 0.95,
+        }
+    } else {
+        classify_with_confidence(&retrieval_query)
+    };
     let detected_intent = intent_classification.intent;
 
     let (mut confidence, confidence_score, mut answer_mode) = assess_confidence(&hits);
@@ -281,13 +279,12 @@ pub fn hybrid_search_complete(
         structured_answer,
         detected_intent: Some(detected_intent),
         intent_confidence: Some(intent_classification.confidence),
-        demo_cheatsheet_block: if demo_cheatsheet_active {
-            Some(demo_match.prompt_block.clone())
+        answer_intent: None,
+        intent_source: if pending.request.intent_override.is_some() {
+            Some("override".to_string())
         } else {
-            None
+            Some("rules".to_string())
         },
-        demo_pinned_paths: demo_match.pinned_paths.clone(),
-        demo_cheatsheet_active,
         symbol_entities,
         parent_merge_applied,
         auto_filters_applied,
@@ -329,9 +326,8 @@ fn intent_short_circuit_result(pending: HybridSearchPending, intent: KcIntentMat
         structured_answer: None,
         detected_intent: None,
         intent_confidence: None,
-        demo_cheatsheet_block: None,
-        demo_pinned_paths: Vec::new(),
-        demo_cheatsheet_active: false,
+        answer_intent: None,
+        intent_source: None,
         symbol_entities: Vec::new(),
         parent_merge_applied: false,
         auto_filters_applied,
@@ -448,7 +444,10 @@ fn search_single(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     pool.truncate((top_k * 3).max(top_k));
-    let mmr_lambda = mmr_lambda_for_intent(classify_query_intent(query));
+    let intent = request
+        .intent_override
+        .unwrap_or_else(|| classify_query_intent(query));
+    let mmr_lambda = mmr_lambda_for_intent(intent);
     let selected = mmr_select(&pool, &chunks, &fused_scores, top_k, mmr_lambda);
 
     let effective_mode = normalize_mode(&request.mode, dense_available, query_dense_present);
@@ -506,9 +505,8 @@ fn search_single(
         structured_answer: None,
         detected_intent: None,
         intent_confidence: None,
-        demo_cheatsheet_block: None,
-        demo_pinned_paths: Vec::new(),
-        demo_cheatsheet_active: false,
+        answer_intent: None,
+        intent_source: None,
         symbol_entities: Vec::new(),
         parent_merge_applied: false,
         auto_filters_applied: None,
@@ -543,9 +541,8 @@ fn empty_result(request: &KcSearchRequest, query: &str) -> KcSearchResult {
         structured_answer: None,
         detected_intent: None,
         intent_confidence: None,
-        demo_cheatsheet_block: None,
-        demo_pinned_paths: Vec::new(),
-        demo_cheatsheet_active: false,
+        answer_intent: None,
+        intent_source: None,
         symbol_entities: Vec::new(),
         parent_merge_applied: false,
         auto_filters_applied: None,
@@ -848,10 +845,11 @@ fn accumulate_rrf(scores: &mut [f64], ranked: &[(usize, f64)], rrf_k: f64) {
 
 fn mmr_lambda_for_intent(intent: QueryIntent) -> f64 {
     match intent {
-        QueryIntent::CodeSymbol | QueryIntent::ErrorCode | QueryIntent::EnvVar => 0.92,
+        intent if is_code_oriented_intent(intent) || matches!(intent, QueryIntent::ErrorCode) => 0.92,
         QueryIntent::RunbookStep => 0.70,
         QueryIntent::Timeline => 0.80,
         QueryIntent::General => 0.45,
+        _ => 0.45,
     }
 }
 

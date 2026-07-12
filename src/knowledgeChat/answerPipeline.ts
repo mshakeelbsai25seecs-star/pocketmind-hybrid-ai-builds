@@ -1,8 +1,8 @@
 import type { ProductConfig } from '../productConfig';
 import type { AnswerRoute } from './answerRouting';
 import { isWeakGrounding } from './answerRouting';
-import { isCodeSymbolQuestion } from './prompts';
-import type { KcSearchHit, KcSearchResult } from './types';
+import { effectiveAnswerIntent } from './types';
+import type { KcSearchHit, KcSearchResult, QueryIntent } from './types';
 
 /**
  * Modular answer pipeline.
@@ -38,7 +38,7 @@ export interface AnswerContext {
   extractivePreview: string | null;
   isStale: () => boolean;
   /** Apply the shared quality gate / citation formatting to a raw answer string. */
-  formatAnswer: (text: string, skipQualityGate?: boolean, demoMode?: boolean) => string;
+  formatAnswer: (text: string, skipQualityGate?: boolean) => string;
   /** Run the Codebase Explorer flow; returns formatted text, or null to fall through. */
   resolveExplorer: () => Promise<string | null>;
   /** Resolve a deterministic evidence answer; returns formatted text, or null. */
@@ -70,26 +70,36 @@ export function isMultiFileQuestion(question: string): boolean {
   );
 }
 
+function answerIntent(ctx: AnswerContext): QueryIntent {
+  return effectiveAnswerIntent(ctx.searchResult);
+}
+
 const stages: AnswerStage[] = [
   {
     id: 'structured',
+    // Specialists only when answer_intent matches (structured already intent-tagged).
     canHandle: ctx => ctx.answerRoute === 'structured' && !!ctx.structuredAnswer,
     execute: async ctx => ({ text: ctx.formatAnswer(ctx.structuredAnswer!, true) }),
   },
   {
     id: 'extractive-code-symbol',
-    // Always prefer a ready extractive/symbol answer over Phi-3 synthesis.
-    canHandle: ctx => !!ctx.extractivePreview,
+    // Prefer extractive only for explain_symbol — list/locate use structured instead.
+    canHandle: ctx => !!ctx.extractivePreview && answerIntent(ctx) === 'explain_symbol',
     execute: async ctx => ({ text: ctx.formatAnswer(ctx.extractivePreview!, true) }),
   },
   {
     id: 'codebase-explorer',
     // Reserve the Explorer LLM for cross-file questions where no extractive answer
-    // exists. Single-symbol questions are served by the extractive stage above.
+    // exists. Single-symbol explain questions stay on the extractive stage above.
     canHandle: ctx =>
       ctx.explorerMode
       && !ctx.extractivePreview
-      && (isMultiFileQuestion(ctx.question) || !isCodeSymbolQuestion(ctx.question)),
+      && answerIntent(ctx) !== 'list_symbols_in_file'
+      && (
+        isMultiFileQuestion(ctx.question)
+        || answerIntent(ctx) === 'general'
+        || answerIntent(ctx) !== 'explain_symbol'
+      ),
     execute: async ctx => {
       const text = await ctx.resolveExplorer();
       return text ? { text } : null;
@@ -115,8 +125,11 @@ const stages: AnswerStage[] = [
     id: 'corrective-rag',
     canHandle: ctx => isWeakGrounding(ctx.contextHits, ctx.productConfig),
     execute: async ctx => {
-      if (ctx.extractivePreview) {
+      if (ctx.extractivePreview && answerIntent(ctx) === 'explain_symbol') {
         return { text: ctx.formatAnswer(ctx.extractivePreview, true) };
+      }
+      if (ctx.structuredAnswer) {
+        return { text: ctx.formatAnswer(ctx.structuredAnswer, true) };
       }
       const evidence = ctx.resolveEvidence();
       if (evidence) return { text: evidence };
@@ -125,10 +138,11 @@ const stages: AnswerStage[] = [
   },
   {
     id: 'llm-synthesis',
-    // Never synthesize when extractive already answered a code-symbol question.
+    // Never synthesize when extractive already answered an explain_symbol question.
+    // general skips false extractive (extractivePreview gated above).
     canHandle: ctx => !(
       !!ctx.extractivePreview
-      && isCodeSymbolQuestion(ctx.question)
+      && answerIntent(ctx) === 'explain_symbol'
     ),
     execute: async ctx => ctx.resolveLlm(),
   },

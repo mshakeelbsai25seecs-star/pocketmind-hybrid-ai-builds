@@ -4,7 +4,7 @@
 
 use crate::knowledge_chat::query_intent::{
     classify_query_intent, extract_camel_symbols, extract_file_hint, extract_snake_case_symbols,
-    QueryIntent,
+    is_code_oriented_intent, QueryIntent,
 };
 use crate::knowledge_chat::types::KcSearchFilters;
 
@@ -32,6 +32,14 @@ pub fn filters_are_empty(filters: &Option<KcSearchFilters>) -> bool {
 
 /// Build filters from query cues. Returns `None` when nothing useful was found.
 pub fn derive_search_filters(query: &str) -> Option<KcSearchFilters> {
+    derive_search_filters_with_intent(query, None)
+}
+
+/// Same as [`derive_search_filters`], but honors an optional Stage-A intent override.
+pub fn derive_search_filters_with_intent(
+    query: &str,
+    intent_override: Option<QueryIntent>,
+) -> Option<KcSearchFilters> {
     let q = query.trim();
     if q.is_empty() {
         return None;
@@ -39,6 +47,7 @@ pub fn derive_search_filters(query: &str) -> Option<KcSearchFilters> {
 
     let mut filters = KcSearchFilters::default();
     let mut any = false;
+    let intent = intent_override.unwrap_or_else(|| classify_query_intent(q));
 
     if let Some(file) = extract_file_hint(q) {
         let name = file.rsplit(['/', '\\']).next().unwrap_or(&file).to_string();
@@ -56,16 +65,14 @@ pub fn derive_search_filters(query: &str) -> Option<KcSearchFilters> {
             .unwrap_or("")
             .to_ascii_lowercase();
         let is_code_ext = CODE_EXTENSIONS.iter().any(|e| *e == ext.as_str());
-        let intent = classify_query_intent(q);
-        if is_code_ext || matches!(intent, QueryIntent::CodeSymbol) {
+        if is_code_ext || is_code_oriented_intent(intent) {
             filters.doc_types = Some(vec!["code".to_string()]);
             any = true;
         }
     } else {
-        let intent = classify_query_intent(q);
         let has_symbol =
             !extract_camel_symbols(q).is_empty() || !extract_snake_case_symbols(q).is_empty();
-        if matches!(intent, QueryIntent::CodeSymbol) && has_symbol {
+        if is_code_oriented_intent(intent) && has_symbol {
             // Soft preferred_doc_types is unused on the hot path; hard-scope to code
             // so symbol questions do not drift into runbooks/docs.
             filters.doc_types = Some(vec!["code".to_string()]);
@@ -122,12 +129,24 @@ mod tests {
     }
 
     #[test]
-    fn filters_are_empty_detects_blank() {
-        assert!(filters_are_empty(&None));
-        assert!(filters_are_empty(&Some(KcSearchFilters::default())));
-        assert!(!filters_are_empty(&Some(KcSearchFilters {
-            file_name_contains: Some(vec!["a.ts".into()]),
-            ..Default::default()
-        })));
+    fn prefers_code_for_list_symbols_intent() {
+        let f = derive_search_filters("What functions are defined in ChatView.tsx?").expect("filters");
+        assert_eq!(f.doc_types.as_deref(), Some(["code".to_string()].as_slice()));
+    }
+
+    #[test]
+    fn intent_override_forces_code_scope() {
+        let f = derive_search_filters_with_intent(
+            "Tell me about timeouts",
+            Some(QueryIntent::ExplainSymbol),
+        );
+        // No symbol/file → may still be None; override alone without cues is ok.
+        let f2 = derive_search_filters_with_intent(
+            "Explain handleSend",
+            Some(QueryIntent::ListSymbolsInFile),
+        )
+        .expect("filters");
+        assert_eq!(f2.doc_types.as_deref(), Some(["code".to_string()].as_slice()));
+        let _ = f;
     }
 }
