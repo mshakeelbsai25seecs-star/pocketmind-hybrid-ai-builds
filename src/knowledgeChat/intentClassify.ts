@@ -32,7 +32,7 @@ const STAGE_A_SYSTEM = [
   '- list_symbols_in_file: list functions/classes/exports in a named file (NOT explain one body).',
   '- locate_definition: where is X defined / which file (short locate, not full explain).',
   '- file_imports: what does a file import (not symbol list / explain).',
-  '- env_var: environment variable name and/or default.',
+  '- env_var: environment variable name and/or default (including "from the environment" / timeout default).',
   '- error_code: named error code meaning.',
   '- runbook_step: what should I do / first incident steps.',
   '- timeline: how long / duration.',
@@ -46,7 +46,9 @@ const STAGE_B_SYSTEM = [
   'Prefer list_symbols_in_file when the question asks what functions/methods/classes are in a file',
   'and snippets show multiple symbols in that file.',
   'Prefer explain_symbol for one named symbol with explain/describe verbs.',
-  'Prefer locate_definition for where/which-file questions.',
+  'Prefer locate_definition for where/which-file questions about a named symbol.',
+  'Prefer env_var when the question asks for an environment variable name and/or its default',
+  '(including "from the environment" / timeout default) — not locate_definition.',
   'Prefer file_imports for import/dependency questions.',
   'Use general when no specialist applies — never guess a specialist.',
 ].join(' ');
@@ -83,7 +85,10 @@ export function vetoSearchIntent(question: string): QueryIntent | null {
   if (
     q.includes('environment variable')
     || q.includes('env var')
+    || q.includes('from the environment')
+    || q.includes('from environment')
     || /\bNEXUS_[A-Z0-9_]+\b/.test(question)
+    || (q.includes('timeout') && (q.includes('default') || q.includes('environ') || /\benv\b/.test(q)))
   ) {
     return 'env_var';
   }
@@ -140,7 +145,12 @@ export function classifyRulesSearchIntent(question: string): QueryIntent {
     return 'file_imports';
   }
 
-  if (isLocateDefinitionQuestion(q)) {
+  // Env/timeout+default before locate — "Where is … from the environment" is env_var.
+  if (isEnvVarQuestion(question)) {
+    return 'env_var';
+  }
+
+  if (isLocateDefinitionQuestion(question)) {
     return 'locate_definition';
   }
 
@@ -181,7 +191,8 @@ export function classifyRulesAnswerIntent(
   }
 
   if (isFileImportsQuestion(q)) return 'file_imports';
-  if (isLocateDefinitionQuestion(q)) return 'locate_definition';
+  if (isEnvVarQuestion(question)) return 'env_var';
+  if (isLocateDefinitionQuestion(question)) return 'locate_definition';
 
   const camels = extractCamelSymbols(question);
   if (
@@ -382,7 +393,24 @@ function isFileImportsQuestion(q: string): boolean {
     && !isListSymbolsQuestion(q);
 }
 
-function isLocateDefinitionQuestion(q: string): boolean {
+function isEnvVarQuestion(question: string): boolean {
+  const q = question.toLowerCase();
+  if (
+    q.includes('environment variable')
+    || q.includes('env var')
+    || q.includes('from the environment')
+    || q.includes('from environment')
+    || /\bnexus_[a-z0-9_]+\b/i.test(question)
+  ) {
+    return true;
+  }
+  return q.includes('timeout')
+    && (q.includes('default') || q.includes('environ') || /\benv\b/.test(q));
+}
+
+function isLocateDefinitionQuestion(question: string): boolean {
+  if (isEnvVarQuestion(question)) return false;
+  const q = question.toLowerCase();
   return q.includes('where is')
     || q.includes('where are')
     || q.includes('which file')

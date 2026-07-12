@@ -51,11 +51,36 @@ pub fn try_structured_answer_with_intent(
     }
 
     let ranked = rank_hits_for_intent(query, intent, hits);
+
+    if matches!(intent, QueryIntent::EnvVar) {
+        for hit in &ranked {
+            if let Some(answer) = extract_env_var_answer(query, hit) {
+                let confidence = hit
+                    .chunk
+                    .source_confidence
+                    .unwrap_or(0.0)
+                    .max(answer.confidence);
+                if confidence < MIN_STRUCTURED_CONFIDENCE && confidence < 0.35 {
+                    continue;
+                }
+                return Some(StructuredAnswer {
+                    intent,
+                    answer_text: answer.text,
+                    confidence,
+                    source_file: hit.chunk.file_name.clone(),
+                    line_start: hit.chunk.line_start,
+                    line_end: hit.chunk.line_end,
+                });
+            }
+        }
+        return None;
+    }
+
     let hit = ranked.first()?;
 
     let answer = match intent {
         QueryIntent::ErrorCode => extract_error_code_answer(query, hit)?,
-        QueryIntent::EnvVar => extract_env_var_answer(query, hit)?,
+        QueryIntent::EnvVar => unreachable!("EnvVar handled above"),
         QueryIntent::RunbookStep => extract_runbook_step_answer(query, hit)?,
         QueryIntent::Timeline => extract_timeline_answer(query, hit)?,
         QueryIntent::ExplainSymbol => {
@@ -392,6 +417,11 @@ pub fn try_list_symbols_in_file_answer(query: &str, hits: &[KcSearchHit]) -> Opt
             if kind_l == "module" || name_l == "module_preamble" || name_l == "file" {
                 continue;
             }
+            if prefers_callable_symbols(query)
+                && !looks_like_real_callable(name, kind, &excerpt_text(hit))
+            {
+                continue;
+            }
             if symbols
                 .iter()
                 .any(|(n, _, _)| n.eq_ignore_ascii_case(name))
@@ -399,6 +429,18 @@ pub fn try_list_symbols_in_file_answer(query: &str, hits: &[KcSearchHit]) -> Opt
                 continue;
             }
             symbols.push((name.clone(), kind.clone(), hit.chunk.line_start));
+        }
+    }
+
+    // Prefer real callables when the question asks for functions/methods/classes.
+    if prefers_callable_symbols(query) {
+        let callables: Vec<_> = symbols
+            .iter()
+            .filter(|(_, kind, _)| is_callable_entity_kind(kind))
+            .cloned()
+            .collect();
+        if !callables.is_empty() {
+            symbols = callables;
         }
     }
 
@@ -451,6 +493,41 @@ pub fn try_list_symbols_in_file_answer(query: &str, hits: &[KcSearchHit]) -> Opt
         line_start: source.chunk.line_start,
         line_end: source.chunk.line_end,
     })
+}
+
+fn prefers_callable_symbols(query: &str) -> bool {
+    let q = query.to_lowercase();
+    q.contains("function") || q.contains("method") || q.contains("class") || q.contains("export")
+}
+
+fn is_callable_entity_kind(kind: &str) -> bool {
+    matches!(
+        kind.to_lowercase().as_str(),
+        "function" | "method" | "class" | "interface" | "struct" | "trait"
+    )
+}
+
+/// Drop mis-tagged locals (e.g. `const content = input.trim()` indexed as function).
+fn looks_like_real_callable(name: &str, kind: &str, body: &str) -> bool {
+    if !is_callable_entity_kind(kind) {
+        return false;
+    }
+    let body_l = body.to_lowercase();
+    if body_l.contains("=>")
+        || body_l.contains("function ")
+        || body_l.contains("function(")
+        || body_l.contains("def ")
+        || body_l.contains("async def ")
+        || body_l.contains(" fn ")
+        || body_l.starts_with("fn ")
+        || body_l.starts_with("pub fn ")
+        || body_l.starts_with("async ")
+        || body_l.contains("class ")
+    {
+        return true;
+    }
+    // No callable syntax in excerpt — keep CamelCase / snake_case names only.
+    name.chars().any(|c| c.is_uppercase()) || name.contains('_')
 }
 
 fn extract_defs_from_text(text: &str) -> Vec<(String, String, Option<i32>)> {
@@ -938,6 +1015,69 @@ mod tests {
         let answer =
             try_structured_answer("What environment variable controls the API timeout?", &hits).unwrap();
         assert!(answer.answer_text.contains("NEXUS_API_TIMEOUT"));
+    }
+
+    #[test]
+    fn qa_timeout_from_environment_not_locate_stub() {
+        let text = include_str!("../../../test-fixtures/kc-qa-corpus/code/config_loader.py");
+        let hits = vec![hit(
+            "config_loader.py",
+            "code",
+            text,
+            0.9,
+            Some(("function", "load_api_timeout")),
+            Some((9, 17)),
+        )];
+        let q =
+            "Where is the API timeout read from the environment and what is its default?";
+        assert_eq!(classify_query_intent(q), QueryIntent::EnvVar);
+        let answer = try_structured_answer(q, &hits).unwrap();
+        assert_eq!(answer.intent, QueryIntent::EnvVar);
+        assert!(answer.answer_text.contains("NEXUS_API_TIMEOUT"));
+        assert!(answer.answer_text.contains("30"));
+        assert!(
+            !answer.answer_text.starts_with("`load_api_timeout`"),
+            "must not be a locate_definition stub"
+        );
+    }
+
+    #[test]
+    fn qa_list_symbols_skips_non_callable_const() {
+        let hits = vec![
+            hit(
+                "ChatView.tsx",
+                "code",
+                "const handleSend = async () => {}",
+                0.9,
+                Some(("function", "handleSend")),
+                Some((10, 16)),
+            ),
+            hit(
+                "ChatView.tsx",
+                "code",
+                "const content = input.trim();",
+                0.85,
+                // Legacy mis-tag from Tree-sitter defaulting variable_declarator → function
+                Some(("function", "content")),
+                Some((12, 12)),
+            ),
+            hit(
+                "ChatView.tsx",
+                "code",
+                "const handleKeyDown = (e) => {}",
+                0.85,
+                Some(("function", "handleKeyDown")),
+                Some((18, 23)),
+            ),
+        ];
+        let answer =
+            try_structured_answer("What functions are defined in ChatView.tsx?", &hits).unwrap();
+        assert!(answer.answer_text.contains("handleSend"));
+        assert!(answer.answer_text.contains("handleKeyDown"));
+        assert!(
+            !answer.answer_text.contains("`content`"),
+            "must not list nested/non-callable const as a function"
+        );
     }
 
     #[test]

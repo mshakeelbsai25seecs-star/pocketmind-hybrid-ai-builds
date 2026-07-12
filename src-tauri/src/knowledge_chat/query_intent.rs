@@ -73,10 +73,7 @@ pub fn veto_query_intent(query: &str) -> Option<QueryIntent> {
         return Some(QueryIntent::ErrorCode);
     }
 
-    if q.contains("environment variable")
-        || q.contains("env var")
-        || query.split_whitespace().any(|w| w.starts_with("NEXUS_"))
-    {
+    if is_env_var_question(query) {
         return Some(QueryIntent::EnvVar);
     }
 
@@ -143,6 +140,12 @@ pub fn classify_query_intent(query: &str) -> QueryIntent {
         || q.contains("business day")
     {
         return QueryIntent::Timeline;
+    }
+
+    // Env / timeout+default before locate — "Where is the API timeout read from the
+    // environment…" must not win as locate_definition (citation stub only).
+    if is_env_var_question(query) {
+        return QueryIntent::EnvVar;
     }
 
     if is_list_symbols_question(&q) && extract_file_hint(query).is_some() {
@@ -212,7 +215,26 @@ pub fn is_file_imports_question(q: &str) -> bool {
         && !is_list_symbols_question(&q)
 }
 
+/// Env-var / timeout-default questions (including "from the environment").
+pub fn is_env_var_question(query: &str) -> bool {
+    let q = query.to_lowercase();
+    if q.contains("environment variable")
+        || q.contains("env var")
+        || q.contains("from the environment")
+        || q.contains("from environment")
+        || query.split_whitespace().any(|w| w.starts_with("NEXUS_"))
+    {
+        return true;
+    }
+    // "Where is the API timeout read … and what is its default?"
+    q.contains("timeout")
+        && (q.contains("default") || q.contains("environ") || q.contains("env "))
+}
+
 pub fn is_locate_definition_question(q: &str) -> bool {
+    if is_env_var_question(q) {
+        return false;
+    }
     let q = q.to_lowercase();
     q.contains("where is")
         || q.contains("where are")
@@ -392,6 +414,27 @@ mod tests {
         );
         assert_eq!(
             classify_query_intent("which file defines load_api_timeout"),
+            QueryIntent::LocateDefinition
+        );
+    }
+
+    #[test]
+    fn classifies_timeout_from_environment_as_env_var() {
+        assert_eq!(
+            classify_query_intent(
+                "Where is the API timeout read from the environment and what is its default?"
+            ),
+            QueryIntent::EnvVar
+        );
+        assert_eq!(
+            veto_query_intent(
+                "Where is the API timeout read from the environment and what is its default?"
+            ),
+            Some(QueryIntent::EnvVar)
+        );
+        // Pure symbol locate still wins when not asking for env/default.
+        assert_eq!(
+            classify_query_intent("Where is load_api_timeout defined?"),
             QueryIntent::LocateDefinition
         );
     }

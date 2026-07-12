@@ -89,16 +89,16 @@ const stages: AnswerStage[] = [
   },
   {
     id: 'codebase-explorer',
-    // Reserve the Explorer LLM for cross-file questions where no extractive answer
-    // exists. Single-symbol explain questions stay on the extractive stage above.
+    // Reserve the Explorer LLM for cross-file / general questions. Specialist
+    // intents (list/locate/env/imports/explain) must not fall through to a
+    // citation-only explorer stub when structured extraction misses.
     canHandle: ctx =>
       ctx.explorerMode
       && !ctx.extractivePreview
-      && answerIntent(ctx) !== 'list_symbols_in_file'
+      && !ctx.structuredAnswer
       && (
         isMultiFileQuestion(ctx.question)
         || answerIntent(ctx) === 'general'
-        || answerIntent(ctx) !== 'explain_symbol'
       ),
     execute: async ctx => {
       const text = await ctx.resolveExplorer();

@@ -34,8 +34,15 @@ fn score_intent_confidence(query: &str, intent: QueryIntent) -> f64 {
             }
         }
         QueryIntent::EnvVar => {
-            if q.contains("environment variable") || q.contains("env var") {
+            if q.contains("environment variable")
+                || q.contains("env var")
+                || q.contains("from the environment")
+                || q.contains("from environment")
+            {
                 score += 0.30;
+            }
+            if q.contains("timeout") && (q.contains("default") || q.contains("environ")) {
+                score += 0.25;
             }
             if query.contains("NEXUS_") {
                 score += 0.20;

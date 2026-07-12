@@ -44,6 +44,22 @@ assert(
   classifyRulesSearchIntent('Where is handleSend defined?') === 'locate_definition',
   'rules locate',
 );
+assert(
+  vetoSearchIntent(
+    'Where is the API timeout read from the environment and what is its default?',
+  ) === 'env_var',
+  'veto env from-the-environment',
+);
+assert(
+  classifyRulesSearchIntent(
+    'Where is the API timeout read from the environment and what is its default?',
+  ) === 'env_var',
+  'rules env timeout+default not locate',
+);
+assert(
+  classifyRulesSearchIntent('Where is load_api_timeout defined?') === 'locate_definition',
+  'symbol locate still locate',
+);
 
 const hits: KcSearchHit[] = [
   {

@@ -155,7 +155,16 @@ fn extract_entities_tree_sitter(
             if entity_name.is_empty() {
                 continue;
             }
-            let kind = kind_from_node(entity_node.kind());
+            let kind = if entity_node.kind() == "variable_declarator" {
+                let kind = kind_for_variable_declarator(entity_node);
+                // Nested locals like `const content = input.trim()` are not top-level symbols.
+                if kind == CodeEntityKind::Const && is_nested_in_callable(entity_node) {
+                    continue;
+                }
+                kind
+            } else {
+                kind_from_node(entity_node.kind())
+            };
             let start = entity_node.start_byte();
             let end = entity_node.end_byte();
             let body = source.get(start..end).unwrap_or("").to_string();
@@ -232,6 +241,46 @@ fn kind_from_node(kind: &str) -> CodeEntityKind {
         k if k.contains("const") => CodeEntityKind::Const,
         _ => CodeEntityKind::Function,
     }
+}
+
+/// `const handleSend = () => {}` → Function; `const content = input.trim()` → Const.
+#[cfg(feature = "code-entities")]
+fn kind_for_variable_declarator(node: tree_sitter::Node) -> CodeEntityKind {
+    if let Some(value) = node.child_by_field_name("value") {
+        let k = value.kind();
+        if k == "arrow_function"
+            || k == "function"
+            || k == "function_expression"
+            || k.contains("function")
+        {
+            return CodeEntityKind::Function;
+        }
+    }
+    CodeEntityKind::Const
+}
+
+/// True when the declarator lives inside a function/method body (not module/class scope).
+#[cfg(feature = "code-entities")]
+fn is_nested_in_callable(node: tree_sitter::Node) -> bool {
+    let mut parent = node.parent();
+    while let Some(p) = parent {
+        let k = p.kind();
+        if k == "arrow_function"
+            || k == "function"
+            || k == "function_expression"
+            || k == "function_declaration"
+            || k == "method_definition"
+            || k == "generator_function"
+            || k == "generator_function_declaration"
+        {
+            return true;
+        }
+        if k == "program" || k == "module" || k == "class_body" {
+            break;
+        }
+        parent = p.parent();
+    }
+    false
 }
 
 #[cfg(feature = "code-entities")]
@@ -447,5 +496,11 @@ mod tests {
         assert!(handle_send.line_start <= 10);
         assert!(handle_send.line_end >= 15);
         assert!(handle_send.line_start >= 10 && handle_send.line_end <= 16);
+        assert_eq!(handle_send.kind, CodeEntityKind::Function);
+        // Nested `const content = input.trim()` must not be indexed as a function symbol.
+        assert!(
+            result.entities.iter().all(|e| e.name != "content"),
+            "nested local `content` must not be a top-level entity"
+        );
     }
 }

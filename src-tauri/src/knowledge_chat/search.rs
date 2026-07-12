@@ -203,8 +203,10 @@ pub fn hybrid_search_complete(
     }
 
     let structured_answer = if !hits.is_empty() {
+        // Prefer the user question over the expanded retrieval_query so intents
+        // like env_var / locate stay aligned with what the user asked.
         try_structured_answer_with_intent(
-            &retrieval_query,
+            &pending.query,
             &hits,
             pending.request.intent_override,
         )
