@@ -10,7 +10,7 @@ use crate::knowledge_chat::scanner::scan_folder;
 use crate::knowledge_chat::remote_embeddings::RemoteEmbedConfig;
 use crate::knowledge_chat::types::{KcCollection, KcCollectionStatus, KcQaCorpusBootstrapResult};
 use std::path::{Path, PathBuf};
-use tauri::{Manager, Window};
+use tauri::Window;
 
 pub const QA_COLLECTION_NAME: &str = "NexusAI QA Corpus";
 const QA_COLLECTION_SETTING: &str = "kc.qa_collection_id";
@@ -266,15 +266,29 @@ fn source_newer_than(src: &Path, dest: &Path) -> bool {
     src_mod > dest_mod
 }
 
-pub fn spawn_startup_bootstrap(app_handle: tauri::AppHandle) {
+/// On app launch: copy QA corpus fixtures only. Do not scan/index/embed —
+/// users run Scan Folder / Build Index manually (or `kc_ensure_qa_corpus`).
+pub fn spawn_startup_bootstrap(_app_handle: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
-        let state = app_handle.state::<AppState>();
-        match bootstrap(state.inner(), None, false, false, None).await {
-            Ok(result) => {
-                log::info!("{}", result.message);
-                let _ = app_handle.emit_all("kc-qa-corpus-ready", &result);
+        let runtime = qa_corpus_runtime_path();
+        let source = qa_corpus_source_path();
+        if !source.is_dir() {
+            log::info!(
+                "QA corpus source not found ({}); skipping startup file sync",
+                source.display()
+            );
+            return;
+        }
+        match sync_qa_corpus(&source, &runtime, false) {
+            Ok(copied) => {
+                if copied > 0 {
+                    log::info!(
+                        "Synced {copied} QA corpus file(s) to {} (index/embed manually)",
+                        runtime.display()
+                    );
+                }
             }
-            Err(err) => log::warn!("QA corpus bootstrap skipped: {err}"),
+            Err(err) => log::warn!("QA corpus startup sync skipped: {err}"),
         }
     });
 }

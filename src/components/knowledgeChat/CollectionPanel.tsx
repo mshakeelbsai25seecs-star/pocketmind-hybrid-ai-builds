@@ -9,7 +9,6 @@ import {
   kcCreateCollection,
   kcDeleteCollection,
   kcDiscoverEmbeddingModels,
-  kcEnsureQaCorpus,
   kcGetDefaultEmbeddingModel,
   kcIndexCollection,
   kcListCollections,
@@ -24,7 +23,7 @@ import { normalizeDisplayPath } from '../../platformPaths';
 import { useKnowledgeChatStore } from '../../knowledgeChat/store';
 import { useAppStore } from '../../store';
 import { embeddingModelPlaceholder, joinPath, pathPlaceholder } from '../../platformPaths';
-import type { KcCollection, KcCollectionHealth, KcFolderCategory, KcIndexProgress, KcIndexResult, KcPartitionMix, KcQaCorpusBootstrapResult } from '../../knowledgeChat/types';
+import type { KcCollection, KcCollectionHealth, KcFolderCategory, KcIndexProgress, KcIndexResult, KcPartitionMix } from '../../knowledgeChat/types';
 import { KC_STATUS_LABELS, QA_CORPUS_NAME } from '../../knowledgeChat/types';
 
 const FOLDER_CATEGORY_LABELS: Record<KcFolderCategory, string> = {
@@ -162,39 +161,20 @@ export default function CollectionPanel() {
     let cancelled = false;
     (async () => {
       try {
-        let items = await kcListCollections();
-        let qaResult: KcQaCorpusBootstrapResult | null = null;
-        const existingQa = items.find(item => item.name === QA_CORPUS_NAME);
-        if (!existingQa || existingQa.status !== 'ready' || existingQa.chunk_count === 0 || (existingQa.code_entity_count ?? 0) === 0) {
-          try {
-            qaResult = await kcEnsureQaCorpus();
-            items = await kcListCollections();
-          } catch (qaErr) {
-            if (!cancelled) {
-              setNotice(`QA corpus: ${humanError(qaErr)}`);
-            }
-          }
-        }
+        // Do not auto-index/embed on mount — use Scan Folder / Build Index (or kc_ensure_qa_corpus) manually.
+        const items = await kcListCollections();
 
         if (cancelled) return;
         setCollections(items);
 
-        const qaCollection = qaResult
-          ? items.find(item => item.id === qaResult.collection_id)
-          : existingQa || items.find(item => item.name === QA_CORPUS_NAME);
+        const qaCollection = items.find(item => item.name === QA_CORPUS_NAME);
         const persistedId = useKnowledgeChatStore.getState().activeCollectionId;
         const validPersisted = persistedId && items.some(item => item.id === persistedId);
 
-        if (qaCollection) {
-          setActiveCollectionId(qaCollection.id);
-          if (qaResult?.message) {
-            setNotice(qaResult.message);
-          }
-          if (qaResult?.warnings?.length) {
-            setCollectionWarnings(qaResult.warnings);
-          }
-        } else if (validPersisted) {
+        if (validPersisted) {
           setActiveCollectionId(persistedId);
+        } else if (qaCollection) {
+          setActiveCollectionId(qaCollection.id);
         } else if (items[0]) {
           setActiveCollectionId(items[0].id);
         }

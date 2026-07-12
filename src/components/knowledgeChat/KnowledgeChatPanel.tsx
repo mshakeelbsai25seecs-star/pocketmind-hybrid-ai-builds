@@ -102,15 +102,6 @@ function partitionsSearchedLabel(partitions?: string[]): string {
 import { formatKnowledgeAnswer, retrievalStatusLabel, unescapeLlmLiterals } from '../../knowledgeChat/formatAnswer';
 import type { CitationHit } from '../../knowledgeChat/formatAnswer';
 import KnowledgeMarkdown from './KnowledgeMarkdown';
-// TODO(overnight-eval): REMOVE — delete overnightEval import + all overnight wiring below
-import {
-  OVERNIGHT_BETWEEN_DELAY_MS,
-  OVERNIGHT_QUESTIONS,
-  OVERNIGHT_START_DELAY_MS,
-  isOvernightEvalEnabled,
-  sleep,
-  type OvernightEvalProgress,
-} from '../../knowledgeChat/overnightEval';
 
 type GenerationResponsePayload = {
   text: string;
@@ -284,10 +275,6 @@ export default function KnowledgeChatPanel() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const generationRef = useRef(0);
   const sendInFlightRef = useRef(false);
-  // TODO(overnight-eval): REMOVE — overnight auto-queue state/refs
-  const [overnightProgress, setOvernightProgress] = useState<OvernightEvalProgress | null>(null);
-  const overnightStartedRef = useRef(false);
-  const sendMessageRef = useRef<(overrideQuestion?: string) => Promise<void>>(async () => undefined);
 
   const { currentModel, defaultParams, productConfig, setProductConfig } = useAppStore();
   const {
@@ -422,12 +409,10 @@ export default function KnowledgeChatPanel() {
     return streamingText.trim();
   };
 
-  const sendMessage = async (overrideQuestion?: string) => {
-    const question = (typeof overrideQuestion === 'string' ? overrideQuestion : input).trim();
+  const sendMessage = async () => {
+    const question = input.trim();
     if (!question || !conversationId || !currentModel || !activeCollection || !chatReady) return;
-    // Prefer in-flight ref over isGenerating state so overnight await chaining is not blocked by a stale render.
-    if (sendInFlightRef.current) return;
-    if (typeof overrideQuestion !== 'string' && isGenerating) return;
+    if (sendInFlightRef.current || isGenerating) return;
 
     const generationId = ++generationRef.current;
     const activeConversationId = conversationId;
@@ -1039,60 +1024,6 @@ export default function KnowledgeChatPanel() {
     }
   };
 
-  sendMessageRef.current = sendMessage;
-
-  // TODO(overnight-eval): REMOVE — auto-ask 5 code questions overnight, then stop
-  useEffect(() => {
-    if (!isOvernightEvalEnabled()) return;
-    if (!chatReady || !conversationId || conversationLoading) return;
-    if (overnightStartedRef.current) return;
-    overnightStartedRef.current = true;
-
-    let cancelled = false;
-    const total = OVERNIGHT_QUESTIONS.length;
-
-    (async () => {
-      console.info('[overnight-eval] Starting queue of', total, 'questions');
-      setOvernightProgress({ completed: 0, total, running: true, asking: 1 });
-      await sleep(OVERNIGHT_START_DELAY_MS);
-      for (let i = 0; i < total; i++) {
-        if (cancelled) return;
-        const question = OVERNIGHT_QUESTIONS[i];
-        setOvernightProgress({ completed: i, total, running: true, asking: i + 1 });
-        console.info(`[overnight-eval] Asking ${i + 1}/${total}:`, question);
-        try {
-          await sendMessageRef.current(question);
-        } catch (err) {
-          console.error(`[overnight-eval] Question ${i + 1} failed; continuing`, err);
-        }
-        if (cancelled) return;
-        const completed = i + 1;
-        setOvernightProgress({
-          completed,
-          total,
-          running: completed < total,
-          asking: completed < total ? completed + 1 : null,
-        });
-        if (completed < total) {
-          await sleep(OVERNIGHT_BETWEEN_DELAY_MS);
-        }
-      }
-      if (!cancelled) {
-        console.info('[overnight-eval] Queue finished');
-        setOvernightProgress({ completed: total, total, running: false, asking: null });
-      }
-    })().catch(err => {
-      console.error('[overnight-eval] Queue aborted', err);
-      if (!cancelled) {
-        setOvernightProgress(prev => (prev ? { ...prev, running: false, asking: null } : null));
-      }
-    });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [chatReady, conversationId, conversationLoading]);
-
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -1148,22 +1079,6 @@ export default function KnowledgeChatPanel() {
       {!chatReady && (
         <div className="rounded-2xl border border-amber-200/70 dark:border-amber-900 bg-amber-50/85 dark:bg-amber-950/20 px-4 py-3 text-sm text-amber-800 dark:text-amber-200 mb-4">
           Select a ready collection and a local model before chatting. Build the index in the panel above first.
-        </div>
-      )}
-
-      {/* TODO(overnight-eval): REMOVE — temporary overnight progress banner */}
-      {overnightProgress && (
-        <div className="mb-4 rounded-2xl border border-orange-300/80 dark:border-orange-800 bg-orange-50/90 dark:bg-orange-950/30 px-4 py-3 text-sm text-orange-900 dark:text-orange-100">
-          <span className="font-semibold">Overnight eval (TEMP):</span>{' '}
-          {overnightProgress.completed}/{overnightProgress.total}
-          {overnightProgress.running && overnightProgress.asking != null
-            ? ` — asking #${overnightProgress.asking}`
-            : overnightProgress.completed >= overnightProgress.total
-              ? ' — done'
-              : ''}
-          <span className="block text-xs mt-1 opacity-80">
-            REMOVE AFTER OVERNIGHT EVAL — disable via OVERNIGHT_AUTO_EVAL or localStorage kc-overnight-eval=0
-          </span>
         </div>
       )}
 

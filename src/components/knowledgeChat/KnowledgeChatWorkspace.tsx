@@ -26,7 +26,7 @@ export default function KnowledgeChatWorkspace() {
                 QA test corpus selected
               </p>
               <p className="mt-1 text-xs text-primary-800/90 dark:text-primary-200/90">
-                Folder: D:\NexusAI\qa-corpus (auto-indexed on launch). Ask grounded questions with cited answers from the indexed files.
+                Folder: D:\NexusAI\qa-corpus. Use Scan Folder / Build Index before asking — indexing is not automatic on launch.
               </p>
               <ul className="mt-2 text-xs text-surface-700 dark:text-surface-300 list-disc pl-5 space-y-1">
                 {QA_SAMPLE_QUESTIONS.map(question => (
