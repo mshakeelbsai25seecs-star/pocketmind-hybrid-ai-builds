@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev:low-mem": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tauri-dev-low-mem.ps1",
+    "tauri:dev:macos": "tauri dev --no-default-features --features custom-protocol,code-entities",
     "dist:stage:windows": "powershell -ExecutionPolicy Bypass -File distribution/windows-desktop/scripts/stage-release.ps1"
   },
   "dependencies": {
