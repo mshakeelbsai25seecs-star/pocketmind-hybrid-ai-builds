@@ -243,7 +243,7 @@ async fn fetch_enterprise_models(base_url: &str, api_key: &str) -> AppResult<Vec
         .and_then(|v| v.as_array())
         .ok_or_else(|| AppError::InferenceError("Organization server /models response missing data array.".to_string()))?;
     let mut models = Vec::new();
-    for item in data {
+        for item in data {
         let id = item
             .get("id")
             .and_then(|v| v.as_str())
@@ -253,7 +253,7 @@ async fn fetch_enterprise_models(base_url: &str, api_key: &str) -> AppResult<Vec
         if id.is_empty() {
             continue;
         }
-        models.push(EnterpriseModelInfo {
+                models.push(EnterpriseModelInfo {
             id,
             owned_by: item
                 .get("owned_by")
@@ -1696,7 +1696,7 @@ pub async fn list_enterprise_server_models(
             db.get_setting(KEY_ENTERPRISE_BASE_URL)
                 .ok()
                 .flatten()
-                .unwrap_or_default()
+        .unwrap_or_default()
         });
     drop(db);
     let normalized = normalize_enterprise_base_url(&resolved_base);
@@ -2074,22 +2074,22 @@ pub async fn embed_soc_dense_texts(
         .iter()
         .zip(embed_result.vectors.into_iter())
         .map(|(item, vector)| SocDenseEmbeddingVectorResult {
-            chunk_id: item.chunk_id.clone(),
-            dimension: vector.len(),
-            vector,
+                    chunk_id: item.chunk_id.clone(),
+                    dimension: vector.len(),
+                    vector,
         })
         .collect::<Vec<_>>();
     let dimension = embed_result.vector_dimension;
-    Ok(SocDenseEmbeddingBuildResult {
-        ok: true,
-        provider_name: "Local llama.cpp embeddings".to_string(),
+        Ok(SocDenseEmbeddingBuildResult {
+            ok: true,
+            provider_name: "Local llama.cpp embeddings".to_string(),
         runtime_path,
-        model_path: clean_model_path,
+            model_path: clean_model_path,
         model_format: "gguf".to_string(),
-        dimension,
-        vectors,
+            dimension,
+            vectors,
         warnings: validation.warnings,
-    })
+        })
 }
 
 #[tauri::command]

@@ -9,10 +9,6 @@ rust-version = "1.70"
 [build-dependencies]
 tauri-build = { version = "1.5", features = [] }
 
-[[bin]]
-name = "nexus-rag-gateway"
-path = "src/bin/nexus_rag_gateway.rs"
-
 [dependencies]
 tauri = { version = "1.5", features = [ "window-hide", "window-unmaximize", "window-show", "window-start-dragging", "window-minimize", "window-close", "window-maximize", "window-unminimize", "shell-open", "path-all", "dialog-all"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -55,7 +51,6 @@ tree-sitter-c = { version = "0.23", optional = true }
 tree-sitter-cpp = { version = "0.23", optional = true }
 tree-sitter-c-sharp = { version = "0.23", optional = true }
 streaming-iterator = { version = "0.1.9", optional = true }
-nexus-rag-gateway = { path = "../enterprise-server/full-rag/gateway" }
 
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 nvml-wrapper = "0.9"
