@@ -38,14 +38,19 @@ NexusAI.app/Contents/Resources/llama.cpp/macos-x64-metal/llama-server
 NexusAI.app/Contents/Resources/llama.cpp/macos-x64-cpu/llama-server
 ```
 
-## Download runtimes
+## Download runtimes (recommended)
 
-Download the official llama.cpp macOS release files from the llama.cpp releases page:
+From the repo root, install **both** architectures automatically:
 
-- macOS Apple Silicon / arm64
-- macOS Intel / x64
+```bash
+npm run setup:macos-runtimes
+npm run verify:macos-runtimes
+```
 
-Extract the `.tar.gz` files. Do not place compressed files directly inside the runtime folders.
+This downloads the latest official llama.cpp macOS arm64 + x64 releases into `bin/llama.cpp/`.  
+`bin/` is gitignored — every new machine must run the setup script once.
+
+Manual option: download from the llama.cpp releases page (Apple Silicon / Intel), then either place the `.tar.gz` files in `~/Downloads` and re-run the setup script, or extract them yourself into the four folders below.
 
 ### Intel Mac GPU (Metal) — required extra step
 
