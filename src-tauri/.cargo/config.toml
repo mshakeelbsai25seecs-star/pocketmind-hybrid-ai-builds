@@ -1,2 +1,9 @@
+# Reduce peak RAM during `tauri dev` / `cargo build` on memory-constrained machines.
+# Windows low-mem launches set CARGO_TARGET_DIR via scripts/tauri-dev-low-mem.ps1
+# (do NOT hardcode a Windows drive path here — it breaks macOS/Linux).
+
 [build]
 jobs = 2
+
+[env]
+# Single-job override: set CARGO_BUILD_JOBS=1 in the shell before building if OOM persists.

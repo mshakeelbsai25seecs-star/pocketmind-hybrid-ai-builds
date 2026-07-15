@@ -9,7 +9,6 @@ rust-version = "1.70"
 [build-dependencies]
 tauri-build = { version = "1.5", features = [] }
 
-
 [dependencies]
 tauri = { version = "1.5", features = [ "window-hide", "window-unmaximize", "window-show", "window-start-dragging", "window-minimize", "window-close", "window-maximize", "window-unminimize", "shell-open", "path-all", "dialog-all"] }
 serde = { version = "1.0", features = ["derive"] }

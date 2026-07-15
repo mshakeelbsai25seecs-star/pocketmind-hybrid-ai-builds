@@ -124,8 +124,12 @@ npm run build
 cd src-tauri
 cargo check
 cd ..
-npm run tauri dev
+# Prefer this on macOS (skips onnx-reranker — no ort prebuilts for x86_64-apple-darwin):
+npm run tauri:dev:macos
+# Equivalent: npx tauri dev --no-default-features --features custom-protocol,code-entities
 ```
+
+Qwen3-Reranker GGUF (primary neural rerank) still works without the ONNX fallback feature.
 
 For a universal Mac app target, build on a Mac with the required Rust targets installed:
 
