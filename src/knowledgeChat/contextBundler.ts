@@ -123,10 +123,19 @@ export function buildBundledLlmContext(
 }
 
 export function buildBundledGroundedPrompt(question: string, contextBlock: string): string {
+  const explainHint = /\b(what does|how does|explain|describe|purpose of|walk me through)\b/i.test(question)
+    ? [
+        '',
+        'ANSWER DETAIL GUIDE',
+        'Write a grounded multi-part answer. Prefer: purpose of the file/symbol, important exports/APIs,',
+        'and how they interact. Quote evidence in ## Evidence. Do not answer with a single short stub.',
+      ].join('\n')
+    : '';
   return [
     'QUESTION',
     question.trim(),
+    explainHint,
     '',
     contextBlock.trim(),
-  ].join('\n');
+  ].filter(Boolean).join('\n');
 }

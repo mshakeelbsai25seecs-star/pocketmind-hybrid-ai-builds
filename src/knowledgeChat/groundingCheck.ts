@@ -103,9 +103,18 @@ export function isNotFoundAnswer(text: string): boolean {
   return /\bI could not find enough evidence\b/i.test(text);
 }
 
+/** True when the local chat model produced no usable text (or only the empty-response stub). */
+export function isEmptyModelResponse(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return true;
+  return /selected model returned an empty response/i.test(trimmed)
+    || /^\[The model returned an empty response\.?\]$/i.test(trimmed);
+}
+
 export function isSubstantiveDraft(text: string): boolean {
   const trimmed = text.trim();
   if (trimmed.length < 80) return false;
   if (isNotFoundAnswer(trimmed)) return false;
+  if (isEmptyModelResponse(trimmed)) return false;
   return true;
 }

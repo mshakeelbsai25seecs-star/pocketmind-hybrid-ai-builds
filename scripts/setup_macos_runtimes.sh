@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+# Install official llama.cpp release archives into NexusAI runtime folders.
+#
+# Notes:
+# - Official macos-arm64 builds usually include Metal (libggml-metal).
+# - Official macos-x64 builds are often CPU-only. For Intel Mac GPU acceleration
+#   (AMD/Intel Metal), run after this:
+#     ./scripts/build_macos_x64_metal_runtime.sh
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -35,6 +42,7 @@ rm -rf "$BASE_DIR/macos-arm64-metal"/* "$BASE_DIR/macos-arm64-cpu"/* "$BASE_DIR/
 
 cp -R "$TMP_DIR/arm64"/* "$BASE_DIR/macos-arm64-metal/"
 cp -R "$TMP_DIR/arm64"/* "$BASE_DIR/macos-arm64-cpu/"
+# Seed Intel folders from the official x64 archive (often CPU-only).
 cp -R "$TMP_DIR/x64"/* "$BASE_DIR/macos-x64-metal/"
 cp -R "$TMP_DIR/x64"/* "$BASE_DIR/macos-x64-cpu/"
 
@@ -42,3 +50,10 @@ chmod +x "$BASE_DIR/macos-arm64-metal/llama-server" "$BASE_DIR/macos-arm64-cpu/l
 
 echo "macOS runtimes installed:"
 find "$BASE_DIR" -maxdepth 2 -name llama-server -print
+
+if ! ls "$BASE_DIR/macos-x64-metal"/libggml-metal* >/dev/null 2>&1; then
+  echo
+  echo "NOTE: macos-x64-metal has no libggml-metal (official x64 archive is CPU-only)."
+  echo "For AMD/Intel GPU acceleration on Intel Macs, build a real Metal runtime:"
+  echo "  ./scripts/build_macos_x64_metal_runtime.sh"
+fi

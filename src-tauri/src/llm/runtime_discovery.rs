@@ -129,6 +129,62 @@ pub fn has_nvidia_driver() -> bool {
         .unwrap_or(false)
 }
 
+/// Which GPU backends a llama-server install actually ships (by sibling libraries).
+/// Folder names alone are not trustworthy: a `macos-*-metal` directory can be a
+/// CPU-only copy with no `libggml-metal`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RuntimeBackendSupport {
+    pub cuda: bool,
+    pub vulkan: bool,
+    pub metal: bool,
+}
+
+impl RuntimeBackendSupport {
+    pub fn any_gpu(self) -> bool {
+        self.cuda || self.vulkan || self.metal
+    }
+}
+
+/// Probe the directory next to `llama-server` for backend shared libraries.
+pub fn probe_runtime_backends(runtime_bin: &Path) -> RuntimeBackendSupport {
+    let Some(dir) = runtime_bin.parent() else {
+        return RuntimeBackendSupport::default();
+    };
+    let entries = match std::fs::read_dir(dir) {
+        Ok(v) => v,
+        Err(_) => return RuntimeBackendSupport::default(),
+    };
+    let mut support = RuntimeBackendSupport::default();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        if !(name.contains("ggml") || name.contains("llama") || name.contains("cublas") || name.contains("cudart")) {
+            continue;
+        }
+        if name.contains("metal") {
+            support.metal = true;
+        }
+        if name.contains("cuda") || name.contains("cublas") || name.contains("cudart") {
+            support.cuda = true;
+        }
+        if name.contains("vulkan") {
+            support.vulkan = true;
+        }
+    }
+    support
+}
+
+/// True when a path that claims to be a Metal runtime actually bundles Metal.
+pub fn runtime_has_metal_backend(runtime_bin: &Path) -> bool {
+    probe_runtime_backends(runtime_bin).metal
+}
+
+/// True when any discovered GPU-labeled runtime actually includes a GPU backend.
+pub fn any_gpu_runtime_backend_available() -> bool {
+    all_runtime_candidates(-1)
+        .iter()
+        .any(|c| probe_runtime_backends(&c.path).any_gpu())
+}
+
 fn runtime_candidates_for_root(root: &Path, binary: &str) -> Vec<RuntimeCandidate> {
     let base_dirs = [
         root.join("bin").join("llama.cpp"),
@@ -155,7 +211,7 @@ fn runtime_candidates_for_root(root: &Path, binary: &str) -> Vec<RuntimeCandidat
         let named_metal = base.join(if cfg!(target_os = "windows") { "llama-server-metal.exe" } else { "llama-server-metal" });
         let named_cpu = base.join(if cfg!(target_os = "windows") { "llama-server-cpu.exe" } else { "llama-server-cpu" });
 
-        for (path, mode, force_cpu) in [
+        for (path, mode, mut force_cpu) in [
             (cuda, "cuda", false),
             (vulkan, "vulkan", false),
             (metal, "metal", false),
@@ -170,7 +226,19 @@ fn runtime_candidates_for_root(root: &Path, binary: &str) -> Vec<RuntimeCandidat
             (named_cpu, "cpu", true),
             (generic, "auto", false),
         ] {
-            if path.is_file() { out.push(RuntimeCandidate::new(path, mode, force_cpu)); }
+            if !path.is_file() {
+                continue;
+            }
+            // Folders named metal/cuda/vulkan but missing the matching backend
+            // library are treated as CPU so we never advertise fake acceleration.
+            let backends = probe_runtime_backends(&path);
+            match mode {
+                "metal" if !backends.metal => force_cpu = true,
+                "cuda" if !backends.cuda => force_cpu = true,
+                "vulkan" if !backends.vulkan => force_cpu = true,
+                _ => {}
+            }
+            out.push(RuntimeCandidate::new(path, mode, force_cpu));
         }
     }
     out
@@ -220,21 +288,31 @@ pub fn ordered_runtime_candidates(gpu_layers: i32) -> AppResult<Vec<RuntimeCandi
     }
 
     let nvidia_ok = has_nvidia_driver();
+    let metal_hw = macos_metal_hardware();
     let wants_gpu = gpu_layers != 0;
     let mut ordered = Vec::<RuntimeCandidate>::new();
 
     if wants_gpu {
-        if cfg!(target_os = "macos") {
-            ordered.extend(all.iter().filter(|c| c.mode == "metal").cloned());
+        if cfg!(target_os = "macos") && metal_hw {
+            // Only lead with Metal runtimes that actually contain a Metal backend.
+            ordered.extend(
+                all.iter()
+                    .filter(|c| c.mode == "metal" && !c.force_cpu && runtime_has_metal_backend(&c.path))
+                    .cloned(),
+            );
         } else if nvidia_ok {
-            ordered.extend(all.iter().filter(|c| c.mode == "cuda").cloned());
+            ordered.extend(all.iter().filter(|c| c.mode == "cuda" && !c.force_cpu).cloned());
         }
-        ordered.extend(all.iter().filter(|c| c.mode == "vulkan").cloned());
+        ordered.extend(all.iter().filter(|c| c.mode == "vulkan" && !c.force_cpu).cloned());
         if !cfg!(target_os = "macos") && !nvidia_ok {
-            ordered.extend(all.iter().filter(|c| c.mode == "cuda").cloned());
+            ordered.extend(all.iter().filter(|c| c.mode == "cuda" && !c.force_cpu).cloned());
         }
         ordered.extend(all.iter().filter(|c| c.mode == "auto" || c.mode == "path" || c.mode == "explicit").cloned());
         ordered.extend(all.iter().filter(|c| c.mode == "cpu").map(|c| { let mut x = c.clone(); x.force_cpu = true; x }));
+        // Fake metal/cuda/vulkan folders (force_cpu) stay last for crash-proof fallback.
+        ordered.extend(all.iter().filter(|c| {
+            (c.mode == "metal" || c.mode == "vulkan" || c.mode == "cuda") && c.force_cpu
+        }).map(|c| { let mut x = c.clone(); x.force_cpu = true; x }));
     } else {
         ordered.extend(all.iter().filter(|c| c.mode == "cpu").map(|c| { let mut x = c.clone(); x.force_cpu = true; x }));
         ordered.extend(all.iter().filter(|c| c.mode == "auto" || c.mode == "path" || c.mode == "explicit").map(|c| { let mut x = c.clone(); x.force_cpu = true; x }));
@@ -276,6 +354,18 @@ You can also place a single {binary} in bin/llama.cpp for auto mode, or set NEXU
 
 pub fn model_size_bytes(path: &str) -> u64 {
     std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+}
+
+/// True when macOS hardware is worth attempting Metal LLM offload: Apple Silicon
+/// unified memory, or a discrete GPU with enough VRAM. Tiny Intel iGPUs alone do
+/// not qualify.
+fn macos_metal_hardware() -> bool {
+    if !cfg!(target_os = "macos") {
+        return false;
+    }
+    let mut monitor = HardwareMonitor::new();
+    let info = monitor.get_system_info();
+    info.gpus.iter().any(|g| g.is_metal_capable && g.vram_total_bytes >= 2 * 1024 * 1024 * 1024)
 }
 
 /// Returns (total_ram, available_ram, free_vram, gpu_count).

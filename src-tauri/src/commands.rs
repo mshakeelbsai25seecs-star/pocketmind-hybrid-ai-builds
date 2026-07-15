@@ -714,9 +714,7 @@ fn model_record_from_path(db: &Database, path: &Path, source_url: Option<&str>) 
     if !path.exists() {
         return Err(AppError::MissingFile(path.display().to_string()));
     }
-    if path.extension().and_then(|e| e.to_str()).map(|e| e.to_lowercase()) != Some("gguf".to_string()) {
-        return Err(AppError::CorruptModel("Only .gguf model files can be imported here.".to_string()));
-    }
+    crate::gguf::validate_gguf_file(path).map_err(AppError::CorruptModel)?;
 
     let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     let canonical_str = canonical.to_string_lossy().to_string();
@@ -926,6 +924,10 @@ pub async fn download_model(
                     if let Some(t) = total {
                         if downloaded >= t {
                             tokio::fs::rename(&part_path, &final_path).await?;
+                            if let Err(msg) = crate::gguf::validate_gguf_file(&final_path) {
+                                let _ = tokio::fs::remove_file(&final_path).await;
+                                return Err(AppError::CorruptModel(msg));
+                            }
                             emit_download_progress(&window, &id, &file_name, "complete", downloaded, total, 0.0, retries, "Download complete.", started_at);
                             let db = state.db.lock().await;
                             return model_record_from_path(&db, &final_path, Some(&url));
@@ -933,6 +935,10 @@ pub async fn download_model(
                     } else if downloaded > 0 {
                         // Unknown total; a clean EOF means success.
                         tokio::fs::rename(&part_path, &final_path).await?;
+                        if let Err(msg) = crate::gguf::validate_gguf_file(&final_path) {
+                            let _ = tokio::fs::remove_file(&final_path).await;
+                            return Err(AppError::CorruptModel(msg));
+                        }
                         emit_download_progress(&window, &id, &file_name, "complete", downloaded, Some(downloaded), 0.0, retries, "Download complete.", started_at);
                         let db = state.db.lock().await;
                         return model_record_from_path(&db, &final_path, Some(&url));
@@ -2309,6 +2315,8 @@ pub struct GpuRuntimeReport {
     pub llama_server_path: Option<String>,
     pub runtime_found: bool,
     pub supports_gpu_layers: bool,
+    /// True only when a bundled runtime actually contains CUDA/Vulkan/Metal libs.
+    pub gpu_acceleration_available: bool,
     pub supports_cuda_hint: bool,
     pub supports_vulkan_hint: bool,
     pub supports_metal_hint: bool,
@@ -2381,20 +2389,20 @@ fn summed_vram(gpus: &[crate::hardware::GPUInfo]) -> (u64, u64) {
 fn auto_fit_plan_for_model(
     model_size_bytes: Option<u64>,
     gpus: &[crate::hardware::GPUInfo],
-    supports_gpu_layers: bool,
+    gpu_acceleration_available: bool,
     available_ram_bytes: u64,
 ) -> (i32, i32, i32, String, String, Option<String>, u64, u64) {
     let (total_vram, free_vram) = summed_vram(gpus);
     let model_size = model_size_bytes.unwrap_or(0);
 
-    if !supports_gpu_layers {
+    if !gpu_acceleration_available {
         return (
             0,
             2048,
             128,
             "CPU fallback".to_string(),
-            "Runtime does not expose GPU-layer controls".to_string(),
-            Some("NexusAI will run safely on CPU. To enable acceleration, bundle a CUDA or Vulkan llama.cpp runtime that supports GPU layer offload.".to_string()),
+            "No real GPU backend library is bundled with llama-server".to_string(),
+            Some("NexusAI will run safely on CPU. GPU folders that lack libggml-metal / CUDA / Vulkan libraries cannot accelerate models. Bundle a real GPU-enabled llama.cpp runtime to enable offload.".to_string()),
             total_vram,
             free_vram,
         );
@@ -2497,13 +2505,54 @@ pub async fn get_gpu_runtime_report(
     let runtime_summary = if all_runtimes.is_empty() {
         "No bundled runtimes found.".to_string()
     } else {
-        all_runtimes.iter().map(|p| format!("{} / {}: {}", runtime_mode_from_path(p), runtime_arch_from_path(p), p.display())).collect::<Vec<_>>().join(" | ")
+        all_runtimes
+            .iter()
+            .map(|p| {
+                let backends = crate::llm::runtime_discovery::probe_runtime_backends(p);
+                let backend_label = if backends.any_gpu() {
+                    format!(
+                        "backends:[cuda={},vulkan={},metal={}]",
+                        backends.cuda, backends.vulkan, backends.metal
+                    )
+                } else {
+                    "backends:[cpu-only]".to_string()
+                };
+                format!(
+                    "{} / {}: {} ({})",
+                    runtime_mode_from_path(p),
+                    runtime_arch_from_path(p),
+                    p.display(),
+                    backend_label
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(" | ")
+    };
+    let distinct_gpu_backends = all_runtimes
+        .iter()
+        .filter(|p| crate::llm::runtime_discovery::probe_runtime_backends(p).any_gpu())
+        .count();
+    let layout_status = if distinct_gpu_backends >= 1 && all_runtimes.len() >= 2 {
+        "pass"
+    } else if all_runtimes.len() >= 1 {
+        "info"
+    } else {
+        "fail"
+    };
+    let layout_message = if distinct_gpu_backends >= 1 {
+        "Multiple runtime modes are bundled with at least one real GPU backend, so NexusAI can auto-select and fall back safely."
+    } else if all_runtimes.len() >= 2 {
+        "Multiple llama-server folders are present, but every scan found CPU-only libraries (no libggml-metal/cuda/vulkan). Auto-selection will stay on CPU until a real GPU runtime is bundled."
+    } else if all_runtimes.len() == 1 {
+        "One llama.cpp runtime is bundled. NexusAI will work with that runtime, but full automatic GPU selection requires a real CUDA/Vulkan/Metal build."
+    } else {
+        "No llama.cpp runtime was found."
     };
     checks.push(gpu_check(
         "runtime_layout",
         "Universal runtime layout",
-        if all_runtimes.len() >= 2 { "pass" } else if all_runtimes.len() == 1 { "info" } else { "fail" },
-        if all_runtimes.len() >= 2 { "Multiple runtime modes are bundled, so NexusAI can auto-select the best available native runtime and fall back safely." } else if all_runtimes.len() == 1 { "One llama.cpp runtime is bundled. NexusAI will work with that runtime, but full automatic selection requires Windows CPU/CUDA/Vulkan folders or macOS arm64/x64 CPU/Metal folders." } else { "No llama.cpp runtime was found." },
+        layout_status,
+        layout_message,
         Some(runtime_summary),
     ));
 
@@ -2523,25 +2572,64 @@ pub async fn get_gpu_runtime_report(
 
     let help_lower = help_text.to_lowercase();
     let supports_gpu_layers = help_lower.contains("gpu-layers") || help_lower.contains("ngl") || help_lower.contains("n-gpu-layers");
-    let supports_cuda_hint = help_lower.contains("cuda") || help_lower.contains("cublas") || help_lower.contains("ggml_cuda");
-    let supports_vulkan_hint = help_lower.contains("vulkan") || help_lower.contains("ggml_vulkan");
-    let supports_metal_hint = help_lower.contains("metal") || help_lower.contains("ggml_metal");
+    let help_cuda = help_lower.contains("cuda") || help_lower.contains("cublas") || help_lower.contains("ggml_cuda");
+    let help_vulkan = help_lower.contains("vulkan") || help_lower.contains("ggml_vulkan");
+    let help_metal = help_lower.contains("metal") || help_lower.contains("ggml_metal");
     let supports_flash_attention = help_lower.contains("flash-attn") || help_lower.contains("flash attention");
+
+    // Prefer library-directory probing over --help text. Folder names and help
+    // flags can claim Metal/CUDA while the install is still CPU-only.
+    let selected_backends = runtime_path
+        .as_ref()
+        .map(|p| crate::llm::runtime_discovery::probe_runtime_backends(p))
+        .unwrap_or_default();
+    let any_gpu_backend = crate::llm::runtime_discovery::any_gpu_runtime_backend_available();
+    let supports_cuda_hint = selected_backends.cuda || help_cuda;
+    let supports_vulkan_hint = selected_backends.vulkan || help_vulkan;
+    let supports_metal_hint = selected_backends.metal || help_metal;
+    let gpu_acceleration_available = any_gpu_backend;
 
     checks.push(gpu_check(
         "gpu_layer_flag",
         "GPU layer control",
         if supports_gpu_layers { "pass" } else { "warning" },
-        if supports_gpu_layers { "The runtime accepts GPU layer/offload flags." } else { "The runtime did not advertise GPU layer flags in --help." },
+        if supports_gpu_layers {
+            "The runtime accepts GPU layer/offload flags (CLI support only — not proof that a GPU backend is compiled in)."
+        } else {
+            "The runtime did not advertise GPU layer flags in --help."
+        },
         None,
     ));
 
+    let backend_status = if selected_backends.any_gpu() {
+        "pass"
+    } else if any_gpu_backend {
+        "info"
+    } else {
+        "warning"
+    };
     checks.push(gpu_check(
         "backend_hint",
-        "Runtime backend hint",
-        if supports_cuda_hint || supports_vulkan_hint || supports_metal_hint { "pass" } else { "info" },
-        if supports_cuda_hint || supports_vulkan_hint || supports_metal_hint { "The runtime help text hints at a GPU backend." } else { "No CUDA/Vulkan/Metal hint was found in --help for the selected runtime. Some builds do not expose this clearly, so confirm with a small model and Runtime diagnostics." },
-        Some(format!("CUDA hint: {supports_cuda_hint}, Vulkan hint: {supports_vulkan_hint}, Metal hint: {supports_metal_hint}, Flash attention: {supports_flash_attention}")),
+        "Runtime GPU backend libraries",
+        backend_status,
+        if selected_backends.any_gpu() {
+            "Selected runtime folder contains GPU backend libraries."
+        } else if any_gpu_backend {
+            "Selected runtime is CPU-only, but another bundled runtime has a GPU backend."
+        } else {
+            "No CUDA/Vulkan/Metal backend libraries were found next to any bundled llama-server. \
+Folders named metal/cuda/vulkan without matching libraries cannot accelerate models — NexusAI will use CPU."
+        },
+        Some(format!(
+            "Selected: CUDA={}, Vulkan={}, Metal={} | Help text: CUDA={}, Vulkan={}, Metal={} | Flash attention CLI: {}",
+            selected_backends.cuda,
+            selected_backends.vulkan,
+            selected_backends.metal,
+            help_cuda,
+            help_vulkan,
+            help_metal,
+            supports_flash_attention
+        )),
     ));
 
     let (nvidia_smi_ok, nvidia_smi_summary) = run_command_for_gpu_probe("nvidia-smi", &["--query-gpu=name,memory.total,memory.used", "--format=csv,noheader"], "nvidia-smi returned no text");
@@ -2565,11 +2653,35 @@ pub async fn get_gpu_runtime_report(
     #[cfg(target_os = "macos")]
     {
         let (metal_info_ok, metal_info_summary) = run_command_for_gpu_probe("system_profiler", &["SPDisplaysDataType"], "system_profiler returned no display information");
+        let metal_runtime_real = all_runtimes.iter().any(|p| {
+            runtime_mode_from_path(p) == "metal"
+                && crate::llm::runtime_discovery::runtime_has_metal_backend(p)
+        });
+        let metal_folder_present = all_runtimes.iter().any(|p| runtime_mode_from_path(p) == "metal");
+        let metal_status = if metal_runtime_real {
+            "pass"
+        } else if metal_folder_present {
+            "warning"
+        } else if metal_info_ok {
+            "info"
+        } else {
+            "info"
+        };
+        let metal_message = if metal_runtime_real {
+            "A bundled Metal llama-server with Metal backend libraries was found."
+        } else if metal_folder_present {
+            "A macos-*-metal folder exists, but it has no Metal backend library (libggml-metal). \
+It is functionally a CPU runtime — GPU offload plans will not be offered."
+        } else if metal_info_ok {
+            "GPU display information is available, but no Metal-capable llama.cpp runtime is bundled."
+        } else {
+            "macOS GPU details could not be read. CPU mode remains supported."
+        };
         checks.push(gpu_check(
             "macos_metal",
-            "macOS Metal check",
-            if metal_info_ok { "pass" } else { "info" },
-            if metal_info_ok { "macOS display/GPU information is available. Bundle native arm64 runtimes for Apple Silicon and native x64 runtimes for Intel Mac support." } else { "macOS GPU details could not be read. CPU mode remains supported, and Metal can still be tested with the matching native macOS runtime." },
+            "macOS Metal runtime",
+            metal_status,
+            metal_message,
             metal_info_summary,
         ));
     }
@@ -2578,7 +2690,7 @@ pub async fn get_gpu_runtime_report(
     {
         checks.push(gpu_check(
             "macos_metal",
-            "macOS Metal check",
+            "macOS Metal runtime",
             "info",
             "Metal acceleration is a macOS runtime option. On Windows, NexusAI uses CUDA or Vulkan when available.",
             None,
@@ -2592,8 +2704,16 @@ pub async fn get_gpu_runtime_report(
     let model_size = selected_model_path
         .as_ref()
         .and_then(|p| std::fs::metadata(p).ok().map(|m| m.len()));
-    let (recommended_gpu_layers, recommended_context_size, recommended_batch_size, recommended_mode, fit_status, warning, total_vram, free_vram) =
-        auto_fit_plan_for_model(model_size, &info.gpus, supports_gpu_layers, info.memory.available_bytes);
+    // GPU layer CLI support alone is not enough — require a real backend library.
+    let (recommended_gpu_layers, recommended_context_size, recommended_batch_size, recommended_mode, fit_status, mut warning, total_vram, free_vram) =
+        auto_fit_plan_for_model(model_size, &info.gpus, gpu_acceleration_available, info.memory.available_bytes);
+    if supports_gpu_layers && !gpu_acceleration_available {
+        let msg = "GPU layer flags exist, but no GPU backend library was found in the bundled runtimes. Auto plan is CPU-only until a real CUDA/Vulkan/Metal build is packaged.";
+        warning = Some(match warning.take() {
+            Some(existing) => format!("{existing} {msg}"),
+            None => msg.to_string(),
+        });
+    }
 
     if info.gpus.is_empty() {
         checks.push(gpu_check("gpu_detected", "GPU detected", "info", "No dedicated GPU was detected by the app scanner. CPU mode remains safe and fully supported.", None));
@@ -2617,6 +2737,7 @@ pub async fn get_gpu_runtime_report(
         llama_server_path: runtime_path.map(|p| p.display().to_string()),
         runtime_found,
         supports_gpu_layers,
+        gpu_acceleration_available,
         supports_cuda_hint,
         supports_vulkan_hint,
         supports_metal_hint,
@@ -2631,7 +2752,15 @@ pub async fn get_gpu_runtime_report(
         recommended_context_size,
         recommended_batch_size,
         recommended_mode: recommended_mode.clone(),
-        auto_strategy: if recommended_gpu_layers == 999 { "Try full GPU first; fall back only if needed.".to_string() } else if recommended_gpu_layers > 0 { "Try full GPU first, then automatic CPU + GPU split, then CPU fallback.".to_string() } else { "Use CPU fallback unless a compatible GPU runtime becomes available.".to_string() },
+        auto_strategy: if !gpu_acceleration_available {
+            "No real GPU backend is bundled. Use CPU Safe until a Metal/CUDA/Vulkan llama.cpp runtime is packaged.".to_string()
+        } else if recommended_gpu_layers == 999 {
+            "Try full GPU first; fall back only if needed.".to_string()
+        } else if recommended_gpu_layers > 0 {
+            "Try full GPU first, then automatic CPU + GPU split, then CPU fallback.".to_string()
+        } else {
+            "Use CPU fallback unless a compatible GPU runtime becomes available.".to_string()
+        },
         auto_gpu_layers: recommended_gpu_layers,
         auto_context_size: recommended_context_size,
         auto_batch_size: recommended_batch_size,

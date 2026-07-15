@@ -25,10 +25,19 @@ pub fn build_evidence_items(query: &str, hits: &[KcSearchHit]) -> Vec<KcEvidence
         .collect()
 }
 
-pub fn format_evidence_answer(_query: &str, items: &[KcEvidenceItem]) -> Option<String> {
+pub fn format_evidence_answer(query: &str, items: &[KcEvidenceItem]) -> Option<String> {
     if items.is_empty() {
         return None;
     }
+
+    // File-level "what does X.ts do?" → one synthesized overview instead of thin
+    // per-snippet "Defines the const …" lines.
+    if is_explain_code_question(query) && file_focused_query(query) {
+        if let Some(synthesized) = synthesize_file_evidence_overview(query, items) {
+            return Some(synthesized);
+        }
+    }
+
     let mut sections = Vec::new();
     for item in items {
         let anchor = match item.line_start {
@@ -63,12 +72,66 @@ pub fn format_evidence_answer(_query: &str, items: &[KcEvidenceItem]) -> Option<
         "Here is the most relevant indexed source for your question.".to_string()
     } else {
         format!(
-            "Here are {} indexed source excerpt(s) bundled for your question (confidence >= {:.0}%).",
+            "Here are {} indexed source excerpt(s) for your question (confidence >= {:.0}%). Each block includes the code and a short interpretation.",
             items.len(),
             MIN_LLM_BUNDLE_CONFIDENCE * 100.0,
         )
     };
     Some(format!("{intro}\n\n{}", sections.join("\n\n---\n\n")))
+}
+
+fn file_focused_query(query: &str) -> bool {
+    query.split_whitespace().any(|token| {
+        let cleaned = token.trim_matches(|c: char| !c.is_alphanumeric() && c != '.' && c != '_' && c != '-');
+        cleaned.contains('.')
+            && cleaned
+                .rsplit_once('.')
+                .map(|(_, ext)| {
+                    matches!(
+                        ext.to_ascii_lowercase().as_str(),
+                        "ts" | "tsx" | "js" | "jsx" | "py" | "rs" | "go" | "java" | "kt" | "cs"
+                    )
+                })
+                .unwrap_or(false)
+    })
+}
+
+fn synthesize_file_evidence_overview(query: &str, items: &[KcEvidenceItem]) -> Option<String> {
+    let file = items.first()?.file_name.clone();
+    if !items.iter().all(|i| i.file_name.eq_ignore_ascii_case(&file)) {
+        // Mixed files — keep the multi-section layout.
+        return None;
+    }
+    let mut lines = Vec::new();
+    lines.push(format!("## Purpose\n\n`{file}` — overview from indexed symbols for: {query}"));
+    lines.push("## Key symbols\n".to_string());
+    for item in items.iter().take(10) {
+        let anchor = item
+            .line_start
+            .map(|s| {
+                if let Some(e) = item.line_end.filter(|e| *e > s) {
+                    format!(" (L{s}–L{e})")
+                } else {
+                    format!(" (L{s})")
+                }
+            })
+            .unwrap_or_default();
+        let meaning = item
+            .plain_summary
+            .clone()
+            .unwrap_or_else(|| "see excerpt".to_string());
+        lines.push(format!("- **{}**{anchor}: {meaning}", item.label));
+    }
+    lines.push("## Evidence excerpts\n".to_string());
+    for item in items.iter().take(6) {
+        let excerpt = item.excerpt.trim();
+        if excerpt.is_empty() {
+            continue;
+        }
+        lines.push(format!("### {}\n\n```\n{excerpt}\n```", item.label));
+    }
+    lines.push(format!("[Source: {file}]"));
+    Some(lines.join("\n"))
 }
 
 fn evidence_item_from_hit(query: &str, hit: &KcSearchHit) -> KcEvidenceItem {
@@ -168,11 +231,34 @@ fn template_summary(query: &str, hit: &KcSearchHit, excerpt: &str) -> String {
     }
 
     if let Some(name) = hit.chunk.entity_name.as_deref().filter(|n| is_plausible_entity_name(n)) {
-        return format!(
-            "This {} `{}` is defined in the source excerpt above.",
-            hit.chunk.entity_kind.as_deref().unwrap_or("symbol"),
-            name
-        );
+        let kind = hit.chunk.entity_kind.as_deref().unwrap_or("symbol");
+        let name_l = name.to_lowercase();
+        if name_l.contains("subscribe") || excerpt_lower.contains("listeners.add") {
+            return format!("`{name}` registers a listener and returns an unsubscribe callback.");
+        }
+        if name_l.contains("notify") || name_l.contains("emit") || excerpt_lower.contains("foreach") {
+            return format!("`{name}` invokes every registered listener (broadcast/notify).");
+        }
+        if name_l.contains("listener") || excerpt_lower.contains("new set") {
+            return format!("`{name}` stores the set of registered listener callbacks.");
+        }
+        // Prefer a slightly richer one-liner from the excerpt body.
+        let first_code = excerpt
+            .lines()
+            .map(str::trim)
+            .find(|l| {
+                !l.is_empty()
+                    && !l.starts_with("//")
+                    && !l.starts_with("/*")
+                    && !l.starts_with('*')
+                    && !l.starts_with("This ")
+            })
+            .unwrap_or("");
+        if first_code.len() > 24 {
+            let clipped: String = first_code.chars().take(140).collect();
+            return format!("`{name}` ({kind}): `{clipped}`");
+        }
+        return format!("`{name}` is a {kind} in `{}`.", hit.chunk.file_name);
     }
 
     if is_symbol_in_text(query, excerpt) {

@@ -61,6 +61,5 @@ pub fn is_usable_embedding_model_path(config: &DeploymentConfig, path: &str) -> 
     if config.is_path_allowed(clean) {
         return true;
     }
-    let candidate = Path::new(clean);
-    candidate.is_file() && clean.to_ascii_lowercase().ends_with(".gguf")
+    crate::gguf::is_valid_gguf_file(Path::new(clean))
 }

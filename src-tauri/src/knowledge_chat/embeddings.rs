@@ -123,8 +123,8 @@ async fn try_spawn_embedding_attempt(
     }
 
     let mut child = command
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .kill_on_drop(true)
         .spawn()
         .map_err(|e| AppError::InferenceError(format!("Could not start local embedding server: {e}")))?;
@@ -135,9 +135,16 @@ async fn try_spawn_embedding_attempt(
         .map_err(|e| AppError::NetworkError(e.to_string()))?;
 
     if let Err(e) = wait_for_embedding_server(&client, &base_url, &mut child).await {
+        let detail = take_child_stderr_tail(&mut child).await;
         let _ = child.kill().await;
-        return Err(e);
+        return Err(match detail {
+            Some(log) if !log.is_empty() => AppError::InferenceError(format!("{e}\n\nllama-server output:\n{log}")),
+            _ => e,
+        });
     }
+
+    // Keep the server from blocking once its pipe buffers fill.
+    drain_child_stdio(&mut child);
 
     Ok(EmbedServerHandle {
         base_url,
@@ -568,12 +575,7 @@ pub(crate) fn validate_model_path(
         crate::knowledge_chat::path_guard::ensure_allowed_path(config, &clean, "Embedding model")?;
     }
     let path = PathBuf::from(&clean);
-    if !path.exists() || !path.is_file() {
-        return Err(AppError::Unknown("Embedding model file does not exist.".to_string()));
-    }
-    if path.extension().and_then(|v| v.to_str()).unwrap_or("").to_lowercase() != "gguf" {
-        return Err(AppError::Unknown("Embedding model must be a .gguf file.".to_string()));
-    }
+    crate::gguf::validate_gguf_file(&path).map_err(AppError::Unknown)?;
     Ok(clean)
 }
 
@@ -688,10 +690,7 @@ pub fn soften_embedding_model_path(model_path: &str, models_dir_hint: Option<&st
 }
 
 fn is_gguf_file(path: &Path) -> bool {
-    path.extension()
-        .and_then(|v| v.to_str())
-        .unwrap_or("")
-        .eq_ignore_ascii_case("gguf")
+    crate::gguf::is_valid_gguf_file(path)
 }
 
 fn collect_gguf_files(dir: &Path, max_depth: usize, out: &mut Vec<String>) {
@@ -766,6 +765,61 @@ async fn wait_for_embedding_server(
             ));
         }
         sleep(Duration::from_millis(450)).await;
+    }
+}
+
+/// Capture a short tail of llama-server stderr/stdout after a failed spawn so
+/// the UI can show the real reason (invalid GGUF, OOM, etc.).
+async fn take_child_stderr_tail(child: &mut tokio::process::Child) -> Option<String> {
+    use tokio::io::AsyncReadExt;
+    let mut combined = String::new();
+    if let Some(mut stderr) = child.stderr.take() {
+        let mut buf = Vec::new();
+        let _ = stderr.read_to_end(&mut buf).await;
+        combined.push_str(&String::from_utf8_lossy(&buf));
+    }
+    if let Some(mut stdout) = child.stdout.take() {
+        let mut buf = Vec::new();
+        let _ = stdout.read_to_end(&mut buf).await;
+        if !buf.is_empty() {
+            if !combined.is_empty() {
+                combined.push('\n');
+            }
+            combined.push_str(&String::from_utf8_lossy(&buf));
+        }
+    }
+    let trimmed = combined.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let lines: Vec<&str> = trimmed.lines().collect();
+    let start = lines.len().saturating_sub(24);
+    Some(lines[start..].join("\n"))
+}
+
+fn drain_child_stdio(child: &mut tokio::process::Child) {
+    use tokio::io::AsyncReadExt;
+    if let Some(mut stderr) = child.stderr.take() {
+        tokio::spawn(async move {
+            let mut buf = [0u8; 4096];
+            loop {
+                match stderr.read(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+            }
+        });
+    }
+    if let Some(mut stdout) = child.stdout.take() {
+        tokio::spawn(async move {
+            let mut buf = [0u8; 4096];
+            loop {
+                match stdout.read(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+            }
+        });
     }
 }
 

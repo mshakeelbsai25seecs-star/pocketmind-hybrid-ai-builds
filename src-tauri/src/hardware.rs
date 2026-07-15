@@ -88,11 +88,20 @@ impl HardwareMonitor {
             architecture: std::env::consts::ARCH.to_string(),
         };
 
+        let total_mem = self.system.total_memory();
+        let used_mem = self.system.used_memory();
+        let free_mem = total_mem.saturating_sub(used_mem);
+        // sysinfo's available_memory() can report 0 on some macOS builds; fall back
+        // so Runtime Manager does not show "Unknown" for system RAM.
+        let available_mem = match self.system.available_memory() {
+            0 => free_mem,
+            n => n,
+        };
         let memory = MemoryInfo {
-            total_bytes: self.system.total_memory(),
-            used_bytes: self.system.used_memory(),
-            free_bytes: self.system.total_memory().saturating_sub(self.system.used_memory()),
-            available_bytes: self.system.available_memory(),
+            total_bytes: total_mem,
+            used_bytes: used_mem,
+            free_bytes: free_mem,
+            available_bytes: available_mem,
         };
 
         let mut storage = StorageInfo { total_bytes: 0, free_bytes: 0 };
@@ -143,17 +152,7 @@ impl HardwareMonitor {
 
         #[cfg(target_os = "macos")]
         {
-            let total_mem = self.system.total_memory();
-            gpus.push(GPUInfo {
-                name: Self::detect_apple_gpu(),
-                vendor: "Apple".to_string(),
-                vram_total_bytes: total_mem,
-                vram_used_bytes: 0,
-                is_cuda_capable: false,
-                is_metal_capable: true,
-                is_vulkan_capable: false,
-                compute_score: Self::estimate_apple_score(),
-            });
+            gpus.extend(Self::detect_macos_gpus(self.system.total_memory()));
         }
 
         if gpus.is_empty() {
@@ -174,28 +173,196 @@ impl HardwareMonitor {
         gpus
     }
 
+    /// Detect macOS GPUs with realistic VRAM / Metal expectations.
+    ///
+    /// Apple Silicon uses unified memory (system RAM ≈ usable "VRAM").
+    /// Intel/AMD GPUs report a much smaller dedicated or dynamic VRAM; treating
+    /// total system RAM as VRAM on those machines makes 8B models look like they
+    /// "fit" when they do not.
     #[cfg(target_os = "macos")]
-    fn detect_apple_gpu() -> String {
+    fn detect_macos_gpus(total_system_memory: u64) -> Vec<GPUInfo> {
         use std::process::Command;
-        if let Ok(output) = Command::new("system_profiler").args(&["SPDisplaysDataType", "-json"]).output() {
+        let mut gpus = Vec::new();
+        let apple_silicon = Self::is_apple_silicon_cpu();
+
+        if let Ok(output) = Command::new("system_profiler")
+            .args(["SPDisplaysDataType", "-json"])
+            .output()
+        {
             if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
                 if let Some(arr) = json.get("SPDisplaysDataType").and_then(|v| v.as_array()) {
-                    if let Some(first) = arr.first() {
-                        if let Some(name) = first.get("sppci_model").and_then(|v| v.as_str()) {
-                            return name.to_string();
+                    for display in arr {
+                        let name = display
+                            .get("sppci_model")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or(if apple_silicon {
+                                "Apple Silicon GPU"
+                            } else {
+                                "Unknown GPU"
+                            })
+                            .to_string();
+                        let name_lower = name.to_lowercase();
+                        let looks_apple_gpu = name_lower.contains("apple")
+                            || name_lower.contains("m1")
+                            || name_lower.contains("m2")
+                            || name_lower.contains("m3")
+                            || name_lower.contains("m4");
+                        let unified = apple_silicon || looks_apple_gpu;
+                        let reported_vram = Self::parse_macos_vram_bytes(display);
+                        let vram_total_bytes = if unified {
+                            total_system_memory
+                        } else {
+                            reported_vram.unwrap_or(0)
+                        };
+                        let vendor = if unified {
+                            "Apple".to_string()
+                        } else if name_lower.contains("amd") || name_lower.contains("radeon") {
+                            "AMD".to_string()
+                        } else if name_lower.contains("intel") {
+                            "Intel".to_string()
+                        } else if name_lower.contains("nvidia") {
+                            "NVIDIA".to_string()
+                        } else {
+                            "Unknown".to_string()
+                        };
+                        let metal_api = display
+                            .get("spdisplays_mtlgpufamilysupport")
+                            .and_then(|v| v.as_str())
+                            .map(|s| s.to_ascii_lowercase().contains("metal"))
+                            .unwrap_or(false);
+                        let discrete_amd_or_nvidia = vendor == "AMD" || vendor == "NVIDIA";
+                        // Metal LLM offload: Apple Silicon always; discrete Metal GPUs with
+                        // enough VRAM can be usable once a real Metal runtime is bundled.
+                        // Tiny Intel iGPUs (~1.5 GB shared) are not treated as Metal-ready.
+                        let is_metal_capable = unified
+                            || (metal_api
+                                && discrete_amd_or_nvidia
+                                && vram_total_bytes >= 2 * 1024 * 1024 * 1024);
+                        let compute_score = if unified {
+                            Self::estimate_apple_score()
+                        } else if discrete_amd_or_nvidia {
+                            2500
+                        } else {
+                            500
+                        };
+                        // Skip display-only rows that are not a GPU model
+                        // (e.g. LCD entries nested under a discrete GPU).
+                        if name == "Unknown GPU" && vram_total_bytes == 0 && !metal_api {
+                            continue;
                         }
+                        gpus.push(GPUInfo {
+                            name,
+                            vendor,
+                            vram_total_bytes,
+                            vram_used_bytes: 0,
+                            is_cuda_capable: false,
+                            is_metal_capable,
+                            is_vulkan_capable: false,
+                            compute_score,
+                        });
                     }
                 }
             }
         }
-        "Apple Silicon GPU".to_string()
+
+        if gpus.is_empty() {
+            gpus.push(GPUInfo {
+                name: if apple_silicon {
+                    "Apple Silicon GPU".to_string()
+                } else {
+                    "macOS GPU".to_string()
+                },
+                vendor: if apple_silicon {
+                    "Apple".to_string()
+                } else {
+                    "Unknown".to_string()
+                },
+                vram_total_bytes: if apple_silicon { total_system_memory } else { 0 },
+                vram_used_bytes: 0,
+                is_cuda_capable: false,
+                is_metal_capable: apple_silicon,
+                is_vulkan_capable: false,
+                compute_score: if apple_silicon {
+                    Self::estimate_apple_score()
+                } else {
+                    500
+                },
+            });
+        }
+        gpus
+    }
+
+    #[cfg(target_os = "macos")]
+    fn is_apple_silicon_cpu() -> bool {
+        use std::process::Command;
+        if let Ok(output) = Command::new("sysctl")
+            .args(["-n", "machdep.cpu.brand_string"])
+            .output()
+        {
+            let brand = String::from_utf8_lossy(&output.stdout).to_lowercase();
+            if brand.contains("apple") {
+                return true;
+            }
+        }
+        cfg!(target_arch = "aarch64")
+    }
+
+    #[cfg(target_os = "macos")]
+    fn parse_macos_vram_bytes(display: &serde_json::Value) -> Option<u64> {
+        const KEYS: &[&str] = &[
+            "spdisplays_vram",
+            "_spdisplays_vram",
+            "spdisplays_vram_shared",
+            "spdisplays_vramrecommended",
+        ];
+        // Prefer dedicated VRAM keys before shared/dynamic iGPU figures.
+        for key in KEYS {
+            if let Some(raw) = display.get(*key).and_then(|v| v.as_str()) {
+                if let Some(bytes) = Self::parse_memory_size_to_bytes(raw) {
+                    if *key != "spdisplays_vram_shared" {
+                        return Some(bytes);
+                    }
+                }
+            }
+        }
+        if let Some(raw) = display
+            .get("spdisplays_vram_shared")
+            .and_then(|v| v.as_str())
+        {
+            return Self::parse_memory_size_to_bytes(raw);
+        }
+        None
+    }
+
+    #[cfg(target_os = "macos")]
+    fn parse_memory_size_to_bytes(raw: &str) -> Option<u64> {
+        let cleaned = raw.trim().to_lowercase().replace(',', "");
+        let mut num = String::new();
+        let mut unit = String::new();
+        for ch in cleaned.chars() {
+            if ch.is_ascii_digit() || ch == '.' {
+                num.push(ch);
+            } else if ch.is_ascii_alphabetic() {
+                unit.push(ch);
+            }
+        }
+        let value: f64 = num.parse().ok()?;
+        let mult = match unit.as_str() {
+            "gb" | "g" | "gib" => 1_073_741_824.0,
+            "mb" | "m" | "mib" => 1_048_576.0,
+            "kb" | "k" | "kib" => 1024.0,
+            "b" | "" => 1.0,
+            _ => return None,
+        };
+        Some((value * mult) as u64)
     }
 
     #[cfg(target_os = "macos")]
     fn estimate_apple_score() -> u32 {
         use std::process::Command;
-        if let Ok(output) = Command::new("sysctl").args(&["-n", "machdep.cpu.brand_string"]).output() {
+        if let Ok(output) = Command::new("sysctl").args(["-n", "machdep.cpu.brand_string"]).output() {
             let brand = String::from_utf8_lossy(&output.stdout);
+            if brand.contains("M4") { return 9000; }
             if brand.contains("M3") { return 8000; }
             if brand.contains("M2") { return 6000; }
             if brand.contains("M1") { return 4000; }

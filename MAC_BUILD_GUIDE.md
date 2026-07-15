@@ -47,6 +47,18 @@ Download the official llama.cpp macOS release files from the llama.cpp releases 
 
 Extract the `.tar.gz` files. Do not place compressed files directly inside the runtime folders.
 
+### Intel Mac GPU (Metal) — required extra step
+
+Official `llama-*-bin-macos-x64.tar.gz` builds are typically **CPU-only** (no `libggml-metal`). Copying that archive into both `macos-x64-metal` and `macos-x64-cpu` will not enable GPU offload.
+
+On an Intel Mac with a discrete Metal GPU (for example AMD Radeon), build and install a real Metal runtime:
+
+```bash
+./scripts/build_macos_x64_metal_runtime.sh
+```
+
+This replaces `bin/llama.cpp/macos-x64-metal/` with a build that includes `libggml-metal*.dylib`. Then restart NexusAI → **Runtime → Scan runtime** → **Use Automatic Optimizer** (or Calculated Split). The scanner only treats Metal as available when `libggml-metal` is present.
+
 ## Simple folder setup on a Mac
 
 From the project root:

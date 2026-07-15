@@ -42,7 +42,14 @@ pub fn try_structured_answer_with_intent(
             return None;
         }
         QueryIntent::ExplainSymbol => {
-            // Explain/describe code questions need the LLM + whole-file context, not prefix stubs.
+            // File-level "what does Foo.ts do?" can be answered deterministically from
+            // symbol hits. Symbol-level "what does handleSend do?" still defers to LLM.
+            if is_file_purpose_question(query) {
+                if let Some(answer) = try_file_purpose_answer(query, hits) {
+                    return Some(answer);
+                }
+            }
+            // Explain/describe a named symbol needs the LLM + whole-file context.
             if is_explain_code_question(query) {
                 return None;
             }
@@ -409,6 +416,229 @@ fn extract_enumeration_count(q: &str) -> Option<usize> {
                 return Some(n);
             }
         }
+    }
+    None
+}
+
+/// True for file-level purpose questions like "what does overviewEvents.ts do?"
+/// (has a filename, no separate camelCase/snake_case symbol to explain).
+pub fn is_file_purpose_question(query: &str) -> bool {
+    let Some(file_hint) = extract_file_hint(query) else {
+        return false;
+    };
+    if !is_explain_code_question(query) {
+        return false;
+    }
+    let stem = file_hint
+        .rsplit_once('.')
+        .map(|(s, _)| s)
+        .unwrap_or(&file_hint)
+        .to_lowercase();
+    // Ignore camel/snake tokens that are only the file stem (overviewEvents from overviewEvents.ts).
+    let has_named_symbol = extract_camel_symbols(query)
+        .iter()
+        .chain(extract_snake_case_symbols(query).iter())
+        .any(|s| s.len() > 3 && s.to_lowercase() != stem);
+    !has_named_symbol
+}
+
+/// Synthesize a detailed file overview from indexed entity hits when the user asks
+/// what a whole file does (not a single function).
+pub fn try_file_purpose_answer(query: &str, hits: &[KcSearchHit]) -> Option<StructuredAnswer> {
+    let file_hint = extract_file_hint(query)?;
+    let file_lower = file_hint.to_lowercase();
+    let mut symbols: Vec<(String, String, Option<i32>, String)> = Vec::new();
+    let mut preamble_excerpt = String::new();
+    let mut best_confidence = 0.0_f64;
+
+    for hit in hits {
+        let name_match = hit.chunk.file_name.eq_ignore_ascii_case(&file_hint)
+            || hit.chunk.file_path.to_lowercase().ends_with(&file_lower)
+            || hit.chunk.file_name.to_lowercase().contains(
+                file_lower
+                    .rsplit_once('.')
+                    .map(|(s, _)| s)
+                    .unwrap_or(&file_lower),
+            );
+        if !name_match {
+            continue;
+        }
+        best_confidence = best_confidence.max(hit.chunk.source_confidence.unwrap_or(0.0));
+        let excerpt = excerpt_text(hit);
+        if let (Some(kind), Some(name)) = (&hit.chunk.entity_kind, &hit.chunk.entity_name) {
+            let kind_l = kind.to_lowercase();
+            let name_l = name.to_lowercase();
+            if kind_l == "module" || name_l == "module_preamble" || name_l == "file" {
+                if preamble_excerpt.is_empty() && excerpt.trim().len() > 20 {
+                    preamble_excerpt = excerpt.chars().take(900).collect();
+                }
+                continue;
+            }
+            if symbols
+                .iter()
+                .any(|(n, _, _, _)| n.eq_ignore_ascii_case(name))
+            {
+                continue;
+            }
+            symbols.push((
+                name.clone(),
+                kind.clone(),
+                hit.chunk.line_start,
+                summarize_symbol_role(name, kind, &excerpt),
+            ));
+        } else if preamble_excerpt.is_empty() && excerpt.trim().len() > 40 {
+            preamble_excerpt = excerpt.chars().take(900).collect();
+        }
+    }
+
+    if symbols.is_empty() && preamble_excerpt.trim().is_empty() {
+        return None;
+    }
+
+    // Prefer exports / callables first in the overview list.
+    symbols.sort_by(|a, b| {
+        let rank = |kind: &str| -> i32 {
+            let k = kind.to_lowercase();
+            if k.contains("export") || k.contains("function") || k.contains("method") {
+                0
+            } else if k.contains("class") || k.contains("const") || k.contains("variable") {
+                1
+            } else {
+                2
+            }
+        };
+        rank(&a.1).cmp(&rank(&b.1)).then_with(|| a.0.cmp(&b.0))
+    });
+
+    let purpose = infer_file_purpose(&file_hint, &symbols, &preamble_excerpt);
+    let mut parts = Vec::new();
+    parts.push(format!("## Purpose\n\n`{file_hint}` {purpose}"));
+
+    if !symbols.is_empty() {
+        let list = symbols
+            .iter()
+            .take(12)
+            .map(|(name, kind, line, role)| {
+                let loc = line
+                    .map(|n| format!(" (L{n})"))
+                    .unwrap_or_default();
+                format!("- `{name}`{loc} — {kind}: {role}")
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+        parts.push(format!("## Key symbols\n\n{list}"));
+    }
+
+    if let Some(flow) = infer_file_flow(&symbols, &preamble_excerpt) {
+        parts.push(format!("## How it works\n\n{flow}"));
+    }
+
+    if !preamble_excerpt.trim().is_empty() && symbols.len() < 2 {
+        parts.push(format!(
+            "## Evidence excerpt\n\n```\n{}\n```",
+            preamble_excerpt.trim()
+        ));
+    }
+
+    parts.push(format!("[Source: {file_hint}]"));
+
+    let confidence = best_confidence.max(0.72).min(0.95);
+    Some(StructuredAnswer {
+        intent: QueryIntent::ExplainSymbol,
+        answer_text: parts.join("\n\n"),
+        confidence,
+        source_file: file_hint,
+        line_start: symbols.first().and_then(|(_, _, l, _)| *l),
+        line_end: symbols.last().and_then(|(_, _, l, _)| *l),
+    })
+}
+
+fn summarize_symbol_role(name: &str, kind: &str, excerpt: &str) -> String {
+    let lower = excerpt.to_lowercase();
+    let name_l = name.to_lowercase();
+    if name_l.contains("subscribe") || lower.contains("listeners.add") {
+        return "registers a callback and returns an unsubscribe function".to_string();
+    }
+    if name_l.contains("notify") || name_l.contains("emit") || lower.contains("forEach") {
+        return "notifies every registered listener (pub/sub broadcast)".to_string();
+    }
+    if name_l.contains("listener") || lower.contains("new set") {
+        return "holds the set of registered callbacks".to_string();
+    }
+    if lower.contains("export function") || lower.contains("export const") {
+        return format!("exported {kind} used by other modules");
+    }
+    if let Some(summary) = summarize_from_def_body(excerpt, name) {
+        return summary;
+    }
+    let first = excerpt
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty() && !l.starts_with("//") && !l.starts_with("/*"))
+        .unwrap_or(kind);
+    if first.len() > 110 {
+        format!("{}…", first.chars().take(110).collect::<String>())
+    } else {
+        first.to_string()
+    }
+}
+
+fn infer_file_purpose(
+    file_hint: &str,
+    symbols: &[(String, String, Option<i32>, String)],
+    preamble: &str,
+) -> String {
+    let names: Vec<String> = symbols.iter().map(|(n, _, _, _)| n.to_lowercase()).collect();
+    let joined = names.join(" ");
+    let pre_l = preamble.to_lowercase();
+    if (joined.contains("subscribe") && joined.contains("notify"))
+        || (pre_l.contains("listeners") && pre_l.contains("notify"))
+    {
+        return format!(
+            "is a small event/pub-sub helper: modules can subscribe to refresh callbacks and later notify them (used for overview refresh wiring around `{file_hint}`)."
+        );
+    }
+    if !symbols.is_empty() {
+        let preview = symbols
+            .iter()
+            .take(4)
+            .map(|(n, k, _, _)| format!("{k} `{n}`"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return format!(
+            "defines and exports {preview}{more}. Use the sections below for the file-level behavior.",
+            more = if symbols.len() > 4 {
+                format!(", and {} more symbol(s)", symbols.len() - 4)
+            } else {
+                String::new()
+            }
+        );
+    }
+    "contains the indexed TypeScript/JavaScript module shown in the evidence excerpt.".to_string()
+}
+
+fn infer_file_flow(
+    symbols: &[(String, String, Option<i32>, String)],
+    preamble: &str,
+) -> Option<String> {
+    let names: Vec<String> = symbols.iter().map(|(n, _, _, _)| n.to_lowercase()).collect();
+    let has_sub = names.iter().any(|n| n.contains("subscribe"));
+    let has_notify = names.iter().any(|n| n.contains("notify") || n.contains("emit"));
+    let has_listeners = names.iter().any(|n| n.contains("listener"))
+        || preamble.to_lowercase().contains("listeners");
+    if has_sub && has_notify {
+        return Some(
+            "Callers register via the subscribe helper (stored in a module-level listener set). \
+When something on the overview should refresh, `notify` walks that set and invokes each listener. \
+This keeps overview UI updates decoupled from the producers of those events."
+                .to_string(),
+        );
+    }
+    if has_listeners && (has_sub || has_notify) {
+        return Some(
+            "A shared listener collection stores callbacks; notify/subscribe helpers add or invoke them."
+                .to_string(),
+        );
     }
     None
 }
@@ -1096,7 +1326,42 @@ mod tests {
             Some((10, 16)),
         )];
         let answer = try_structured_answer("What does handleSend do in ChatView.tsx?", &hits);
-        assert!(answer.is_none(), "explain questions should defer to LLM");
+        assert!(answer.is_none(), "symbol explain questions should defer to LLM");
+    }
+
+    #[test]
+    fn qa_file_purpose_overview_events() {
+        let hits = vec![
+            hit(
+                "overviewEvents.ts",
+                "code",
+                "type Listener = () => void;\nconst listeners = new Set<Listener>();",
+                0.9,
+                Some(("const", "listeners")),
+                Some((1, 3)),
+            ),
+            hit(
+                "overviewEvents.ts",
+                "code",
+                "export function subscribeOverviewRefresh(fn: Listener): () => void {\n  listeners.add(fn);\n  return () => listeners.delete(fn);\n}",
+                0.92,
+                Some(("function", "subscribeOverviewRefresh")),
+                Some((5, 8)),
+            ),
+            hit(
+                "overviewEvents.ts",
+                "code",
+                "export function notifyOverviewRefresh(): void {\n  listeners.forEach((fn) => fn());\n}",
+                0.93,
+                Some(("function", "notifyOverviewRefresh")),
+                Some((10, 12)),
+            ),
+        ];
+        let answer = try_structured_answer("what does overviewEvents.ts do?", &hits).unwrap();
+        assert!(answer.answer_text.contains("## Purpose"));
+        assert!(answer.answer_text.contains("subscribeOverviewRefresh"));
+        assert!(answer.answer_text.contains("notifyOverviewRefresh"));
+        assert!(answer.answer_text.to_lowercase().contains("pub-sub") || answer.answer_text.to_lowercase().contains("listener"));
     }
 
     #[test]

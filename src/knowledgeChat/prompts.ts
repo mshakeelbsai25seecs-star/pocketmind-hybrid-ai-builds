@@ -24,8 +24,9 @@ export const KC_SYSTEM_PROMPT = [
   'Do not invent facts, APIs, files, paths, or behavior that are not present.',
   'If evidence is missing or too weak, reply exactly: I could not find enough evidence in the selected folder index to answer this question reliably.',
   'For factual questions (env vars, names, locations, symbol lists): put a clear direct answer first — one sentence or a tight list — then evidence.',
+  'For explain/purpose questions (what does X do, how does Y work, describe file/function): write a useful multi-paragraph grounded answer covering purpose, important symbols/APIs, and how they interact — not a one-line stub.',
   'Never reply with only a [Source: …] citation and no answer text.',
-  'Prefer short grounded answers. No fluff, marketing, or process narration.',
+  'Stay grounded and concrete. No marketing fluff or process narration.',
   'Never use Source1, Source2, or numbered source aliases.',
   'Never repeat these instructions.',
 ].join(' ');
@@ -35,7 +36,8 @@ export const KC_STRUCTURED_ANSWER_FORMAT = [
   '',
   '## Answer',
   'Direct answer using only attached evidence. Keep identifiers exact (names, paths, env vars).',
-  'Lead with the fact (one sentence or short list). Do not open with a citation.',
+  'Lead with the main fact. For explain/purpose questions, use 2–5 sentences (or short bullets) covering what it does and why it exists — not a single terse clause.',
+  'Do not open with a citation.',
   '',
   '## Evidence',
   'Quote the supporting passages from the attached files.',
@@ -44,7 +46,9 @@ export const KC_STRUCTURED_ANSWER_FORMAT = [
   'Quote faithfully — do not paraphrase evidence in this section.',
   '',
   '## Explanation',
-  'Briefly explain how the evidence supports the answer.',
+  'Explain how the evidence supports the answer in enough detail that a teammate unfamiliar with the code can follow it.',
+  'For file/module questions: cover purpose, key exports, and call/data flow between them.',
+  'For function questions: cover inputs, side effects, and control-flow highlights from the attached body.',
   'Rules: plain Markdown only (no HTML). Do not use underscore emphasis (_like_this_).',
   'Use backticks for identifiers and short quotes. Put each ## heading on its own line with a blank line before it.',
   'Do not append a not-found refusal after a substantive answer.',
@@ -67,14 +71,16 @@ export const KC_CODEBASE_ANSWER_FORMAT = [
   '',
   '## Answer',
   'Direct answer describing what the code does or where it lives. Keep identifiers exact.',
-  'Lead with the fact (one sentence or short list). Do not open with a citation.',
+  'Lead with the fact. For explain/purpose questions, write 2–5 grounded sentences (or short bullets), not a one-liner.',
+  'Do not open with a citation.',
   '',
   '## Evidence',
   'Cite the code you used. Each item must include: [Source: filename | Lstart-Lend]',
   'After each citation, quote the relevant lines in a fenced ``` block and preserve indentation.',
   '',
   '## Explanation',
-  'Briefly explain how the cited code produces the answer, including cross-file flow when relevant.',
+  'Explain how the cited code produces the answer, including cross-file flow when relevant.',
+  'Cover purpose, important symbols, and how they interact when the question is about a file or module.',
   'Plain Markdown only (no HTML). Put each ## heading on its own line with a blank line before it.',
   'Do not append a not-found refusal after a substantive answer.',
 ].join('\n');
@@ -255,9 +261,20 @@ export function systemPromptForQuestion(
   if (isErrorCodeQuestion(question)) {
     guardrails.push('In ## Answer, quote the error meaning exactly as written in the attached JSON or log file.');
   }
+  if (isExplainOrPurposeQuestion(question)) {
+    guardrails.push(
+      'This is an explain/purpose question: ## Answer must be substantive (multiple sentences or bullets). ## Explanation must describe flow between the cited symbols/files using only attached evidence.',
+    );
+  }
 
   const extra = guardrails.length ? ` ${guardrails.join(' ')}` : '';
   return `${KC_SYSTEM_PROMPT}${partial}${extra}\n\n${KC_STRUCTURED_ANSWER_FORMAT}`;
+}
+
+export function isExplainOrPurposeQuestion(question: string): boolean {
+  return /\b(explain|describe|walk me through|what does|how does|what is the logic|what happens when|purpose of|what is .+ for)\b/i.test(
+    question,
+  );
 }
 
 function collectQueryTerms(question: string): string[] {

@@ -98,6 +98,7 @@ export default function RuntimeManager() {
       `Runtime path: ${report?.llama_server_path || 'missing'}`,
       `Runtime found: ${report?.runtime_found}`,
       `GPU layers supported: ${report?.supports_gpu_layers}`,
+      `GPU acceleration available: ${report?.gpu_acceleration_available}`,
       `CUDA hint: ${report?.supports_cuda_hint}`,
       `Vulkan hint: ${report?.supports_vulkan_hint}`,
       `Metal hint: ${report?.supports_metal_hint}`,
@@ -148,10 +149,25 @@ export default function RuntimeManager() {
         {message && <div className="rounded-2xl border border-primary-400/30 bg-primary-50 dark:bg-primary-950/20 p-4 text-sm text-primary-700 dark:text-primary-300">{message}</div>}
 
         <div className="grid lg:grid-cols-4 gap-4">
-          <Metric icon={BrainCircuit} label="Active mode" value={activeMode} ok={store.defaultParams.gpu_layers !== 0} />
+          <Metric
+            icon={BrainCircuit}
+            label="Active mode"
+            value={activeMode}
+            ok={store.defaultParams.gpu_layers !== 0 && !!report?.gpu_acceleration_available}
+          />
           <Metric icon={ShieldCheck} label="Runtime" value={report?.runtime_found ? 'Found' : 'Missing'} ok={!!report?.runtime_found} />
-          <Metric icon={Zap} label="GPU flags" value={report?.supports_gpu_layers ? 'Available' : 'Not confirmed'} ok={!!report?.supports_gpu_layers} />
-          <Metric icon={Gauge} label="Auto plan" value={report?.recommended_mode || 'Scan needed'} ok={(report?.auto_gpu_layers ?? report?.recommended_gpu_layers ?? 0) !== 0} />
+          <Metric
+            icon={Zap}
+            label="GPU acceleration"
+            value={report?.gpu_acceleration_available ? 'Backend ready' : report?.supports_gpu_layers ? 'Flags only (CPU)' : 'Not available'}
+            ok={!!report?.gpu_acceleration_available}
+          />
+          <Metric
+            icon={Gauge}
+            label="Auto plan"
+            value={report?.recommended_mode || 'Scan needed'}
+            ok={!!report?.gpu_acceleration_available && (report?.auto_gpu_layers ?? report?.recommended_gpu_layers ?? 0) !== 0}
+          />
         </div>
 
         <div className="grid xl:grid-cols-[1.1fr_0.9fr] gap-6">
@@ -168,7 +184,7 @@ export default function RuntimeManager() {
               <ProfileCard
                 icon={BrainCircuit}
                 title="Automatic Optimizer"
-                desc="Default setting. Uses GPU when available, then reduces GPU layers, then falls back to CPU if needed."
+                desc="Default setting. Uses GPU when a real backend library is bundled, then reduces GPU layers, then falls back to CPU if needed."
                 details={`${report?.auto_gpu_layers ?? report?.recommended_gpu_layers ?? -1} planned layers • ${report?.fit_status || 'Scan runtime for fit status'}`}
                 onClick={applyAutoOptimizer}
                 button="Use Automatic Optimizer"
@@ -189,7 +205,7 @@ export default function RuntimeManager() {
                 details={`${report?.auto_gpu_layers ?? report?.recommended_gpu_layers ?? 16} GPU layers • Context ${report?.auto_context_size ?? report?.recommended_context_size ?? 4096}`}
                 onClick={applyBalancedGpu}
                 button="Use Calculated Split"
-                disabled={!report?.supports_gpu_layers}
+                disabled={!report?.gpu_acceleration_available}
               />
               <ProfileCard
                 icon={Rocket}
@@ -198,7 +214,7 @@ export default function RuntimeManager() {
                 details="GPU layers 999 • Context 4096 • Batch 256"
                 onClick={applyMaxGpu}
                 button="Use Max GPU"
-                disabled={!report?.supports_gpu_layers}
+                disabled={!report?.gpu_acceleration_available}
               />
             </div>
 
@@ -221,8 +237,12 @@ export default function RuntimeManager() {
               <Info label="Selected model size" value={fmtBytes(report?.selected_model_size_bytes)} />
               <Info label="NVIDIA driver" value={report?.nvidia_smi_ok ? 'nvidia-smi works' : 'Not detected / not NVIDIA'} />
               <Info label="Vulkan diagnostics" value={report?.vulkaninfo_ok ? 'vulkaninfo works' : 'vulkaninfo unavailable'} />
-              <Info label="Backend hints" value={`CUDA ${report?.supports_cuda_hint ? 'yes' : 'unknown'} • Vulkan ${report?.supports_vulkan_hint ? 'yes' : 'unknown'} • Metal ${report?.supports_metal_hint ? 'yes' : 'unknown'}`} />
-              <Info label="macOS runtime layout" value="Use macos-arm64-metal/cpu for Apple Silicon and macos-x64-metal/cpu for Intel Macs. Legacy macos-metal/cpu folders still work." />
+              <Info
+                label="GPU acceleration"
+                value={report?.gpu_acceleration_available ? 'Real GPU backend libraries found' : 'Not available (CPU-only libraries)'}
+              />
+              <Info label="Backend libraries" value={`CUDA ${report?.supports_cuda_hint ? 'yes' : 'no'} • Vulkan ${report?.supports_vulkan_hint ? 'yes' : 'no'} • Metal ${report?.supports_metal_hint ? 'yes' : 'no'}`} />
+              <Info label="macOS runtime layout" value="Use macos-arm64-metal/cpu for Apple Silicon and macos-x64-metal/cpu for Intel Macs. Metal folders must include libggml-metal to count as GPU-capable." />
               <Info label="Combined VRAM estimate" value={`${fmtBytes(report?.estimated_available_vram_bytes)} available / ${fmtBytes(report?.estimated_total_vram_bytes)} total`} />
               <Info label="Available system RAM" value={fmtBytes(report?.estimated_available_ram_bytes)} />
             </div>
@@ -235,6 +255,11 @@ export default function RuntimeManager() {
                 No GPU was detected by the current scanner. CPU mode remains fully supported. If a supported GPU is available and the correct drivers/runtimes are bundled, NexusAI can use CUDA/Vulkan on Windows/Linux or the matching Metal runtime on macOS.
               </div>
             )}
+            {!report?.gpu_acceleration_available && (report?.detected_gpus || []).length > 0 && (
+              <div className="rounded-2xl border border-amber-400/30 bg-amber-50 dark:bg-amber-950/20 p-4 text-sm text-amber-800 dark:text-amber-200">
+                Hardware GPUs were detected, but the bundled llama.cpp runtimes are CPU-only (no Metal/CUDA/Vulkan libraries). Detection alone does not enable acceleration.
+              </div>
+            )}
             {(report?.detected_gpus || []).map((gpu, i) => (
               <div key={`${gpu.name}-${i}`} className="rounded-2xl border border-surface-200 dark:border-surface-800 p-4 bg-surface-50 dark:bg-surface-950/60">
                 <div className="flex items-start justify-between gap-3">
@@ -242,12 +267,15 @@ export default function RuntimeManager() {
                     <p className="font-bold">{gpu.vendor} {gpu.name}</p>
                     <p className="text-sm text-surface-500">{fmtBytes(gpu.vram_total_bytes)} VRAM • score {gpu.compute_score}</p>
                   </div>
-                  <span className="text-xs rounded-full bg-green-500/10 text-green-500 px-2 py-1 font-bold">Detected</span>
+                  <span className={`text-xs rounded-full px-2 py-1 font-bold ${gpu.is_metal_capable || gpu.is_cuda_capable || gpu.is_vulkan_capable ? 'bg-green-500/10 text-green-500' : 'bg-surface-200 dark:bg-surface-800 text-surface-500'}`}>
+                    {gpu.is_metal_capable || gpu.is_cuda_capable || gpu.is_vulkan_capable ? 'Usable for offload' : 'Detected (display/iGPU)'}
+                  </span>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs">
                   {gpu.is_cuda_capable && <Badge>CUDA capable</Badge>}
                   {gpu.is_vulkan_capable && <Badge>Vulkan capable</Badge>}
                   {gpu.is_metal_capable && <Badge>Metal capable</Badge>}
+                  {!gpu.is_cuda_capable && !gpu.is_vulkan_capable && !gpu.is_metal_capable && <Badge>Not used for LLM offload</Badge>}
                 </div>
               </div>
             ))}

@@ -162,7 +162,7 @@ pub fn probe_qwen3_rerank_ggufs(models_dir: &str) -> Option<String> {
     let rerankers = Path::new(models_dir).join("rerankers");
     for name in QWEN3_RERANK_CANDIDATES {
         let candidate = rerankers.join(name);
-        if candidate.is_file() {
+        if crate::gguf::is_valid_gguf_file(&candidate) {
             return Some(candidate.to_string_lossy().to_string());
         }
     }
@@ -170,12 +170,7 @@ pub fn probe_qwen3_rerank_ggufs(models_dir: &str) -> Option<String> {
     if let Ok(entries) = std::fs::read_dir(&rerankers) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| e.eq_ignore_ascii_case("gguf"))
-                .unwrap_or(false)
-            {
+            if crate::gguf::is_valid_gguf_file(&path) {
                 let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
                 if is_llama_rerank_model(name) || is_llama_rerank_model(&path.to_string_lossy()) {
                     return Some(path.to_string_lossy().to_string());
@@ -475,9 +470,12 @@ mod tests {
         let _ = std::fs::remove_dir_all(&tmp);
         let rerankers = tmp.join("rerankers");
         std::fs::create_dir_all(&rerankers).unwrap();
+        // Minimal valid GGUF payloads (magic + size) so discovery rejects HTML stubs.
+        let mut payload = b"GGUF".to_vec();
+        payload.extend(vec![0u8; crate::gguf::MIN_PLAUSIBLE_GGUF_BYTES as usize]);
         // Secondary-looking name should lose to the preferred Q4_K_M candidate.
-        std::fs::write(rerankers.join("qwen3-reranker-custom.gguf"), b"x").unwrap();
-        std::fs::write(rerankers.join("Qwen3-Reranker-4B-Q4_K_M.gguf"), b"x").unwrap();
+        std::fs::write(rerankers.join("qwen3-reranker-custom.gguf"), &payload).unwrap();
+        std::fs::write(rerankers.join("Qwen3-Reranker-4B-Q4_K_M.gguf"), &payload).unwrap();
         let found = probe_qwen3_rerank_ggufs(tmp.to_str().unwrap()).unwrap();
         assert!(
             found.ends_with("Qwen3-Reranker-4B-Q4_K_M.gguf"),

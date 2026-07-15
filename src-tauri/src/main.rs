@@ -12,6 +12,7 @@ mod commands;
 mod deployment;
 mod product;
 mod audit;
+mod gguf;
 mod knowledge_chat;
 
 use tauri::{Manager, WindowEvent};

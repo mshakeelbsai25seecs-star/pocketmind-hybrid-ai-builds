@@ -35,7 +35,7 @@ export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
   enable_llm_query_expand: true,
   folder_agnostic_mode: true,
   enable_hyde: true,
-  knowledge_chat_evidence_mode: 'concise',
+  knowledge_chat_evidence_mode: 'evidence_explanation',
   knowledge_chat_deployment_profile: 'server',
   enable_contextual_indexing: true,
   enable_semantic_chunking: true,

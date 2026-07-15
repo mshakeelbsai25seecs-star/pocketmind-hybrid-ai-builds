@@ -556,6 +556,8 @@ export interface GpuRuntimeReport {
   llama_server_path?: string | null;
   runtime_found: boolean;
   supports_gpu_layers: boolean;
+  /** True only when a bundled runtime contains real CUDA/Vulkan/Metal libraries. */
+  gpu_acceleration_available: boolean;
   supports_cuda_hint: boolean;
   supports_vulkan_hint: boolean;
   supports_metal_hint: boolean;

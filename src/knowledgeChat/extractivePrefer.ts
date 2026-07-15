@@ -1,5 +1,5 @@
 import type { KcGroundedContextSource, KcSearchHit, KcSymbolEntity } from './types';
-import { isNotFoundAnswer } from './groundingCheck';
+import { isEmptyModelResponse, isNotFoundAnswer } from './groundingCheck';
 import {
   isCodeSymbolQuestion,
   tryExtractiveCodeSymbolAnswer,
@@ -21,6 +21,7 @@ export function shouldPreferExtractiveOverLlm(
   if (isCodeSymbolQuestion(question)) return true;
   if (!groundingOk) return true;
   if (isNotFoundAnswer(llmDraft)) return true;
+  if (isEmptyModelResponse(llmDraft)) return true;
   if (isWeakStructuredCodeAnswer(llmDraft)) return true;
   return false;
 }
