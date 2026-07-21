@@ -8,7 +8,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::Mutex;
 
-const IDLE_SHUTDOWN_SECS: u64 = 600;
+/// Keep warm embed servers longer so a second Knowledge Chat question does not
+/// pay another multi-minute Qwen3-Embedding cold start. Same model/weights.
+const IDLE_SHUTDOWN_SECS: u64 = 1_800;
 const DEFAULT_MAX_WARM_SESSIONS: usize = 2;
 
 struct WarmEmbedSession {

@@ -154,7 +154,7 @@ export default function SocDataPackIntake() {
       return;
     }
     if (!isAllowedCompanyIntakePath(folderPath, deploymentConfig || undefined)) {
-      setError('Company data intake must use a path under the configured NexusAI data roots. Update Settings → Deployment if needed.');
+      setError('Company data intake must use a path under the configured PocketMind Hybrid AI data roots. Update Settings → Deployment if needed.');
       return;
     }
 

@@ -113,21 +113,21 @@ export default function CollectionHealthPanel() {
 
           {readiness && (
             <div className="rounded-xl border border-white/70 dark:border-surface-800 bg-surface-50/85 dark:bg-surface-950/55 p-3 space-y-2">
-              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-surface-500">Default partition models</p>
+              <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-surface-500">Search models</p>
               <div className="grid sm:grid-cols-2 gap-2 text-xs">
                 <ModelReadinessRow
-                  label="Code model (Qwen3-Embedding)"
+                  label="Code search model"
                   resolved={readiness.code_model_resolved}
                   path={readiness.code_model_path}
                 />
                 <ModelReadinessRow
-                  label="Knowledge model (BGE-M3)"
+                  label="Document search model"
                   resolved={readiness.knowledge_model_resolved}
                   path={readiness.knowledge_model_path}
                 />
                 {typeof readiness.llama_rerank_configured === 'boolean' && (
                   <ModelReadinessRow
-                    label="Reranker (Qwen3-Reranker)"
+                    label="Result ranking model"
                     resolved={readiness.llama_rerank_configured}
                     path={readiness.llama_rerank_model_path || ''}
                   />
@@ -139,7 +139,7 @@ export default function CollectionHealthPanel() {
           {health.partitions.length > 0 && (
             <div className="space-y-2">
               <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-surface-500">
-                Partitions {health.folder_category ? `· ${health.folder_category.replace(/_/g, ' ')}` : ''}
+                Content groups {health.folder_category ? `· ${health.folder_category.replace(/_/g, ' ')}` : ''}
               </p>
               <div className="grid lg:grid-cols-2 xl:grid-cols-3 gap-3">
                 {health.partitions.map(partition => (
@@ -151,24 +151,62 @@ export default function CollectionHealthPanel() {
 
           <div className="grid sm:grid-cols-2 xl:grid-cols-4 gap-2">
             <Stat label="Status" value={KC_STATUS_LABELS[health.status]} />
-            <Stat label="Dense coverage" value={`${health.dense_coverage_pct.toFixed(0)}%`} />
-            <Stat label="HNSW index" value={health.hnsw_ready ? `${health.hnsw_vector_count} vectors` : 'Not built'} />
-            <Stat label="Qwen3 reranker" value={readiness?.llama_rerank_configured ? 'Configured' : 'Missing GGUF'} />
-            <Stat label="ONNX fallback" value={health.onnx_reranker_configured ? 'Configured' : health.onnx_reranker_enabled ? 'Missing model' : 'Disabled'} />
-            <Stat label="PDF OCR" value={health.pdf_ocr_available ? 'Available' : 'Unavailable'} />
-            <Stat label="FTS index" value={health.fts_populated ? 'Ready' : 'Empty'} />
+            <Stat label="Meaning search coverage" value={`${health.dense_coverage_pct.toFixed(0)}%`} />
+            <Stat label="Fast meaning index" value={health.hnsw_ready ? 'Ready' : 'Not built'} />
+            <Stat label="Result ranking" value={readiness?.llama_rerank_configured ? 'Ready' : 'Not set up'} />
+            <Stat label="Scanned PDF reading" value={health.pdf_ocr_available ? 'Ready' : 'Not available'} />
+            <Stat label="PDF reader in use" value={
+              (health.ocr_engine_hint || 'auto')
+                .replace('auto→docling', 'Automatic (layout)')
+                .replace('auto→legacy', 'Automatic (built-in)')
+                .replace('legacy (docling unavailable)', 'Built-in')
+                .replace('docling', 'Layout-aware')
+                .replace('legacy', 'Built-in')
+            } />
+            <Stat
+              label="Online page images"
+              value={
+                health.image_rag_opt_in
+                  ? (health.image_rag_configured ? 'Allowed & set up' : 'Allowed (needs Settings)')
+                  : 'Off for this folder'
+              }
+            />
+            <Stat label="Word search index" value={health.fts_populated ? 'Ready' : 'Empty'} />
             <Stat label="Files" value={`${health.indexed_files} indexed / ${health.file_count} total`} />
-            <Stat label="Chunks" value={String(health.chunk_count)} />
-            <Stat label="Dense vectors" value={String(health.dense_chunk_count)} />
+            <Stat label="Searchable sections" value={String(health.chunk_count)} />
+            <Stat label="Meaning-search sections" value={String(health.dense_chunk_count)} />
             <Stat label="Failed" value={String(health.failed_files)} />
             <Stat label="Skipped" value={String(health.skipped_files)} />
           </div>
 
-          {readiness && readiness.warnings.length > 0 && (
-            <IssueList title="System readiness warnings" items={readiness.warnings} />
+          {readiness && (
+            <div className="rounded-xl border border-sky-200/70 dark:border-sky-900 bg-sky-50/70 dark:bg-sky-950/20 p-3 space-y-2">
+              <p className="text-xs font-bold uppercase tracking-[0.14em] text-sky-800 dark:text-sky-300">
+                Server deployment targets
+              </p>
+              <p className="text-xs text-sky-900 dark:text-sky-100">
+                Best-quality models for a server deployment (this machine may run smaller local fallbacks):
+              </p>
+              <ul className="text-xs text-sky-900 dark:text-sky-100 space-y-1 list-disc pl-4">
+                <li><strong>Document search:</strong> BGE-M3 (or organization knowledge embeddings)</li>
+                <li><strong>Code search:</strong> Qwen3-Embedding-8B when GPU/RAM allows</li>
+                <li><strong>Result ranking:</strong> Qwen3-Reranker-4B under models/rerankers</li>
+                <li><strong>Answer model:</strong> 70B-class instruct or organization OpenAI-compatible endpoint</li>
+              </ul>
+              <p className="text-[11px] text-sky-800/90 dark:text-sky-200/90">
+                After chunking/retrieval upgrades, rebuild each collection index for best accuracy.
+              </p>
+            </div>
           )}
+
+          {readiness && (() => {
+            const fixItems = readiness.warnings.filter(
+              (w) => !w.startsWith('Server deployment targets') && !w.startsWith('Chunking and retrieval'),
+            );
+            return fixItems.length > 0 ? <IssueList title="Things to fix" items={fixItems} /> : null;
+          })()}
           {health.ocr_needed_files.length > 0 && (
-            <IssueList title="PDFs that may need OCR" items={health.ocr_needed_files} />
+            <IssueList title="PDFs that may need text reading" items={health.ocr_needed_files} />
           )}
           {health.failed_file_samples.length > 0 && (
             <IssueList title="Failed files" items={health.failed_file_samples} />

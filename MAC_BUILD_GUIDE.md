@@ -1,10 +1,10 @@
-# NexusAI macOS Build Guide
+# PocketMind Hybrid AI macOS Build Guide
 
-This source is prepared for one shared NexusAI codebase across Windows and macOS. Windows keeps CPU/CUDA/Vulkan runtimes. macOS uses native CPU/Metal llama.cpp runtimes.
+This source is prepared for one shared PocketMind Hybrid AI codebase across Windows and macOS. Windows keeps CPU/CUDA/Vulkan runtimes. macOS uses native CPU/Metal llama.cpp runtimes.
 
 ## Supported Apple laptop targets
 
-NexusAI should support both active Mac laptop families when the correct runtime folders are bundled:
+PocketMind Hybrid AI should support both active Mac laptop families when the correct runtime folders are bundled:
 
 - **Apple Silicon Macs**: M1, M2, M3, M4 and newer (`arm64` / `aarch64`).
 - **Intel Macs**: older MacBook models (`x64` / `x86_64`).
@@ -29,13 +29,13 @@ bin/llama.cpp/macos-metal/llama-server
 bin/llama.cpp/macos-cpu/llama-server
 ```
 
-Inside a packaged `.app`, NexusAI also checks:
+Inside a packaged `.app`, PocketMind Hybrid AI also checks:
 
 ```text
-NexusAI.app/Contents/Resources/llama.cpp/macos-arm64-metal/llama-server
-NexusAI.app/Contents/Resources/llama.cpp/macos-arm64-cpu/llama-server
-NexusAI.app/Contents/Resources/llama.cpp/macos-x64-metal/llama-server
-NexusAI.app/Contents/Resources/llama.cpp/macos-x64-cpu/llama-server
+PocketMind Hybrid AI.app/Contents/Resources/llama.cpp/macos-arm64-metal/llama-server
+PocketMind Hybrid AI.app/Contents/Resources/llama.cpp/macos-arm64-cpu/llama-server
+PocketMind Hybrid AI.app/Contents/Resources/llama.cpp/macos-x64-metal/llama-server
+PocketMind Hybrid AI.app/Contents/Resources/llama.cpp/macos-x64-cpu/llama-server
 ```
 
 ## Download runtimes (recommended)
@@ -62,7 +62,7 @@ On an Intel Mac with a discrete Metal GPU (for example AMD Radeon), build and in
 ./scripts/build_macos_x64_metal_runtime.sh
 ```
 
-This replaces `bin/llama.cpp/macos-x64-metal/` with a build that includes `libggml-metal*.dylib`. Then restart NexusAI → **Runtime → Scan runtime** → **Use Automatic Optimizer** (or Calculated Split). The scanner only treats Metal as available when `libggml-metal` is present.
+This replaces `bin/llama.cpp/macos-x64-metal/` with a build that includes `libggml-metal*.dylib`. Then restart PocketMind Hybrid AI → **Runtime → Scan runtime** → **Use Automatic Optimizer** (or Calculated Split). The scanner only treats Metal as available when `libggml-metal` is present.
 
 ## Simple folder setup on a Mac
 

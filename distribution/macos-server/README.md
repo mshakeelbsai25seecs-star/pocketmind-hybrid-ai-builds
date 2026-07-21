@@ -1,25 +1,17 @@
-# NexusAI — macOS Server Package
+# PocketMind Hybrid AI — macOS Server Package
 
-For shared Mac Studio / Mac mini SOC pilots in server mode.
-
-## Default data root
-
-`/Library/Application Support/NexusAI` when `NEXUS_DEPLOY_MODE=server`
-
-Workstation installs use `~/Library/Application Support/NexusAI`.
-
-## Quick start
-
-```bash
-sudo bash scripts/prepare-server.sh "/Library/Application Support/NexusAI"
-export NEXUS_DATA_ROOT="/Library/Application Support/NexusAI"
-export NEXUS_DEPLOY_MODE=server
-```
-
-Stage application from `../macos-desktop/payload/` after building on macOS.
+Handoff kit for macOS server / shared Mac pilots.
 
 ## Contents
 
-- `docs/` — USER_MANUAL, ADMIN guide, CONFIGURATION, TROUBLESHOOTING
-- `config/` — deployment.env.example, folder-layout.md
-- `scripts/prepare-server.sh`
+- `docs/` — user, admin, configuration, troubleshooting guides
+- `scripts/prepare-server.sh` — create data folders
+
+## Quick start
+
+1. Run `./scripts/prepare-server.sh`.
+2. Install the desktop app package from `../macos-desktop/`.
+3. Open the app → **Settings → Deployment** → **Save**.
+4. Scan and index company data before use.
+
+Also see `../shared/docs/QUICK_START.md`.

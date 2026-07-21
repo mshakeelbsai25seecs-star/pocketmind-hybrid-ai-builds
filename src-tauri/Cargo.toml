@@ -1,8 +1,8 @@
 [package]
 name = "nexus-ai"
 version = "0.1.0"
-description = "Offline-first multi-LLM chat application"
-authors = ["NexusAI Team"]
+description = "PocketMind Hybrid AI — offline-first multi-LLM chat application"
+authors = ["PocketMind Hybrid AI Team"]
 edition = "2021"
 rust-version = "1.70"
 

@@ -1,11 +1,11 @@
-# NexusAI Configuration Reference (Linux)
+# PocketMind Hybrid AI Configuration Reference (Linux)
 
 | Setting | Default |
 |---------|---------|
-| Data root | `/var/lib/nexusai` |
-| Models | `/var/lib/nexusai/models` |
-| Company data | `/var/lib/nexusai/company-data` |
-| Exports | `/var/lib/nexusai/exports` |
+| Data root | `/var/lib/pocketmind` |
+| Models | `/var/lib/pocketmind/models` |
+| Company data | `/var/lib/pocketmind/company-data` |
+| Exports | `/var/lib/pocketmind/exports` |
 
 Set `NEXUS_DATA_ROOT` to override. Use `:` as separator in `NEXUS_ALLOWED_PATHS`.
 

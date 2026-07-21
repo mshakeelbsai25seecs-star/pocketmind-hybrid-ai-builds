@@ -18,9 +18,9 @@ import { useAppStore } from '../store';
 
 export const KC_SYSTEM_PROMPT = [
   'You are Nexus Data Knowledge Chat (answer stage).',
-  'The user message contains a QUESTION and ATTACHED SOURCE FILES from the indexed folder.',
-  'Each attached block is either the COMPLETE indexed file (≤ 24 KB) or retrieved excerpts when the file is larger.',
-  'Answer ONLY from attached blocks. Do not use outside knowledge.',
+  'The user message contains a QUESTION and a retrieved evidence pack (tool-style search_vectorstore result) from the indexed folder.',
+  'Each evidence block is either the COMPLETE indexed file (≤ 24 KB) or retrieved excerpts when the file is larger.',
+  'Treat the evidence pack as the only ground truth. Answer ONLY from that evidence. Do not use outside knowledge.',
   'Do not invent facts, APIs, files, paths, or behavior that are not present.',
   'If evidence is missing or too weak, reply exactly: I could not find enough evidence in the selected folder index to answer this question reliably.',
   'For factual questions (env vars, names, locations, symbol lists): put a clear direct answer first — one sentence or a tight list — then evidence.',
@@ -792,38 +792,71 @@ export function buildRetrievedContextBlock(
   charBudget?: number,
   question = '',
 ): string {
-  const budget = charBudget ?? DEFAULT_CONTEXT_CHAR_BUDGET;
+  const budget = Math.max(2_000, charBudget ?? DEFAULT_CONTEXT_CHAR_BUDGET);
+  const safeName = (collectionName || 'collection').trim() || 'collection';
 
-  if (!hits.length) {
+  if (!Array.isArray(hits) || !hits.length) {
     return [
-      `Collection: ${collectionName}`,
+      `Collection: ${safeName}`,
       'No relevant indexed snippets were retrieved for this question.',
     ].join('\n');
   }
 
-  let remaining = budget - collectionName.length - 120;
+  let remaining = budget - safeName.length - 120;
   const sections: string[] = [];
 
   for (const hit of hits.slice(0, MAX_SOURCES)) {
     if (remaining <= 200) break;
+    if (!hit?.chunk) continue;
     const perSnippet = Math.min(MAX_SNIPPET_CHARS, Math.floor(remaining / 2));
-    const snippet = resolveContextSnippet(hit, question, perSnippet);
+    const snippet = (resolveContextSnippet(hit, question, perSnippet) || '').trim();
+    if (!snippet) continue;
     const sectionLabel = displaySectionLabel(hit).slice(0, 80);
     const anchor = formatAnchorSuffix(hit);
+    const path = hit.chunk.file_path || hit.chunk.file_name || 'unknown';
+    const pageBit = hit.chunk.page_start
+      ? `page=${hit.chunk.page_start}${hit.chunk.page_end && hit.chunk.page_end !== hit.chunk.page_start ? `-${hit.chunk.page_end}` : ''}`
+      : '';
+    const meta = [
+      `path=${path}`,
+      sectionLabel ? `section=${sectionLabel}` : '',
+      pageBit,
+      anchor.replace(/[()]/g, '').trim(),
+    ].filter(Boolean).join(' | ');
     const block = [
-      `[Source: ${hit.chunk.file_name} | ${sectionLabel}${anchor}]`,
+      `[evidence ${sections.length + 1}] ${meta}`,
       snippet,
     ].join('\n');
     sections.push(block);
     remaining -= block.length;
   }
 
+  if (!sections.length) {
+    return [
+      `Collection: ${safeName}`,
+      'No relevant indexed snippets were retrieved for this question.',
+    ].join('\n');
+  }
+
   return [
-    `Collection: ${collectionName}`,
+    `Collection: ${safeName}`,
     '',
-    'RETRIEVED SOURCES:',
+    'tool_call: search_vectorstore',
+    'tool_result: RETRIEVED EVIDENCE PACK',
+    'Treat the following as the only retrieved evidence. Cite using path/page/section metadata.',
+    '',
     sections.join('\n\n---\n\n'),
   ].join('\n');
+}
+
+/** Parse VALID/INVALID from the citation verifier model. */
+export function parseVerificationVerdict(raw: string): 'valid' | 'invalid' | 'unknown' {
+  const token = raw.trim().split(/\s+/)[0]?.toUpperCase() ?? '';
+  if (token.startsWith('VALID')) return 'valid';
+  if (token.startsWith('INVALID')) return 'invalid';
+  if (/\bVALID\b/i.test(raw) && !/\bINVALID\b/i.test(raw)) return 'valid';
+  if (/\bINVALID\b/i.test(raw)) return 'invalid';
+  return 'unknown';
 }
 
 export function buildCitationHits(hits: KcSearchHit[]): CitationHit[] {

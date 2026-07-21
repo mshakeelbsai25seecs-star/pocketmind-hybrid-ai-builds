@@ -1,4 +1,4 @@
-# NexusAI Enterprise Deployment Decision Tree
+# PocketMind Hybrid AI Enterprise Deployment Decision Tree
 
 Use this guide to choose the safest server profile.
 
@@ -77,4 +77,4 @@ model IDs
 network/VPN access rules
 ```
 
-Then connect NexusAI directly through the Organization Server page.
+Then connect PocketMind Hybrid AI directly through the Organization Server page.

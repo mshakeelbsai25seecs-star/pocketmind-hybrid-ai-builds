@@ -1,11 +1,11 @@
-# NexusAI Troubleshooting
+# PocketMind Hybrid AI Troubleshooting
 
 ## App won't start
 
 | Symptom | Check |
 |---------|--------|
 | Missing DLL / runtime | Install VC++ redistributable; bundle `bin/llama.cpp` per release checklist |
-| Database error | Ensure `%APPDATA%\NexusAI` is writable |
+| Database error | Ensure `%APPDATA%\PocketMind Hybrid AI` is writable |
 | Blank window | Run from terminal to see logs; check GPU drivers |
 
 ## No model available
@@ -21,7 +21,7 @@
 3. Ensure **Auto-retrieve** is enabled.
 4. Verify company files are under configured `company-data` path.
 
-## "Path is outside configured NexusAI data roots"
+## "Path is outside configured PocketMind Hybrid AI data roots"
 
 1. Open **Settings → Deployment**.
 2. Move files under `data_root` or add path to `NEXUS_ALLOWED_PATHS`.

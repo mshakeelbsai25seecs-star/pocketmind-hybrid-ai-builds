@@ -79,20 +79,40 @@ export async function serverRagChat(
   collectionId: string,
   message: string,
 ): Promise<ServerRagChatResponse> {
-  const res = await fetch(`${creds.baseUrl}/v1/knowledge/chat`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${creds.token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      collection_id: collectionId,
-      message,
-    }),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => '');
-    throw new Error(`Server RAG chat failed (${res.status}): ${text || res.statusText}`);
+  const id = (collectionId || '').trim();
+  const msg = (message || '').trim();
+  if (!id || !msg) {
+    throw new Error('Server RAG chat requires a collection and a non-empty message.');
   }
-  return (await res.json()) as ServerRagChatResponse;
+  if (!creds.baseUrl.trim() || !creds.token.trim()) {
+    throw new Error('Server RAG credentials are incomplete.');
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 120_000);
+  try {
+    const res = await fetch(`${creds.baseUrl}/v1/knowledge/chat`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${creds.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        collection_id: id,
+        message: msg.slice(0, 32_000),
+      }),
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => '');
+      throw new Error(`Server RAG chat failed (${res.status}): ${text || res.statusText}`);
+    }
+    const data = (await res.json()) as Partial<ServerRagChatResponse>;
+    return {
+      answer: typeof data.answer === 'string' ? data.answer : '',
+      sources: Array.isArray(data.sources) ? data.sources : [],
+      collection_id: typeof data.collection_id === 'string' ? data.collection_id : id,
+    };
+  } finally {
+    clearTimeout(timer);
+  }
 }

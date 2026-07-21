@@ -137,6 +137,34 @@ pub fn collection_health(db: &Database, collection_id: &str) -> AppResult<KcColl
         None
     };
 
+    // #region agent log
+    crate::knowledge_chat::debug_session::agent_log(
+        "C",
+        "health.rs:collection_health",
+        "collection_health_snapshot",
+        serde_json::json!({
+            "collection_id": collection_id,
+            "chunk_count": collection.chunk_count,
+            "dense_chunk_count": collection.dense_chunk_count,
+            "dense_coverage_pct": dense_coverage_pct,
+            "fts_populated": fts_populated,
+            "hnsw_ready": dense_hnsw::hnsw_ready(collection_id),
+            "failed_files": failed,
+            "pending_files": pending,
+            "pdf_ocr_available": pdf_ocr_available(),
+            "partition_model_resolved": partitions.iter().map(|p| {
+                serde_json::json!({
+                    "id": p.partition_id,
+                    "model_resolved": p.model_resolved,
+                    "chunk_count": p.chunk_count,
+                    "dense_count": p.dense_chunk_count,
+                    "hnsw_ready": p.hnsw_ready,
+                })
+            }).collect::<Vec<_>>(),
+        }),
+    );
+    // #endregion
+
     Ok(KcCollectionHealth {
         collection_id: collection_id.to_string(),
         status: collection.status,
@@ -159,6 +187,21 @@ pub fn collection_health(db: &Database, collection_id: &str) -> AppResult<KcColl
         onnx_reranker_configured: onnx_reranker_configured(db),
         onnx_reranker_enabled: cfg!(feature = "onnx-reranker"),
         pdf_ocr_available: pdf_ocr_available(),
+        ocr_engine_hint: {
+            let cfg = crate::ocr_settings::load_ocr_image_rag_config(db, false);
+            crate::ocr_settings::probe_ocr_capabilities(&cfg).active_engine_hint
+        },
+        image_rag_opt_in: collection.image_rag_opt_in && collection.allow_cloud_media,
+        image_rag_configured: {
+            let key_ok = db
+                .get_api_key(crate::ocr_settings::IMAGE_RAG_PROVIDER)
+                .ok()
+                .flatten()
+                .map(|k| !k.is_empty())
+                .unwrap_or(false);
+            let cfg = crate::ocr_settings::load_ocr_image_rag_config(db, key_ok);
+            crate::ocr_settings::probe_ocr_capabilities(&cfg).image_rag_configured
+        },
         folder_category: collection.folder_category,
         partitions,
         dual_model_reindex_recommended,
@@ -219,9 +262,35 @@ pub fn system_readiness(db: &Database) -> AppResult<KcSystemReadiness> {
             && std::path::Path::new(&llama_rerank_model_path).is_file());
     if !llama_rerank_configured {
         warnings.push(
-            "Primary reranker (Qwen3-Reranker GGUF) not found. Place Qwen3-Reranker-4B-Q4_K_M.gguf (or f16/Q8) under models/rerankers. Search falls back to dense-pair / ONNX / phrase.".to_string(),
+            "Primary reranker (Qwen3-Reranker GGUF) not found. Place Qwen3-Reranker-4B-Q4_K_M.gguf (or f16/Q8) under models/rerankers. Search falls back to dense-pair / ONNX / phrase. Recommended for best ranking quality on server: Qwen3-Reranker-4B.".to_string(),
         );
     }
+
+    // Always surface deploy targets so laptop fallbacks stay usable while server
+    // model choices are explicit before production.
+    warnings.push(
+        "Server deployment targets (best quality): knowledge dense = BGE-M3; code dense = Qwen3-Embedding-8B (when resources allow); rerank = Qwen3-Reranker-4B; answer = 70B-class instruct or org OpenAI-compatible endpoint. This machine can keep smaller local GGUFs for offline use.".to_string(),
+    );
+    warnings.push(
+        "Chunking and retrieval improvements require a rebuild/reindex of each collection for best accuracy.".to_string(),
+    );
+
+    // #region agent log
+    crate::knowledge_chat::debug_session::agent_log(
+        "C",
+        "health.rs:system_readiness",
+        "system_readiness_snapshot",
+        serde_json::json!({
+            "embedding_model_resolved": embedding_model_resolved,
+            "llama_server_available": llama_server_available,
+            "pdf_ocr_available": pdf_ocr,
+            "code_model_resolved": code_model_resolved,
+            "knowledge_model_resolved": knowledge_model_resolved,
+            "llama_rerank_configured": llama_rerank_configured,
+            "warning_count": warnings.len(),
+        }),
+    );
+    // #endregion
 
     Ok(KcSystemReadiness {
         db_ready: true,

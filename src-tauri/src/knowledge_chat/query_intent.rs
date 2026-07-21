@@ -86,6 +86,9 @@ pub fn veto_query_intent(query: &str) -> Option<QueryIntent> {
 }
 
 fn regex_list_symbols_veto(q: &str) -> bool {
+    if wants_per_symbol_behavior_explanation(q) {
+        return false;
+    }
     let has_list_verb = (q.contains("what functions")
         || q.contains("what methods")
         || q.contains("what classes")
@@ -148,6 +151,12 @@ pub fn classify_query_intent(query: &str) -> QueryIntent {
         return QueryIntent::EnvVar;
     }
 
+    // Multi-symbol behavior questions ("what does each function do?") need LLM synthesis,
+    // not a structured name inventory.
+    if wants_per_symbol_behavior_explanation(&q) {
+        return QueryIntent::General;
+    }
+
     if is_list_symbols_question(&q) && extract_file_hint(query).is_some() {
         return QueryIntent::ListSymbolsInFile;
     }
@@ -182,8 +191,54 @@ fn is_named_function_lookup(q: &str) -> bool {
             || q.contains("what ts"))
 }
 
+/// True when the user wants behavior/purpose for multiple symbols ("what does each do"),
+/// not a bare name/line inventory.
+pub fn wants_per_symbol_behavior_explanation(q: &str) -> bool {
+    let text = q.to_lowercase();
+    if !(text.contains("function")
+        || text.contains("method")
+        || text.contains("class")
+        || text.contains("symbol"))
+    {
+        return false;
+    }
+    let asks_behavior = text.contains(" do")
+        || text.contains(" does")
+        || text.contains(" did")
+        || text.contains(" doing")
+        || text.contains(" for")
+        || text.contains("purpose")
+        || text.contains("responsible")
+        || text.contains(" role")
+        || text.contains(" mean")
+        || text.contains(" means")
+        || text.contains("handle")
+        || text.contains("handles")
+        || text.contains("explain")
+        || text.contains("describe")
+        || text.contains("walk me through");
+    if !asks_behavior {
+        return false;
+    }
+    text.contains(" each ")
+        || text.contains(" every ")
+        || text.contains("all the ")
+        || text.contains("all of the ")
+        || text.contains("what each")
+        || text.contains("what every")
+        || text.contains("explain what each")
+        || text.contains("explain what every")
+        || text.contains("tell me what each")
+        || text.contains("tell me what every")
+        || text.starts_with("each ")
+        || text.starts_with("every ")
+}
+
 pub fn is_list_symbols_question(q: &str) -> bool {
     let q = q.to_lowercase();
+    if wants_per_symbol_behavior_explanation(&q) {
+        return false;
+    }
     q.contains("functions defined in")
         || q.contains("methods defined in")
         || q.contains("classes defined in")

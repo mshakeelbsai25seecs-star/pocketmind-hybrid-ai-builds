@@ -11,6 +11,7 @@ mod file_context;
 mod commands;
 mod deployment;
 mod product;
+mod ocr_settings;
 mod audit;
 mod gguf;
 mod knowledge_chat;
@@ -34,7 +35,7 @@ fn main() {
         Ok(db) => db,
         Err(err) => {
             eprintln!(
-                "NexusAI could not open the database at {}: {err}",
+                "PocketMind Hybrid AI could not open the database at {}: {err}",
                 deployment::app_database_dir().display()
             );
             std::process::exit(1);
@@ -63,6 +64,7 @@ fn main() {
             commands::stream_generate,
             commands::generate_response,
             commands::stop_generation,
+            commands::unload_chat_model,
             commands::create_character,
             commands::get_characters,
             commands::update_character,
@@ -121,7 +123,13 @@ fn main() {
             knowledge_chat::kc_preview_partition_mix,
             knowledge_chat::kc_run_eval,
             knowledge_chat::kc_collection_health,
+            knowledge_chat::kc_ocr_capabilities,
+            knowledge_chat::kc_set_collection_image_rag,
+            knowledge_chat::kc_image_rag_enrich,
             knowledge_chat::kc_system_readiness,
+            commands::get_ocr_image_rag_config,
+            commands::save_ocr_image_rag_config,
+            commands::test_image_rag_connection,
             knowledge_chat::kc_build_file_catalog,
             knowledge_chat::kc_load_selected_files,
             knowledge_chat::kc_build_repo_map,

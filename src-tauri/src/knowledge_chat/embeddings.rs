@@ -69,11 +69,41 @@ pub(crate) async fn spawn_embedding_server(
         let attempts = runtime_discovery::gpu_layer_attempts(model_path, desired_gpu_layers, runtime.force_cpu);
         for gpu_layers in attempts {
             match try_spawn_embedding_attempt(&runtime.path, model_path, context_size, batch_size, gpu_layers).await {
-                Ok(handle) => return Ok(handle),
+                Ok(handle) => {
+                    // #region agent log
+                    crate::knowledge_chat::debug_session::agent_log(
+                        "B",
+                        "embeddings.rs:spawn_embedding_server",
+                        "embed_server_spawn_ok",
+                        serde_json::json!({
+                            "runtime": runtime.label,
+                            "gpu_layers": gpu_layers,
+                            "desired_gpu_layers": desired_gpu_layers,
+                            "chat_holds_gpu": runtime_discovery::chat_holds_gpu(),
+                            "model_basename": std::path::Path::new(model_path).file_name().and_then(|s| s.to_str()).unwrap_or(""),
+                        }),
+                    );
+                    // #endregion
+                    return Ok(handle);
+                }
                 Err(e) => errors.push(format!("{} with {} GPU layers: {}", runtime.label, gpu_layers, e)),
             }
         }
     }
+
+    // #region agent log
+    crate::knowledge_chat::debug_session::agent_log(
+        "B",
+        "embeddings.rs:spawn_embedding_server",
+        "embed_server_spawn_failed",
+        serde_json::json!({
+            "desired_gpu_layers": desired_gpu_layers,
+            "chat_holds_gpu": runtime_discovery::chat_holds_gpu(),
+            "error_count": errors.len(),
+            "first_errors": errors.iter().take(3).cloned().collect::<Vec<_>>(),
+        }),
+    );
+    // #endregion
 
     Err(AppError::InferenceError(format!(
         "Could not start a local embedding server after automatic GPU/CPU fallback. Tried full GPU offload first, then reduced GPU layers, then CPU. Details:\n{}",
@@ -284,7 +314,7 @@ pub async fn embed_missing_dense_vectors_partitioned(
         if !path_guard::is_usable_embedding_model_path(&deploy, &resolved) {
             partitions_missing_model.push(partition.as_str().to_string());
             warnings.push(format!(
-                "Semantic search is off for {} files: move the embedding model into your NexusAI models folder (Settings → Deployment), or use Browse to select a .gguf file there.",
+                "Semantic search is off for {} files: move the embedding model into your PocketMind Hybrid AI models folder (Settings → Deployment), or use Browse to select a .gguf file there.",
                 partition.label()
             ));
             continue;
@@ -335,7 +365,7 @@ pub async fn embed_missing_dense_vectors_partitioned(
             if texts.is_empty() {
                 continue;
             }
-            let vectors = match crate::knowledge_chat::remote_embeddings::embed_partition_texts(
+            let outcome = match crate::knowledge_chat::remote_embeddings::embed_partition_texts(
                 remote,
                 partition,
                 pool.as_ref(),
@@ -345,15 +375,23 @@ pub async fn embed_missing_dense_vectors_partitioned(
                 texts,
             )
             .await {
-                Ok(vectors) => vectors,
+                Ok(outcome) => outcome,
                 Err(err) => {
                     warnings.push(format!(
-                        "Dense embedding batch failed for {} partition: {err}",
-                        partition.as_str()
+                        "Dense embedding skipped for {} — {}",
+                        partition.label(),
+                        summarize_dense_embed_error(&err.to_string())
                     ));
-                    continue;
+                    // Stop further batches for this partition; keep lexical index usable.
+                    break;
                 }
             };
+            if let Some(note) = outcome.quality_note {
+                if !warnings.iter().any(|w| w == &note) {
+                    warnings.push(note);
+                }
+            }
+            let vectors = outcome.vectors;
 
             if let Some(dim) = vectors.first().map(|v| v.len() as u32) {
                 if !partition_dims.iter().any(|(p, _)| p == partition.as_str()) {
@@ -376,7 +414,24 @@ pub async fn embed_missing_dense_vectors_partitioned(
             )?;
         }
         stored += partition_stored;
-        partitions_ready.push(partition.as_str().to_string());
+        // #region agent log
+        crate::knowledge_chat::debug_session::agent_log(
+            "F",
+            "embeddings.rs:embed_missing_dense_vectors_partitioned",
+            "partition_marked_ready",
+            serde_json::json!({
+                "partition": partition.as_str(),
+                "partition_stored": partition_stored,
+                "warning_count": warnings.len(),
+                "warning_sample": warnings.iter().take(2).cloned().collect::<Vec<_>>(),
+            }),
+        );
+        // #endregion
+        if partition_stored > 0 || rows.is_empty() {
+            partitions_ready.push(partition.as_str().to_string());
+        } else {
+            partitions_missing_model.push(partition.as_str().to_string());
+        }
     }
 
     Ok(PartitionEmbedOutcome {
@@ -522,7 +577,22 @@ pub fn prefer_code_embedding_model(candidates: &[String]) -> Option<String> {
         .or_else(|| candidates.first().cloned())
 }
 
-/// Prefer a BGE-M3 model for the knowledge partition, then fall back gracefully.
+fn looks_like_qwen3_embedding(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    lower.contains("qwen3") && (lower.contains("embed") || lower.contains("embedding"))
+}
+
+fn looks_like_bge_or_compact_doc_embed(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    lower.contains("bge-m3")
+        || lower.contains("bge_m3")
+        || lower.contains("bgem3")
+        || lower.contains("bge")
+        || (lower.contains("nomic") && lower.contains("embed"))
+}
+
+/// Prefer a BGE-M3 (or similarly compact) model for non-code partitions.
+/// Never fall back to Qwen3-Embedding-8B — it OOMs on typical 8–16 GB laptops.
 pub fn prefer_knowledge_embedding_model(candidates: &[String]) -> Option<String> {
     candidates
         .iter()
@@ -537,9 +607,67 @@ pub fn prefer_knowledge_embedding_model(candidates: &[String]) -> Option<String>
                 lower.contains("nomic") && lower.contains("embed")
             })
         })
-        .or_else(|| candidates.iter().find(|path| path.to_lowercase().contains("embed")))
         .cloned()
-        .or_else(|| candidates.first().cloned())
+}
+
+/// Rewrite non-code partitions that incorrectly point at a huge code embedder (Qwen3-8B).
+pub fn heal_partition_config_models(
+    mut config: KcPartitionConfig,
+    models_dir: &str,
+    knowledge_override: Option<&str>,
+) -> KcPartitionConfig {
+    let discovered = discover_embedding_models(&[models_dir.to_string()]);
+    let knowledge_seed = knowledge_override
+        .map(|v| normalize_path_string(v.trim().trim_matches('"')))
+        .filter(|v| !v.is_empty() && !looks_like_qwen3_embedding(v))
+        .or_else(|| prefer_knowledge_embedding_model(&discovered))
+        .unwrap_or_default();
+    let knowledge_model = soften_embedding_model_path(&knowledge_seed, Some(models_dir));
+    let profile = if knowledge_model.is_empty() {
+        EmbeddingProfileId::BgeM3
+    } else {
+        embedding_profiles::resolve_profile_for_model(&knowledge_model)
+    };
+
+    for entry in &mut config.partitions {
+        let partition = KcPartitionId::from_value(&entry.partition_id);
+        if partition == KcPartitionId::Code {
+            continue;
+        }
+        let path = entry.embedding_model_path.trim();
+        let needs_heal = path.is_empty()
+            || looks_like_qwen3_embedding(path)
+            || !looks_like_bge_or_compact_doc_embed(path);
+        if needs_heal {
+            // Prefer BGE when available; otherwise clear Qwen3 so we skip dense
+            // (lexical still works) instead of OOMing.
+            entry.embedding_model_path = knowledge_model.clone();
+            entry.profile_id = profile.as_str().to_string();
+            entry.vector_dimension = None;
+        }
+    }
+    config
+}
+
+/// Short user-facing dense-embed failure (strip multi-KB llama-server dumps).
+pub fn summarize_dense_embed_error(err: &str) -> String {
+    let lower = err.to_lowercase();
+    if lower.contains("outofdevicememory")
+        || lower.contains("failed to allocate")
+        || lower.contains("cpu_repack")
+        || lower.contains("0xc0000005")
+    {
+        return "Not enough memory to load this embedding model. For documents/runbooks use BGE-M3 (Browse → document model), not Qwen3-Embedding-8B. Word search still works without dense vectors.".to_string();
+    }
+    if lower.contains("failed to load model") || lower.contains("exited before ready") {
+        return "Could not start the local embedding model (out of memory or wrong model for this PC). Choose BGE-M3 for documents, then rebuild. Word search still works.".to_string();
+    }
+    let one_line = err.lines().next().unwrap_or(err).trim();
+    if one_line.len() > 240 {
+        format!("{}…", &one_line[..240])
+    } else {
+        one_line.to_string()
+    }
 }
 
 fn emit_dense_progress_phase(
@@ -551,6 +679,10 @@ fn emit_dense_progress_phase(
     message: &str,
 ) {
     if let Some(window) = window {
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as i64)
+            .unwrap_or(0);
         let payload = KcIndexProgress {
             collection_id: collection_id.to_string(),
             phase: format!("dense_{}", partition.as_str()),
@@ -558,6 +690,12 @@ fn emit_dense_progress_phase(
             total,
             file_name: None,
             message: message.to_string(),
+            detail: Some("dense".to_string()),
+            files_done: Some(current.min(total)),
+            files_failed: None,
+            updated_at_ms: Some(now),
+            elapsed_ms: None,
+            state: Some("running".to_string()),
         };
         let _ = window.emit("kc-index-progress", payload);
     }
@@ -621,7 +759,7 @@ pub fn try_resolve_embedding_model_path(
         return Ok(found);
     }
     Err(AppError::Unknown(format!(
-        "No .gguf embedding model found near \"{clean}\". Click Browse beside the embedding field and select a model file (e.g. nomic-embed-text-v1.5.Q4_K_M.gguf), or place one under your NexusAI models folder."
+        "No .gguf embedding model found near \"{clean}\". Click Browse beside the embedding field and select a model file (e.g. nomic-embed-text-v1.5.Q4_K_M.gguf), or place one under your PocketMind Hybrid AI models folder."
     )))
 }
 
@@ -956,6 +1094,20 @@ fn extract_embedding_from_value(value: &serde_json::Value) -> AppResult<Vec<f32>
                 sum = Some(vec![0.0; v.len()]);
             }
             let acc = sum.as_mut().unwrap();
+            // #region agent log
+            if v.len() != acc.len() {
+                crate::knowledge_chat::debug_session::agent_log(
+                    "A",
+                    "embeddings.rs:extract_embedding_from_value",
+                    "jagged_token_vector_lengths",
+                    serde_json::json!({
+                        "acc_len": acc.len(),
+                        "token_len": v.len(),
+                        "token_index": count,
+                    }),
+                );
+            }
+            // #endregion
             for (idx, value) in v.iter().enumerate() {
                 acc[idx] += value;
             }

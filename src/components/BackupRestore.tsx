@@ -105,7 +105,7 @@ export default function BackupRestore() {
           </div>
           <h2 className="text-2xl font-bold">Import backup</h2>
           <p className="text-sm text-surface-600 dark:text-surface-400 mt-2 min-h-16">
-            Import conversations and characters from a NexusAI backup. Imported items are added as new records and do not overwrite the existing library.
+            Import conversations and characters from a PocketMind Hybrid AI backup. Imported items are added as new records and do not overwrite the existing library.
           </p>
           <input
             ref={fileRef}

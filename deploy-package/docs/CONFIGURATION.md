@@ -1,4 +1,4 @@
-# NexusAI Configuration Reference
+# PocketMind Hybrid AI Configuration Reference
 
 ## In-app configuration
 
@@ -8,7 +8,7 @@
 
 | Setting | Default (Windows Server) | Description |
 |---------|--------------------------|-------------|
-| Data root | `C:\ProgramData\NexusAI` | Parent for all NexusAI data |
+| Data root | `C:\ProgramData\PocketMind` | Parent for all PocketMind Hybrid AI data |
 | Models directory | `{data_root}\models` | Chat GGUF files |
 | Embedding model | `{data_root}\models\embeddings\nomic-embed-text-v1.5.Q4_K_M.gguf` | Knowledge Chat / SOC retrieval |
 | Company SOC data root | `{data_root}\company-data` | Grounded knowledge collection |
@@ -40,11 +40,11 @@ Use **Apply server performance preset** or **Apply workstation preset** in the D
 Environment variables override defaults on startup (see `deployment.env.example`).
 
 ```
-NEXUS_DATA_ROOT=C:\ProgramData\NexusAI
-NEXUS_MODELS_DIR=C:\ProgramData\NexusAI\models
-NEXUS_SOC_DATA_ROOT=C:\ProgramData\NexusAI\company-data
-NEXUS_EXPORT_DIR=C:\ProgramData\NexusAI\exports
-NEXUS_EMBEDDING_MODEL=C:\ProgramData\NexusAI\models\embeddings\nomic-embed-text-v1.5.Q4_K_M.gguf
+NEXUS_DATA_ROOT=C:\ProgramData\PocketMind
+NEXUS_MODELS_DIR=C:\ProgramData\PocketMind\models
+NEXUS_SOC_DATA_ROOT=C:\ProgramData\PocketMind\company-data
+NEXUS_EXPORT_DIR=C:\ProgramData\PocketMind\exports
+NEXUS_EMBEDDING_MODEL=C:\ProgramData\PocketMind\models\embeddings\nomic-embed-text-v1.5.Q4_K_M.gguf
 NEXUS_CONTEXT_SIZE=8192
 NEXUS_MAX_TOKENS=1024
 NEXUS_DEPLOY_MODE=server
@@ -57,6 +57,6 @@ SOC scan, export, OCR, and embedding model paths must fall under configured data
 
 ## Application database
 
-User conversations and deployment settings: `%APPDATA%\NexusAI\app.db` (Windows) or equivalent on Linux.
+User conversations and deployment settings: `%APPDATA%\PocketMind Hybrid AI\app.db` (Windows) or equivalent on Linux.
 
 Knowledge Chat collection index: stored in app database; source files remain on disk under `company-data`.

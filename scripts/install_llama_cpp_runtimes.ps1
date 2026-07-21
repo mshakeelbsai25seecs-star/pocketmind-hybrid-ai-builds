@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
   Download and stage llama.cpp Windows runtimes (CPU + CUDA + Vulkan) into the
-  bin\llama.cpp\{cpu,cuda,vulkan} layout that NexusAI expects.
+  bin\llama.cpp\{cpu,cuda,vulkan} layout that PocketMind Hybrid AI expects.
 
 .DESCRIPTION
   Queries the official ggml-org/llama.cpp GitHub releases, downloads the Windows
@@ -67,7 +67,7 @@ function Write-Section($text) { Write-Host "`n=== $text ===" -ForegroundColor Cy
 
 function Get-ReleaseAssets {
   param([string]$Tag)
-  $headers = @{ "User-Agent" = "NexusAI-Installer"; "Accept" = "application/vnd.github+json" }
+  $headers = @{ "User-Agent" = "PocketMind Hybrid AI-Installer"; "Accept" = "application/vnd.github+json" }
   if ($Tag) {
     $url = "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/$Tag"
   } else {
@@ -168,7 +168,7 @@ function Install-Backend {
   }
 }
 
-Write-Section "NexusAI llama.cpp runtime installer"
+Write-Section "PocketMind Hybrid AI llama.cpp runtime installer"
 Write-Host "Target: $Target"
 
 $release = Get-ReleaseAssets -Tag $Tag
@@ -238,4 +238,4 @@ if (-not $SkipCuda) {
 Write-Section "Summary"
 $summary | Format-Table -AutoSize
 Write-Host "`nInstalled under: $Target" -ForegroundColor Cyan
-Write-Host "NexusAI will auto-discover these on next launch. Set the Runtime profile to Automatic Optimizer for GPU/CPU auto-fit." -ForegroundColor Cyan
+Write-Host "PocketMind Hybrid AI will auto-discover these on next launch. Set the Runtime profile to Automatic Optimizer for GPU/CPU auto-fit." -ForegroundColor Cyan

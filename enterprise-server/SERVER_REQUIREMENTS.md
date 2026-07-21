@@ -1,4 +1,4 @@
-# NexusAI Enterprise Server Requirements
+# PocketMind Hybrid AI Enterprise Server Requirements
 
 ## Minimum pilot server
 

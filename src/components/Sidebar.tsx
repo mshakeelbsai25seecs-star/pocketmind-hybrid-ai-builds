@@ -76,7 +76,8 @@ export default function Sidebar() {
     setActiveCharacter(conv?.character_id || null);
     const msgs = await invoke<Message[]>('get_messages', { conversationId: id });
     setMessages(id, msgs);
-    setActiveView('chat');
+    const isKnowledgeChat = conv?.mode === 'knowledge' || conv?.mode === 'knowledge-server-rag';
+    setActiveView(isKnowledgeChat ? 'knowledge-chat' : 'chat');
     setSidebarOpen(false);
   };
 
@@ -173,7 +174,7 @@ export default function Sidebar() {
               <MessageSquare className="w-5 h-5 text-white" />
             </div>
             <div className="min-w-0">
-              <span className="font-black text-lg tracking-tight block truncate text-surface-950 dark:text-white">NexusAI</span>
+              <span className="font-black text-lg tracking-tight block truncate text-surface-950 dark:text-white">PocketMind Hybrid AI</span>
               <span className="text-[11px] text-surface-500 block truncate">Offline AI workspace</span>
             </div>
           </div>

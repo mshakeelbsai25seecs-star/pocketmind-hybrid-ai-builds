@@ -7,6 +7,15 @@ import {
   type ProductConfig,
   DEFAULT_PRODUCT_CONFIG,
 } from '../productConfig';
+import {
+  DEFAULT_OCR_IMAGE_RAG_CONFIG,
+  loadOcrCapabilities,
+  loadOcrImageRagConfig,
+  saveOcrImageRagConfig,
+  testImageRagConnection,
+  type OcrCapabilities,
+  type OcrImageRagConfig,
+} from '../ocrImageRagConfig';
 
 export default function SecuritySettingsPanel() {
   const { productConfig, setProductConfig } = useAppStore();
@@ -95,7 +104,7 @@ export default function SecuritySettingsPanel() {
         </label>
 
         <label className="block">
-          <span className="block text-sm font-medium mb-2">Min source confidence for context (0–1)</span>
+          <span className="block text-sm font-medium mb-2">How strong a source must be to include it</span>
           <input
             type="number"
             min={0}
@@ -105,11 +114,11 @@ export default function SecuritySettingsPanel() {
             onChange={e => update('min_source_confidence_for_context', Number(e.target.value) || 0.42)}
             className="input-field w-40"
           />
-          <p className="mt-1 text-xs text-surface-500">Code entities and sources below this score are excluded from the LLM context block.</p>
+          <p className="mt-1 text-xs text-surface-500">Weaker matches are left out of what the model can see.</p>
         </label>
 
         <label className="block">
-          <span className="block text-sm font-medium mb-2">Min source confidence for generation (0–1)</span>
+          <span className="block text-sm font-medium mb-2">How strong a source must be before answering</span>
           <input
             type="number"
             min={0}
@@ -119,41 +128,35 @@ export default function SecuritySettingsPanel() {
             onChange={e => update('min_source_confidence_for_generation', Number(e.target.value) || 0.28)}
             className="input-field w-40"
           />
-          <p className="mt-1 text-xs text-surface-500">Knowledge Chat will not call the LLM unless at least one source meets this threshold.</p>
+          <p className="mt-1 text-xs text-surface-500">If nothing meets this bar, you’ll get a “not enough evidence” reply instead of a guess.</p>
         </label>
 
         <label className="block">
-          <span className="block text-sm font-medium mb-2">Knowledge Chat deployment profile</span>
+          <span className="block text-sm font-medium mb-2">Hardware profile</span>
           <select
             value={form.knowledge_chat_deployment_profile}
             onChange={e => update('knowledge_chat_deployment_profile', e.target.value as ProductConfig['knowledge_chat_deployment_profile'])}
             className="input-field w-full max-w-md"
           >
-            <option value="demo">Demo (laptop) — reduced context window for local models</option>
-            <option value="server">Server — full context for 70B+ offline deployment</option>
+            <option value="demo">Laptop — lighter, for everyday use</option>
+            <option value="server">Workstation / server — uses more context for larger models</option>
           </select>
-          <p className="mt-1 text-xs text-surface-500">
-            Server profile sends more retrieved sources and a larger context block to the model. Use demo while testing on a laptop.
-          </p>
         </label>
 
         <label className="block">
-          <span className="block text-sm font-medium mb-2">Knowledge Chat mode</span>
+          <span className="block text-sm font-medium mb-2">Chat style</span>
           <select
             value={form.knowledge_chat_mode}
             onChange={e => update('knowledge_chat_mode', e.target.value as ProductConfig['knowledge_chat_mode'])}
             className="input-field w-full max-w-md"
           >
-            <option value="folder_qa">Folder Q&amp;A — grounded document answers</option>
-            <option value="codebase_explorer">Codebase Explorer — repo map + symbol-first code retrieval</option>
+            <option value="folder_qa">Documents — answers from your files</option>
+            <option value="codebase_explorer">Code — focuses on functions and classes</option>
           </select>
-          <p className="mt-1 text-xs text-surface-500">
-            Codebase Explorer injects a repo map and pins matching functions/classes for engineering questions. Both modes share the same local index.
-          </p>
         </label>
 
         <div className="rounded-lg border border-surface-200 dark:border-surface-700 p-4 space-y-3">
-          <p className="text-sm font-medium">Knowledge Chat indexing (rebuild index after changes)</p>
+          <p className="text-sm font-medium">Indexing options (rebuild your folder index after changing these)</p>
           <label className="flex items-start gap-3 cursor-pointer">
             <input
               type="checkbox"
@@ -162,10 +165,8 @@ export default function SecuritySettingsPanel() {
               className="mt-1"
             />
             <span>
-              <span className="block font-medium">Contextual chunk prefixes</span>
-              <span className="text-xs text-surface-500">
-                Prepends file/section context to chunk text before embedding and FTS for better retrieval.
-              </span>
+              <span className="block font-medium">Add file/section labels to each piece of text</span>
+              <span className="text-xs text-surface-500">Helps search understand where a passage came from.</span>
             </span>
           </label>
           <label className="flex items-start gap-3 cursor-pointer">
@@ -176,10 +177,8 @@ export default function SecuritySettingsPanel() {
               className="mt-1"
             />
             <span>
-              <span className="block font-medium">Semantic paragraph chunking</span>
-              <span className="text-xs text-surface-500">
-                Splits prose on paragraph boundaries instead of fixed token windows when possible.
-              </span>
+              <span className="block font-medium">Split documents on natural paragraphs</span>
+              <span className="text-xs text-surface-500">Keeps related sentences together when possible.</span>
             </span>
           </label>
           <label className="flex items-start gap-3 cursor-pointer">
@@ -190,10 +189,8 @@ export default function SecuritySettingsPanel() {
               className="mt-1"
             />
             <span>
-              <span className="block font-medium">Exact dense prefetch</span>
-              <span className="text-xs text-surface-500">
-                Linear cosine scan over all embeddings (slower on large folders, best recall). Enabled automatically on Server profile.
-              </span>
+              <span className="block font-medium">Thorough meaning search (slower on huge folders)</span>
+              <span className="text-xs text-surface-500">Checks more candidates for better recall. On by default for the workstation profile.</span>
             </span>
           </label>
           <label className="flex items-start gap-3 cursor-pointer">
@@ -204,27 +201,22 @@ export default function SecuritySettingsPanel() {
               className="mt-1"
             />
             <span>
-              <span className="block font-medium">Contextual chunk summaries</span>
-              <span className="text-xs text-surface-500">
-                Adds a one-line topic summary to each chunk prefix at index time (deterministic today; LLM hook for 3B+ models later). Rebuild index after enabling.
-              </span>
+              <span className="block font-medium">Add short topic lines while indexing</span>
+              <span className="text-xs text-surface-500">Can improve search; rebuild the index after turning this on.</span>
             </span>
           </label>
         </div>
 
         <label className="block">
-          <span className="block text-sm font-medium mb-2">Knowledge Chat answer style</span>
+          <span className="block text-sm font-medium mb-2">Answer style</span>
           <select
             value={form.knowledge_chat_evidence_mode}
             onChange={e => update('knowledge_chat_evidence_mode', e.target.value as ProductConfig['knowledge_chat_evidence_mode'])}
             className="input-field w-full max-w-md"
           >
-            <option value="concise">Concise — synthesized answer only (evidence fallback when blocked)</option>
-            <option value="evidence_explanation">Evidence + explanation — always show source excerpt and what it means</option>
+            <option value="concise">Short answer</option>
+            <option value="evidence_explanation">Answer plus quoted source text</option>
           </select>
-          <p className="mt-1 text-xs text-surface-500">
-            Evidence mode shows the indexed text and a plain-language summary so you can verify answers.
-          </p>
         </label>
 
         <label className="flex items-start gap-3 cursor-pointer">
@@ -250,9 +242,9 @@ export default function SecuritySettingsPanel() {
             className="mt-1"
           />
           <span>
-            <span className="block font-medium">Allow intent cache short-circuit</span>
+            <span className="block font-medium">Instant answers for known FAQ matches</span>
             <span className="text-xs text-surface-500">
-              When enabled, very high-confidence FAQ-style intent matches can answer without running full document retrieval. Off by default for safer grounding.
+              Off by default. When on, very clear FAQ matches can answer without a full folder search.
             </span>
           </span>
         </label>
@@ -265,9 +257,9 @@ export default function SecuritySettingsPanel() {
             className="mt-1"
           />
           <span>
-            <span className="block font-medium">LLM expansion for vague Knowledge Chat queries</span>
+            <span className="block font-medium">Clarify short questions before searching</span>
             <span className="text-xs text-surface-500">
-              Uses the active local model to rewrite shorthand questions before retrieval when rule-based expansion is not enough.
+              Uses your local chat model to expand vague questions into clearer search wording.
             </span>
           </span>
         </label>
@@ -280,9 +272,9 @@ export default function SecuritySettingsPanel() {
             className="mt-1"
           />
           <span>
-            <span className="block font-medium">Folder-agnostic Knowledge Chat mode</span>
+            <span className="block font-medium">Generic folder mode (not SOC-tuned)</span>
             <span className="text-xs text-surface-500">
-              Disables SOC-specific retrieval filters, intent shortcuts, and defaults eval to generic folder checks.
+              Use this for ordinary company folders instead of security-operations packs.
             </span>
           </span>
         </label>
@@ -295,12 +287,14 @@ export default function SecuritySettingsPanel() {
             className="mt-1"
           />
           <span>
-            <span className="block font-medium">HyDE dense retrieval expansion</span>
+            <span className="block font-medium">Extra help for vague questions</span>
             <span className="text-xs text-surface-500">
-              Embeds a hypothetical document passage for dense search. Can help vague questions; may add latency.
+              Searches as if a short matching document existed. Can help; may be a bit slower.
             </span>
           </span>
         </label>
+
+        <OcrImageRagSettingsBlock />
 
         <div className="flex flex-wrap gap-2 pt-2">
           <button type="button" onClick={() => void save()} disabled={busy} className="btn-primary flex items-center gap-2 disabled:opacity-60">
@@ -315,6 +309,197 @@ export default function SecuritySettingsPanel() {
         {notice && <p className="text-sm text-emerald-600 dark:text-emerald-300">{notice}</p>}
         {error && <p className="text-sm text-red-600 dark:text-red-300">{error}</p>}
       </div>
+    </div>
+  );
+}
+
+function OcrImageRagSettingsBlock() {
+  const [cfg, setCfg] = useState<OcrImageRagConfig>(DEFAULT_OCR_IMAGE_RAG_CONFIG);
+  const [caps, setCaps] = useState<OcrCapabilities | null>(null);
+  const [apiKey, setApiKey] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        setCfg(await loadOcrImageRagConfig());
+        setCaps(await loadOcrCapabilities());
+      } catch (e) {
+        setErr(e instanceof Error ? e.message : String(e));
+      }
+    })();
+  }, []);
+
+  const saveOcr = async () => {
+    setBusy(true);
+    setMsg(null);
+    setErr(null);
+    try {
+      const url = (cfg.image_rag_base_url || '').trim();
+      if (cfg.image_rag_enabled && url && !/^https?:\/\//i.test(url)) {
+        setErr('API address must start with http:// or https://');
+        return;
+      }
+      const clamped = {
+        ...cfg,
+        image_rag_max_regions_per_query: Math.min(8, Math.max(1, Number(cfg.image_rag_max_regions_per_query) || 4)),
+        ocr_engine: ['auto', 'legacy', 'docling'].includes(cfg.ocr_engine) ? cfg.ocr_engine : 'auto',
+      };
+      const saved = await saveOcrImageRagConfig(clamped, apiKey.trim() ? apiKey : null);
+      setCfg(saved);
+      setApiKey('');
+      try {
+        setCaps(await loadOcrCapabilities());
+      } catch {
+        /* optional */
+      }
+      setMsg('Saved. Rebuild your folder index if you changed how PDFs are read.');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const testConn = async () => {
+    setBusy(true);
+    setMsg(null);
+    setErr(null);
+    try {
+      setMsg(await testImageRagConnection());
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const statusLine = caps
+    ? [
+        caps.python_available ? 'PDF text reading ready' : 'PDF text reading needs Python',
+        caps.docling_importable ? 'layout reader installed' : null,
+        caps.opencv_available ? 'image cleanup installed' : null,
+      ].filter(Boolean).join(' · ')
+    : null;
+
+  return (
+    <div className="mt-4 pt-4 border-t border-surface-200 dark:border-surface-700 space-y-3">
+      <h3 className="font-medium text-sm">Scanned PDFs &amp; optional page images</h3>
+      <p className="text-xs text-surface-500">
+        Scanned PDFs are read on this device by default. Sending page images to an online vision service is optional and off unless you turn it on here and again for each folder.
+      </p>
+      {statusLine && <p className="text-xs text-surface-500">{statusLine}</p>}
+      <label className="block text-sm">
+        <span className="text-xs text-surface-500">How to read scanned PDFs</span>
+        <select
+          className="mt-1 w-full input"
+          value={cfg.ocr_engine}
+          onChange={e => setCfg({ ...cfg, ocr_engine: e.target.value })}
+        >
+          <option value="auto">Automatic (best available on this PC)</option>
+          <option value="legacy">Built-in reader</option>
+          <option value="docling">Layout-aware reader (if installed)</option>
+        </select>
+      </label>
+      <label className="flex items-start gap-3 cursor-pointer">
+        <input type="checkbox" checked={cfg.ocr_preprocess} onChange={e => setCfg({ ...cfg, ocr_preprocess: e.target.checked })} className="mt-1" />
+        <span className="text-sm">Clean up page images before reading (when available)</span>
+      </label>
+      <label className="flex items-start gap-3 cursor-pointer">
+        <input type="checkbox" checked={cfg.ocr_caption_figures} onChange={e => setCfg({ ...cfg, ocr_caption_figures: e.target.checked })} className="mt-1" />
+        <span className="text-sm">Make tables and figures easier to find in search</span>
+      </label>
+      <label className="flex items-start gap-3 cursor-pointer">
+        <input type="checkbox" checked={cfg.ocr_llm_repair} onChange={e => setCfg({ ...cfg, ocr_llm_repair: e.target.checked })} className="mt-1" />
+        <span className="text-sm">Fix obvious OCR typos (stays on this device)</span>
+      </label>
+      <label className="flex items-start gap-3 cursor-pointer">
+        <input type="checkbox" checked={cfg.verify_llm_answer} onChange={e => setCfg({ ...cfg, verify_llm_answer: e.target.checked })} className="mt-1" />
+        <span className="text-sm">Double-check answers against your sources before showing them</span>
+      </label>
+      <label className="flex items-start gap-3 cursor-pointer">
+        <input type="checkbox" checked={cfg.image_rag_enabled} onChange={e => setCfg({ ...cfg, image_rag_enabled: e.target.checked })} className="mt-1" />
+        <span className="text-sm font-medium">Allow online page-image look-up (master switch)</span>
+      </label>
+      <label className="block text-sm">
+        <span className="text-xs text-surface-500">Vision API address</span>
+        <input
+          className="mt-1 w-full input"
+          value={cfg.image_rag_base_url}
+          onChange={e => setCfg({ ...cfg, image_rag_base_url: e.target.value })}
+          placeholder="https://api.openai.com/v1"
+        />
+      </label>
+      <label className="block text-sm">
+        <span className="text-xs text-surface-500">Vision model name</span>
+        <input
+          className="mt-1 w-full input"
+          value={cfg.image_rag_model}
+          onChange={e => setCfg({ ...cfg, image_rag_model: e.target.value })}
+          placeholder="gpt-4o-mini"
+        />
+      </label>
+      <label className="block text-sm">
+        <span className="text-xs text-surface-500">
+          API key {cfg.image_rag_api_key_configured ? '(saved — leave blank to keep)' : ''}
+        </span>
+        <input
+          type="password"
+          className="mt-1 w-full input"
+          value={apiKey}
+          onChange={e => setApiKey(e.target.value)}
+          placeholder="Paste key"
+          autoComplete="off"
+        />
+      </label>
+      <label className="block text-sm">
+        <span className="text-xs text-surface-500">Max page images per question (1–8)</span>
+        <input
+          type="number"
+          min={1}
+          max={8}
+          className="mt-1 w-full input"
+          value={cfg.image_rag_max_regions_per_query}
+          onChange={e => setCfg({
+            ...cfg,
+            image_rag_max_regions_per_query: Math.min(8, Math.max(1, Number(e.target.value) || 4)),
+          })}
+        />
+      </label>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="btn-secondary" disabled={busy} onClick={() => void saveOcr()}>
+          Save PDF / image settings
+        </button>
+        <button type="button" className="btn-secondary" disabled={busy || !cfg.image_rag_enabled} onClick={() => void testConn()}>
+          Test connection
+        </button>
+        <button
+          type="button"
+          className="btn-secondary"
+          disabled={busy || !cfg.image_rag_api_key_configured}
+          onClick={() => void (async () => {
+            setBusy(true);
+            setErr(null);
+            setMsg(null);
+            try {
+              const saved = await saveOcrImageRagConfig(cfg, '');
+              setCfg(saved);
+              setApiKey('');
+              setMsg('API key removed.');
+            } catch (e) {
+              setErr(e instanceof Error ? e.message : String(e));
+            } finally {
+              setBusy(false);
+            }
+          })()}
+        >
+          Remove API key
+        </button>
+      </div>
+      {msg && <p className="text-sm text-emerald-600 dark:text-emerald-300">{msg}</p>}
+      {err && <p className="text-sm text-red-600 dark:text-red-300">{err}</p>}
     </div>
   );
 }

@@ -7,7 +7,11 @@ pub const DEPLOY_MODE_SERVER: &str = "server";
 
 /// Preferred Windows storage root when the D: drive is available (large models, indexes, cache).
 #[cfg(target_os = "windows")]
-pub const WINDOWS_PREFERRED_DATA_ROOT: &str = r"D:\NexusAI";
+pub const WINDOWS_PREFERRED_DATA_ROOT: &str = r"D:\PocketMind";
+
+/// Previous brand folder name — kept so upgrades still find existing installs.
+#[cfg(target_os = "windows")]
+pub const WINDOWS_LEGACY_DATA_ROOT: &str = r"D:\NexusAI";
 
 const KEY_MODE: &str = "deploy.mode";
 const KEY_DATA_ROOT: &str = "deploy.data_root";
@@ -73,7 +77,27 @@ pub fn default_data_root() -> PathBuf {
     preferred_data_root()
 }
 
-/// Resolve the active NexusAI data root (`NEXUS_DATA_ROOT`, else `D:\NexusAI` on Windows).
+/// True when a system data root already exists as writable, or can be created.
+#[cfg(target_os = "linux")]
+fn linux_system_data_root_usable(path: &Path) -> bool {
+    if path.is_dir() {
+        let probe = path.join(".pocketmind_write_probe");
+        match std::fs::write(&probe, b"") {
+            Ok(()) => {
+                let _ = std::fs::remove_file(&probe);
+                true
+            }
+            Err(_) => false,
+        }
+    } else if path.exists() {
+        false
+    } else {
+        std::fs::create_dir_all(path).is_ok()
+    }
+}
+
+/// Resolve the active PocketMind Hybrid AI data root (`NEXUS_DATA_ROOT`, else platform default).
+/// If a legacy NexusAI root already exists and the new root does not, keep using the legacy root.
 pub fn preferred_data_root() -> PathBuf {
     if let Ok(value) = std::env::var("NEXUS_DATA_ROOT") {
         if !value.trim().is_empty() {
@@ -83,6 +107,10 @@ pub fn preferred_data_root() -> PathBuf {
     #[cfg(target_os = "windows")]
     {
         let root = PathBuf::from(WINDOWS_PREFERRED_DATA_ROOT);
+        let legacy = PathBuf::from(WINDOWS_LEGACY_DATA_ROOT);
+        if !root.exists() && legacy.exists() {
+            return legacy;
+        }
         let _ = std::fs::create_dir_all(&root);
         return root;
     }
@@ -92,21 +120,66 @@ pub fn preferred_data_root() -> PathBuf {
             .map(|v| v.eq_ignore_ascii_case("server"))
             .unwrap_or(false);
         if server_mode {
-            return PathBuf::from("/Library/Application Support/NexusAI");
+            let root = PathBuf::from("/Library/Application Support/PocketMind");
+            let legacy = PathBuf::from("/Library/Application Support/NexusAI");
+            if !root.exists() && legacy.exists() {
+                return legacy;
+            }
+            return root;
         }
-        return dirs::data_dir()
+        let root = dirs::data_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("PocketMind");
+        let legacy = dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
             .join("NexusAI");
+        if !root.exists() && legacy.exists() {
+            return legacy;
+        }
+        return root;
     }
     #[cfg(target_os = "linux")]
     {
-        return PathBuf::from("/var/lib/nexusai");
+        let server_mode = std::env::var("NEXUS_DEPLOY_MODE")
+            .map(|v| v.eq_ignore_ascii_case("server"))
+            .unwrap_or(false);
+        let system_root = PathBuf::from("/var/lib/pocketmind");
+        let system_legacy = PathBuf::from("/var/lib/nexusai");
+        if server_mode
+            || linux_system_data_root_usable(&system_root)
+            || (system_legacy.exists() && linux_system_data_root_usable(&system_legacy))
+        {
+            if !system_root.exists() && system_legacy.exists() {
+                return system_legacy;
+            }
+            if server_mode || linux_system_data_root_usable(&system_root) {
+                return system_root;
+            }
+            return system_legacy;
+        }
+        let root = dirs::data_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("PocketMind");
+        let legacy = dirs::data_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("NexusAI");
+        if !root.exists() && legacy.exists() {
+            return legacy;
+        }
+        return root;
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     {
-        dirs::data_dir()
+        let root = dirs::data_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join("NexusAI")
+            .join("PocketMind");
+        let legacy = dirs::data_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("NexusAI");
+        if !root.exists() && legacy.exists() {
+            return legacy;
+        }
+        root
     }
 }
 
@@ -153,6 +226,7 @@ pub fn configure_process_storage_env() {
     }
 }
 
+/// Pre-rebrand AppData folder (`NexusAI`) used for database/index migration.
 pub fn legacy_app_database_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
@@ -667,6 +741,17 @@ fn legacy_storage_roots() -> Vec<String> {
         roots.push(normalize_path_string(
             &legacy_programdata_root().to_string_lossy(),
         ));
+        roots.push(normalize_path_string(WINDOWS_LEGACY_DATA_ROOT));
+    }
+    #[cfg(target_os = "macos")]
+    {
+        roots.push(normalize_path_string(
+            "/Library/Application Support/NexusAI",
+        ));
+    }
+    #[cfg(target_os = "linux")]
+    {
+        roots.push(normalize_path_string("/var/lib/nexusai"));
     }
     roots.push(normalize_path_string(
         &legacy_app_database_dir().to_string_lossy(),

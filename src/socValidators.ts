@@ -586,7 +586,7 @@ export function formatSocValidatorChatSummary(result: SocValidatorResult, input:
 
 export function buildSocValidatorChatPrompt(result: SocValidatorResult, input: SocValidatorInput): string {
   return [
-    'You are Nexus AI Fortinet SOC Copilot.',
+    'You are PocketMind Hybrid AI Fortinet SOC Copilot.',
     'Review the compact deterministic validator summary below and produce concise fixes, retest steps, and human approval guidance.',
     'Do not claim live FortiSIEM/FortiSOAR integration. Do not recommend destructive production actions without approval and rollback notes.',
     '',

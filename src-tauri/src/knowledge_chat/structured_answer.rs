@@ -4,7 +4,8 @@ use crate::knowledge_chat::evidence_answer::{
 };
 use crate::knowledge_chat::query_intent::{
     classify_query_intent, extract_camel_symbols, extract_error_code, extract_file_hint,
-    extract_snake_case_symbols, is_explain_code_question, QueryIntent,
+    extract_snake_case_symbols, is_explain_code_question, wants_per_symbol_behavior_explanation,
+    QueryIntent,
 };
 use crate::knowledge_chat::types::{KcSearchHit, StructuredAnswer};
 
@@ -30,6 +31,10 @@ pub fn try_structured_answer_with_intent(
             return try_file_imports_answer(query, hits);
         }
         QueryIntent::ListSymbolsInFile => {
+            // Inventory extractors must not answer "what does each function do?".
+            if wants_per_symbol_behavior_explanation(query) {
+                return None;
+            }
             return try_list_symbols_in_file_answer(query, hits);
         }
         QueryIntent::LocateDefinition => {

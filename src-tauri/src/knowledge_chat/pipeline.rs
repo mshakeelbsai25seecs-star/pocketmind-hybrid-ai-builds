@@ -91,6 +91,8 @@ pub struct PartitionQueryEmbeddings {
     pub models_used: Vec<(String, String)>,
     /// All partitions in scope that had a resolvable model (searched).
     pub partitions_searched: Vec<String>,
+    /// Local-fallback / recommended-server notes for UI degradation banners.
+    pub quality_notes: Vec<String>,
 }
 
 /// Embed the retrieval query once per active partition with that partition's
@@ -107,6 +109,7 @@ pub async fn embed_partition_query_vectors(
         vectors: Vec::new(),
         models_used: Vec::new(),
         partitions_searched: Vec::new(),
+        quality_notes: Vec::new(),
     };
 
     for partition in scope.partitions() {
@@ -136,13 +139,20 @@ pub async fn embed_partition_query_vectors(
         )
         .await
         {
-            Ok(vectors) => {
-                if let Some(vector) = vectors.into_iter().next() {
+            Ok(outcome) => {
+                if let Some(note) = outcome.quality_note {
+                    out.quality_notes.push(note);
+                }
+                if let Some(vector) = outcome.vectors.into_iter().next() {
                     if !vector.is_empty() {
-                        let label = remote
-                            .and_then(|r| r.model_for(partition))
-                            .map(|id| format!("organization:{id}"))
-                            .unwrap_or_else(|| resolved.clone());
+                        let label = if outcome.used_organization {
+                            remote
+                                .and_then(|r| r.model_for(partition))
+                                .map(|id| format!("organization:{id}"))
+                                .unwrap_or_else(|| resolved.clone())
+                        } else {
+                            resolved.clone()
+                        };
                         out.vectors.push((partition.as_str().to_string(), vector));
                         out.models_used.push((partition.as_str().to_string(), label));
                     }

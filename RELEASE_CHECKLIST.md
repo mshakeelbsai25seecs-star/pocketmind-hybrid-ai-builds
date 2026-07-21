@@ -1,4 +1,4 @@
-# NexusAI Production Release Checklist
+# PocketMind Hybrid AI Production Release Checklist
 
 Use this checklist before sharing a tester or production-style build.
 
@@ -8,15 +8,15 @@ Use this checklist before sharing a tester or production-style build.
 - [ ] Run `cargo check` from `src-tauri` on the Windows build machine.
 - [ ] Run `npm run tauri build` from the project root.
 - [ ] Confirm `src-tauri/target/release/nexus-ai.exe` exists.
-- [ ] Confirm the portable release folder contains `NexusAI.exe`.
+- [ ] Confirm the portable release folder contains `PocketMind Hybrid AI.exe`.
 
 ## 2. Universal runtime packaging
 
 The portable release should include this structure:
 
 ```text
-NexusAI_Production_Release
-├─ NexusAI.exe
+PocketMind Hybrid AI_Production_Release
+├─ PocketMind Hybrid AI.exe
 ├─ models
 └─ bin
    └─ llama.cpp
@@ -65,13 +65,13 @@ NexusAI_Production_Release
 - [ ] On limited GPU machines, Auto mode attempts CPU + GPU split before CPU fallback.
 - [ ] On CPU-only machines, Auto mode falls back safely to CPU.
 - [ ] Large models such as 70B remain visible in the catalog for qualified enterprise hardware.
-- [ ] If a model cannot fit available memory, NexusAI displays a clear fit/runtime error instead of crashing.
+- [ ] If a model cannot fit available memory, PocketMind Hybrid AI displays a clear fit/runtime error instead of crashing.
 
 ## 5. GPU validation checks
 
 For NVIDIA machines:
 
-- [ ] Run `nvidia-smi` before opening NexusAI.
+- [ ] Run `nvidia-smi` before opening PocketMind Hybrid AI.
 - [ ] Open Runtime and scan.
 - [ ] Use Automatic Optimizer first, then verify it selects GPU or CPU+GPU split when hardware supports it.
 - [ ] Generate a response while watching `nvidia-smi -l 1`.
@@ -87,7 +87,7 @@ For AMD/Intel/Vulkan machines:
 
 - [ ] Vulkan runtime folder exists.
 - [ ] Runtime scan reports Vulkan information when available.
-- [ ] If Vulkan fails, NexusAI should fall back to CPU with a clear message.
+- [ ] If Vulkan fails, PocketMind Hybrid AI should fall back to CPU with a clear message.
 
 ## 6. Chat management
 
@@ -135,8 +135,8 @@ Only share the build when local chat, runtime scan, model health check, chat man
 macOS readiness notes:
 - The same source code can be built on macOS with Tauri.
 - Final macOS .app/.dmg bundles must be built on a Mac or macOS CI runner.
-- For Apple Silicon acceleration, bundle a Metal-enabled llama.cpp runtime in bin/llama.cpp/macos-metal or in NexusAI.app/Contents/Resources/llama.cpp/macos-metal.
-- For safe macOS fallback, bundle a CPU llama.cpp runtime in bin/llama.cpp/macos-cpu or in NexusAI.app/Contents/Resources/llama.cpp/macos-cpu.
+- For Apple Silicon acceleration, bundle a Metal-enabled llama.cpp runtime in bin/llama.cpp/macos-metal or in PocketMind Hybrid AI.app/Contents/Resources/llama.cpp/macos-metal.
+- For safe macOS fallback, bundle a CPU llama.cpp runtime in bin/llama.cpp/macos-cpu or in PocketMind Hybrid AI.app/Contents/Resources/llama.cpp/macos-cpu.
 - Windows runtime folders remain cpu, cuda, and vulkan.
 - GPU acceleration should be verified with Runtime → Scan runtime and a real generation test on target hardware.
 
@@ -146,7 +146,7 @@ Bundle native Apple Silicon and Intel runtimes separately so one Mac source/rele
 - bin/llama.cpp/macos-arm64-cpu/llama-server
 - bin/llama.cpp/macos-x64-metal/llama-server
 - bin/llama.cpp/macos-x64-cpu/llama-server
-NexusAI selects only the matching native runtime for the current Mac and falls back safely to CPU.
+PocketMind Hybrid AI selects only the matching native runtime for the current Mac and falls back safely to CPU.
 
 ## Organization Server Mode Checklist
 
@@ -167,8 +167,8 @@ NexusAI selects only the matching native runtime for the current Mac and falls b
 - [ ] Security checklist reviewed with company IT.
 - [ ] Server endpoint exposes `/v1/models`.
 - [ ] Server endpoint supports `/v1/chat/completions` streaming.
-- [ ] NexusAI Organization Server connection test passes.
-- [ ] Server model appears in NexusAI.
+- [ ] PocketMind Hybrid AI Organization Server connection test passes.
+- [ ] Server model appears in PocketMind Hybrid AI.
 - [ ] Server chat streams response correctly.
 - [ ] Pilot users understand allowed document/data policy.
 - [ ] CPU/GPU utilization monitored during pilot.

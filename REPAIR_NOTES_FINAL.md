@@ -1,4 +1,4 @@
-# NexusAI hard repair notes
+# PocketMind Hybrid AI hard repair notes
 
 This repair focuses on the real chat-quality problem instead of temporary UI patches.
 

@@ -1,4 +1,4 @@
-# NexusAI Troubleshooting
+# PocketMind Hybrid AI Troubleshooting
 
 ## App won't start
 

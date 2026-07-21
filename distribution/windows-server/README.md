@@ -1,32 +1,22 @@
-# NexusAI — Windows Server Package
+# PocketMind Hybrid AI — Windows Server Package
 
-Enterprise handoff kit for Windows Server SOC pilots. Includes admin documentation, configuration templates, and folder preparation scripts.
+Handoff kit for Windows Server pilots.
 
 ## Contents
 
-| Path | Purpose |
-|------|---------|
-| `docs/USER_MANUAL.md` | Analyst guide |
-| `docs/ADMIN_DEPLOYMENT_GUIDE.md` | IT install and rollout |
-| `docs/CONFIGURATION.md` | Paths, env vars, performance |
-| `docs/TROUBLESHOOTING.md` | Common issues |
-| `config/deployment.env.example` | Environment template |
-| `config/folder-layout.md` | Directory structure |
-| `scripts/prepare-server.ps1` | Create `C:\ProgramData\NexusAI` tree |
+- `docs/USER_MANUAL.md` — analyst guide
+- `docs/ADMIN_DEPLOYMENT_GUIDE.md` — IT install
+- `docs/CONFIGURATION.md` — paths and options
+- `docs/TROUBLESHOOTING.md` — common issues
+- `scripts/prepare-server.ps1` — create data folders
 
-## Application binary
+## Quick start
 
-Copy the staged Windows desktop payload from `../windows-desktop/payload/` or build with `npm run tauri build` and stage via `../windows-desktop/scripts/stage-release.ps1`.
+1. Run `.\scripts\prepare-server.ps1`.
+2. Copy the app and models into the install folder.
+3. Launch the app → **Settings → Deployment** → **Save**.
+4. Scan and index company data before use.
 
-## Quick start (admin)
+Default data root: `C:\ProgramData\PocketMind`
 
-```powershell
-.\scripts\prepare-server.ps1 -DataRoot "C:\ProgramData\NexusAI"
-# Copy NexusAI.exe + bin\llama.cpp into install folder
-# Copy models and company-data
-# Launch app → Settings → Deployment → Save
-```
-
-Default data root: `C:\ProgramData\NexusAI`
-
-See also `../shared/docs/QUICK_START.md`.
+Also see `../shared/docs/QUICK_START.md`.

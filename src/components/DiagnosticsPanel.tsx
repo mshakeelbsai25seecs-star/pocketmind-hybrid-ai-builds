@@ -32,7 +32,7 @@ export default function DiagnosticsPanel() {
   const report = useMemo(() => {
     if (!diag) return '';
     return [
-      'NexusAI Diagnostics Report',
+      'PocketMind Hybrid AI Diagnostics Report',
       `App version: ${diag.app_version}`,
       `Current dir: ${diag.current_dir}`,
       `Executable dir: ${diag.executable_dir}`,

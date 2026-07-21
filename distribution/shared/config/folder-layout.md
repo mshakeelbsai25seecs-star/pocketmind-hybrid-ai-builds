@@ -22,10 +22,10 @@
 
 | Platform | Default |
 |----------|---------|
-| Windows | `C:\ProgramData\NexusAI` |
-| Linux | `/var/lib/nexusai` |
-| macOS workstation | `~/Library/Application Support/NexusAI` |
-| macOS server | `/Library/Application Support/NexusAI` |
+| Windows | `C:\ProgramData\PocketMind` |
+| Linux | `/var/lib/pocketmind` |
+| macOS workstation | `~/Library/Application Support/PocketMind` |
+| macOS server | `/Library/Application Support/PocketMind` |
 
 Intake subfolders mirror your data pack: `intake/rules`, `intake/parsers`, `intake/playbooks`, etc.
 

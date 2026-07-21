@@ -448,7 +448,7 @@ export default function SocKnowledgeBase() {
       if (!selected || Array.isArray(selected)) return;
       const normalized = normalizeSocPath(selected);
       if (!pathAllowed(normalized)) {
-        setError('File path must be under configured NexusAI data roots. Update Settings → Deployment.');
+        setError('File path must be under configured PocketMind Hybrid AI data roots. Update Settings → Deployment.');
         return;
       }
       setForm(prev => ({
@@ -470,7 +470,7 @@ export default function SocKnowledgeBase() {
       return;
     }
     if (!pathAllowed(filePath)) {
-      setError('File path must be under configured NexusAI data roots.');
+      setError('File path must be under configured PocketMind Hybrid AI data roots.');
       return;
     }
     if (!title) {
@@ -577,9 +577,9 @@ export default function SocKnowledgeBase() {
         status: 'failed',
         providerName: 'Local llama.cpp embeddings',
         modelPath,
-        error: 'Embedding model path must be under configured NexusAI data roots.',
+        error: 'Embedding model path must be under configured PocketMind Hybrid AI data roots.',
       });
-      setError('Embedding model path must be under configured NexusAI data roots.');
+      setError('Embedding model path must be under configured PocketMind Hybrid AI data roots.');
       return;
     }
 
@@ -753,7 +753,7 @@ export default function SocKnowledgeBase() {
       return;
     }
     if (!pathAllowed(modelPath)) {
-      setError('Embedding model must be under configured NexusAI data roots.');
+      setError('Embedding model must be under configured PocketMind Hybrid AI data roots.');
       return;
     }
 
@@ -896,7 +896,7 @@ export default function SocKnowledgeBase() {
       return;
     }
     if (!pathAllowed(path)) {
-      setError('PDF OCR path must be under configured NexusAI data roots.');
+      setError('PDF OCR path must be under configured PocketMind Hybrid AI data roots.');
       return;
     }
 
@@ -938,7 +938,7 @@ export default function SocKnowledgeBase() {
     const path = normalizeSocPath(resource.filePath);
 
     if (!pathAllowed(path)) {
-      setError(`Cannot index ${resource.title}. Path must be under configured NexusAI data roots.`);
+      setError(`Cannot index ${resource.title}. Path must be under configured PocketMind Hybrid AI data roots.`);
       return;
     }
 
@@ -1176,7 +1176,7 @@ export default function SocKnowledgeBase() {
       if (!selected || Array.isArray(selected)) return;
       const normalized = normalizeSocPath(selected);
       if (!bulkPathAllowed(normalized)) {
-        setError('Bulk import path must be under configured NexusAI data roots.');
+        setError('Bulk import path must be under configured PocketMind Hybrid AI data roots.');
         return;
       }
       setBulkFolderPath(normalized);
@@ -1198,7 +1198,7 @@ export default function SocKnowledgeBase() {
       return;
     }
     if (!bulkPathAllowed(folderPath)) {
-      setError('Bulk import path must be under configured NexusAI data roots.');
+      setError('Bulk import path must be under configured PocketMind Hybrid AI data roots.');
       return;
     }
 

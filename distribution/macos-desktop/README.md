@@ -1,4 +1,4 @@
-# NexusAI — macOS Desktop Package
+# PocketMind Hybrid AI — macOS Desktop Package
 
 macOS `.app` / `.dmg` deliverable for Intel and Apple Silicon Macs.
 
@@ -22,11 +22,11 @@ Bundle native llama.cpp servers per architecture:
 - `bin/llama.cpp/macos-x64-metal/llama-server`
 - `bin/llama.cpp/macos-x64-cpu/llama-server`
 
-NexusAI selects the matching binary for the current Mac.
+PocketMind Hybrid AI selects the matching binary for the current Mac.
 
 ## Default paths
 
-`~/Library/Application Support/NexusAI`
+`~/Library/Application Support/PocketMind`
 
 ## Docs
 

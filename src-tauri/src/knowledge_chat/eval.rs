@@ -52,6 +52,7 @@ pub async fn run_eval(
     let mut faithfulness_sum = 0.0f64;
     let mut mrr_sum = 0.0f64;
     let mut mrr_count = 0usize;
+    let mut hybrid_log_rank_sum = 0.0f64;
 
     for case in &eval_cases {
         let scope = case.search_scope.unwrap_or(KcSearchScope::Both);
@@ -152,6 +153,9 @@ pub async fn run_eval(
             context_precision_at_k(&case.expected_files, &hit_files, search.hits.len());
         let lexical_faithfulness =
             lexical_faithfulness_score(&case.expected_terms, &joined);
+        let hybrid_log_rank =
+            hybrid_log_rank_score(&case.expected_files, &hit_files);
+        hybrid_log_rank_sum += hybrid_log_rank;
 
         let case_passed = recall_at_k >= 1.0
             && term_hit_rate >= 0.34
@@ -174,6 +178,7 @@ pub async fn run_eval(
             context_precision_at_k,
             lexical_faithfulness,
             mrr: mrr.unwrap_or(0.0),
+            hybrid_log_rank,
             top_file,
             confidence: search.confidence.clone(),
             passed: case_passed,
@@ -217,8 +222,29 @@ pub async fn run_eval(
         } else {
             0.0
         },
+        average_hybrid_log_rank: if cases_run > 0 {
+            hybrid_log_rank_sum / cases_run as f64
+        } else {
+            0.0
+        },
         results,
     })
+}
+
+/// ∑ 1/log2(rank+1) for each expected file found in hit list (Datapizza-style log-rank).
+fn hybrid_log_rank_score(expected_files: &[String], hit_files: &[String]) -> f64 {
+    if expected_files.is_empty() || hit_files.is_empty() {
+        return 0.0;
+    }
+    let mut score = 0.0;
+    for expected in expected_files {
+        let needle = expected.to_lowercase();
+        if let Some(pos) = hit_files.iter().position(|name| name.contains(&needle)) {
+            let rank = (pos + 1) as f64;
+            score += 1.0 / (rank + 1.0).log2();
+        }
+    }
+    score
 }
 
 async fn run_production_search(
@@ -314,7 +340,7 @@ async fn run_production_search(
                 &path,
                 &pending.rewrite.retrieval_query,
                 &mut pending.hits,
-                retrieval_config.onnx_rerank_top_n,
+                retrieval_config.llama_rerank_top_n,
                 retrieval_config.onnx_blend_self,
                 retrieval_config.onnx_blend_new,
             )

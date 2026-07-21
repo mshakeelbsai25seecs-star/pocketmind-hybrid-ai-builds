@@ -74,6 +74,40 @@ const listShredGuard = formatKnowledgeAnswer(
 assert(listShredGuard.includes('## Evidence'), 'list-style restructure must not shred structured answers');
 assert(listShredGuard.includes('policy_one = True'), 'structured evidence fences must survive list questions');
 
+const emptyParenFence = formatKnowledgeAnswer(
+  [
+    'ChatView defines send, keydown, and copy helpers.',
+    '',
+    '## Evidence',
+    '',
+    '[Source: ChatView.tsx | L1–L36]',
+    '```typescript',
+    'export default function ChatView() {',
+    '  const handleSend = async () => {',
+    '    if (!input.trim()) return;',
+    '    const content = input.trim();',
+    '    void handleSend();',
+    '  };',
+    '  const handleKeyDown = (event: React.KeyboardEvent) => {',
+    '    if (event.key === \'Enter\' && !event.shiftKey) {',
+    '      event.preventDefault();',
+    '    }',
+    '  };',
+    '  return <button onClick={() => void handleSend()}>Send</button>;',
+    '}',
+    '```',
+  ].join('\n'),
+  [],
+  { skipQualityGate: true },
+);
+assert(emptyParenFence.includes('function ChatView()'), 'must keep empty () in function decls inside fences');
+assert(emptyParenFence.includes('async () =>'), 'must keep empty () in arrow functions inside fences');
+assert(emptyParenFence.includes('input.trim()'), 'must keep empty () in method calls inside fences');
+assert(emptyParenFence.includes('preventDefault()'), 'must keep empty () in preventDefault inside fences');
+assert(emptyParenFence.includes('onClick={() => void handleSend()}'), 'must keep JSX handler () inside fences');
+assert(!emptyParenFence.includes('function ChatView {'), 'must not shred ChatView() to ChatView');
+assert(!emptyParenFence.includes('async  =>'), 'must not shred async () => to async =>');
+
 const citationStub = formatKnowledgeAnswer(
   '[Source: ChatView.tsx | function handleSend]',
   [{ file_name: 'ChatView.tsx', sectionLabel: 'function handleSend', line_start: 10, line_end: 16 }],

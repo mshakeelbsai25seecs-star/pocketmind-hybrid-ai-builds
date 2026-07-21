@@ -2,6 +2,7 @@ import type { ProductConfig } from '../productConfig';
 import type { KcGroundedContextSource, KcSearchHit, KcSearchResult, QueryIntent } from './types';
 import { effectiveAnswerIntent, normalizeQueryIntent } from './types';
 import { buildExplainFallbackFromAttached, resolveStructuredAnswer } from './evidenceAnswer';
+import { wantsPerSymbolBehaviorExplanation } from './intentClassify';
 import { tryExtractiveCodeSymbolAnswer } from './prompts';
 import {
   bundleHitsForLlm,
@@ -61,7 +62,7 @@ export function resolveAnswerFallback(
     return searchResult.grounded_context?.evidence_answer?.trim() || null;
   }
 
-  const structured = resolveStructuredAnswer(searchResult);
+  const structured = resolveStructuredAnswer(searchResult, question);
   if (structured) return structured;
 
   if (allowsExplainExtractive(intent)) {
@@ -86,7 +87,13 @@ export function shouldUseLlmSynthesis(
   question = '',
 ): boolean {
   const intent = effectiveAnswerIntent(searchResult);
-  if (resolveStructuredAnswer(searchResult)) return false;
+  if (wantsPerSymbolBehaviorExplanation(question)) {
+    // Force synthesis so we explain bodies, not emit a symbol inventory.
+    if (!contextHits.length) return false;
+    if (isWeakGrounding(contextHits, productConfig)) return false;
+    return true;
+  }
+  if (resolveStructuredAnswer(searchResult, question)) return false;
   if (
     allowsExplainExtractive(intent)
     && question
@@ -115,12 +122,14 @@ export function resolveAnswerRoute(
   productConfig: ProductConfig | null | undefined,
 ): AnswerRoute {
   const intent = effectiveAnswerIntent(searchResult);
+  // Name-inventory structured answers must not short-circuit "what does each do?" questions.
+  const allowStructured = !wantsPerSymbolBehaviorExplanation(question);
 
-  if (resolveStructuredAnswer(searchResult) && allowsSpecialistExtractive(intent)) {
+  if (allowStructured && resolveStructuredAnswer(searchResult, question) && allowsSpecialistExtractive(intent)) {
     return 'structured';
   }
   // Structured may still win for general numbered-list answers.
-  if (resolveStructuredAnswer(searchResult) && intent === 'general') {
+  if (allowStructured && resolveStructuredAnswer(searchResult, question) && intent === 'general') {
     return 'structured';
   }
 

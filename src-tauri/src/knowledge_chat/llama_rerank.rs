@@ -21,9 +21,18 @@ use tokio::process::Command;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
 
-const IDLE_SHUTDOWN_SECS: u64 = 300;
-const RERANK_CONTEXT_SIZE: u32 = 8192;
-const DOC_SNIPPET_CHARS: usize = 2400;
+/// Keep the Qwen3-Reranker server warm across questions (same quality, far less cold-start).
+const IDLE_SHUTDOWN_SECS: u64 = 1_800;
+/// Rerank inputs are short (query + snippet). Large ctx + multi-slot wastes RAM and
+/// previously interacted badly with `--embedding` forcing n_ubatch=512.
+const RERANK_CONTEXT_SIZE: u32 = 2048;
+const RERANK_BATCH_SIZE: u32 = 2048;
+/// Shorter snippets keep token count down; measured ~4s/doc at 800–1400 chars on CPU.
+const DOC_SNIPPET_CHARS: usize = 900;
+/// llama.cpp ranks documents sequentially; keep each HTTP call small enough to
+/// finish well under the client timeout on CPU.
+const RERANK_HTTP_BATCH: usize = 8;
+const RERANK_HTTP_TIMEOUT_SECS: u64 = 120;
 
 struct WarmRerankSession {
     model_path: String,
@@ -68,19 +77,49 @@ impl KcRerankPool {
         }
         if let Some(remote_base) = remote_rerank_base_url() {
             let client = reqwest::Client::builder()
-                .timeout(Duration::from_secs(180))
+                .timeout(Duration::from_secs(RERANK_HTTP_TIMEOUT_SECS))
                 .build()
-                .map_err(|e| AppError::InferenceError(format!("Failed to create remote rerank client: {e}")))?;
-            return post_rerank(&client, &remote_base, query, documents).await;
+                .map_err(|e| {
+                    AppError::InferenceError(format!("Failed to create remote rerank client: {e}"))
+                })?;
+            return post_rerank_batched(&client, &remote_base, query, documents).await;
         }
         let model_path = normalize_model_path(model_path)?;
-        let mut guard = self.session.lock().await;
-        Self::drop_idle(&mut guard).await;
-        Self::ensure_session(&mut guard, &model_path).await?;
-        let session = guard.as_mut().expect("session just ensured");
-        let scores = post_rerank(&session.client, &session.base_url, query, documents).await?;
-        session.last_used = Instant::now();
-        Ok(scores)
+
+        // Hold the pool lock only while ensuring the warm server. Scoring can take
+        // tens of seconds on CPU — do not block other work (or a reset) on that.
+        let (client, base_url) = {
+            let mut guard = self.session.lock().await;
+            Self::drop_idle(&mut guard).await;
+            Self::ensure_session(&mut guard, &model_path).await?;
+            let session = guard.as_mut().expect("session just ensured");
+            (session.client.clone(), session.base_url.clone())
+        };
+
+        match post_rerank_batched(&client, &base_url, query, documents).await {
+            Ok(scores) => {
+                let mut guard = self.session.lock().await;
+                if let Some(session) = guard.as_mut() {
+                    if session.base_url == base_url {
+                        session.last_used = Instant::now();
+                    }
+                }
+                Ok(scores)
+            }
+            Err(err) => {
+                // A timed-out /v1/rerank often leaves llama-server still grinding
+                // the old batch — drop the session so the next call gets a clean one.
+                let mut guard = self.session.lock().await;
+                if let Some(session) = guard.as_ref() {
+                    if session.base_url == base_url {
+                        if let Some(mut stale) = guard.take() {
+                            kill_and_reap(&mut stale.child).await;
+                        }
+                    }
+                }
+                Err(err)
+            }
+        }
     }
 
     async fn drop_idle(guard: &mut Option<WarmRerankSession>) {
@@ -112,7 +151,7 @@ impl KcRerankPool {
                 }
             }
             if let Some(mut stale) = guard.take() {
-                let _ = stale.child.kill().await;
+                kill_and_reap(&mut stale.child).await;
             }
         }
         *guard = Some(spawn_rerank_server(model_path).await?);
@@ -142,11 +181,21 @@ pub fn remote_rerank_base_url() -> Option<String> {
     }
 }
 
-/// True when the configured path looks like a llama.cpp RANK GGUF (Qwen3-Reranker).
+/// True when the path is a GGUF intended for the llama.cpp RANK reranker.
+/// Accepts `*rerank*` names and any `.gguf` living under a `rerankers` folder.
 pub fn is_llama_rerank_model(path: &str) -> bool {
     let lower = path.to_ascii_lowercase();
-    lower.ends_with(".gguf")
-        && (lower.contains("rerank") || lower.contains("qwen3-reranker") || lower.contains("qwen3_reranker"))
+    if !lower.ends_with(".gguf") {
+        return false;
+    }
+    if lower.contains("rerank")
+        || lower.contains("qwen3-reranker")
+        || lower.contains("qwen3_reranker")
+    {
+        return true;
+    }
+    // Any GGUF the user places under models/rerankers/ is treated as the RANK model.
+    lower.contains("/rerankers/") || lower.contains("\\rerankers\\")
 }
 
 const QWEN3_RERANK_CANDIDATES: &[&str] = &[
@@ -157,8 +206,26 @@ const QWEN3_RERANK_CANDIDATES: &[&str] = &[
     "Qwen3-Reranker-4B.gguf",
 ];
 
-/// Probe `models/rerankers` for a known Qwen3-Reranker GGUF (or any matching name).
+/// Probe `models/rerankers` for a known Qwen3-Reranker GGUF (or any GGUF there).
 pub fn probe_qwen3_rerank_ggufs(models_dir: &str) -> Option<String> {
+    if let Some(found) = probe_qwen3_rerank_in_models_dir(models_dir) {
+        return Some(found);
+    }
+    // Windows: also probe legacy NexusAI models root when the preferred root differs.
+    #[cfg(target_os = "windows")]
+    {
+        let legacy = PathBuf::from(crate::deployment::WINDOWS_LEGACY_DATA_ROOT).join("models");
+        let legacy_s = legacy.to_string_lossy();
+        if !legacy_s.eq_ignore_ascii_case(models_dir.trim()) {
+            if let Some(found) = probe_qwen3_rerank_in_models_dir(&legacy_s) {
+                return Some(found);
+            }
+        }
+    }
+    None
+}
+
+fn probe_qwen3_rerank_in_models_dir(models_dir: &str) -> Option<String> {
     let rerankers = Path::new(models_dir).join("rerankers");
     for name in QWEN3_RERANK_CANDIDATES {
         let candidate = rerankers.join(name);
@@ -166,19 +233,27 @@ pub fn probe_qwen3_rerank_ggufs(models_dir: &str) -> Option<String> {
             return Some(candidate.to_string_lossy().to_string());
         }
     }
-    // Accept any *qwen3*rerank*.gguf the user dropped in (e.g. community F16 builds).
+    // Prefer any *rerank* name, then fall back to the first valid GGUF in the folder.
+    let mut any_gguf: Option<String> = None;
     if let Ok(entries) = std::fs::read_dir(&rerankers) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if crate::gguf::is_valid_gguf_file(&path) {
-                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-                if is_llama_rerank_model(name) || is_llama_rerank_model(&path.to_string_lossy()) {
-                    return Some(path.to_string_lossy().to_string());
-                }
+        let mut paths: Vec<PathBuf> = entries
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| crate::gguf::is_valid_gguf_file(p))
+            .collect();
+        paths.sort();
+        for path in paths {
+            let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let full = path.to_string_lossy().to_string();
+            if is_llama_rerank_model(name) || name.to_ascii_lowercase().contains("rerank") {
+                return Some(full);
+            }
+            if any_gguf.is_none() {
+                any_gguf = Some(full);
             }
         }
     }
-    None
+    any_gguf
 }
 
 /// Resolve the primary llama.cpp RANK GGUF (Qwen3-Reranker) from settings /
@@ -214,11 +289,16 @@ pub fn resolve_llama_rerank_path(db: &Database) -> Option<String> {
             }
         });
     if let Some(path) = configured {
-        if is_llama_rerank_model(&path) && Path::new(&path).is_file() {
-            return Some(path);
+        if Path::new(&path).is_file()
+            && (is_llama_rerank_model(&path) || path.to_ascii_lowercase().ends_with(".gguf"))
+        {
+            // Prefer configured GGUF; skip ONNX / non-files (fall through to probe).
+            if path.to_ascii_lowercase().ends_with(".gguf") {
+                return Some(path);
+            }
         }
     }
-    // Prefer discovering Qwen even when settings still point at an ONNX file.
+    // Prefer discovering a folder GGUF even when settings still point at ONNX.
     probe_qwen3_rerank_ggufs(&deploy.models_dir)
 }
 
@@ -284,25 +364,160 @@ pub async fn apply_llama_rerank(
 }
 
 async fn spawn_rerank_server(model_path: &str) -> AppResult<WarmRerankSession> {
+    // Policy: try GPU first, then CPU. The historical bug was not "missing CPU in
+    // the ladder" — `gpu_layer_attempts` already ended with 0 — but that the GPU
+    // attempt *hangs without exiting*, we only `kill()` without `wait()`, and the
+    // following `--gpu-layers 0` spawn is poisoned by the still-dying Vulkan
+    // process (live logs: llama_rank_ms ≈ 2× health timeout, then fallback).
+    //
+    // Fix:
+    // 1) Thin GPU ladder (one optimistic offload, then 0 on that runtime)
+    // 2) Fail-fast health window for GPU attempts
+    // 3) Kill + wait + brief settle before the next attempt
+    // 4) Dedicated clean CPU pass across CPU-ordered runtimes afterward
     let desired_gpu_layers = runtime_discovery::embed_gpu_layers();
-    let runtimes = runtime_discovery::ordered_runtime_candidates(desired_gpu_layers)?;
+    let gpu_runtimes = runtime_discovery::ordered_runtime_candidates(desired_gpu_layers)?;
     let mut errors = Vec::<String>::new();
 
-    for runtime in runtimes {
+    crate::knowledge_chat::debug_session::agent_log(
+        "R",
+        "llama_rerank.rs:spawn_rerank_server",
+        "rerank_spawn_begin",
+        serde_json::json!({
+            "model_basename": Path::new(model_path)
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or(model_path),
+            "desired_gpu_layers": desired_gpu_layers,
+            "runtime_count": gpu_runtimes.len(),
+            "first_runtime": gpu_runtimes.first().map(|r| r.label.clone()),
+        }),
+    );
+
+    // ---- Pass 1: GPU-capable runtimes (and their own layer-0 attempt) ----
+    for runtime in gpu_runtimes.iter().filter(|r| !r.force_cpu) {
         let attempts =
-            runtime_discovery::gpu_layer_attempts(model_path, desired_gpu_layers, runtime.force_cpu);
+            rerank_gpu_layer_attempts(model_path, desired_gpu_layers, runtime.force_cpu);
         for gpu_layers in attempts {
             match try_spawn_rerank_attempt(&runtime.path, model_path, gpu_layers).await {
-                Ok(session) => return Ok(session),
-                Err(e) => errors.push(format!("{} with {} GPU layers: {}", runtime.label, gpu_layers, e)),
+                Ok(session) => {
+                    crate::knowledge_chat::debug_session::agent_log(
+                        "R",
+                        "llama_rerank.rs:spawn_rerank_server",
+                        "rerank_spawn_ok",
+                        serde_json::json!({
+                            "pass": "gpu",
+                            "runtime": runtime.label,
+                            "gpu_layers": gpu_layers,
+                            "base_url": session.base_url,
+                        }),
+                    );
+                    return Ok(session);
+                }
+                Err(e) => {
+                    let msg = e.to_string();
+                    crate::knowledge_chat::debug_session::agent_log(
+                        "R",
+                        "llama_rerank.rs:spawn_rerank_server",
+                        "rerank_spawn_attempt_failed",
+                        serde_json::json!({
+                            "pass": "gpu",
+                            "runtime": runtime.label,
+                            "gpu_layers": gpu_layers,
+                            "error": msg.chars().take(500).collect::<String>(),
+                        }),
+                    );
+                    errors.push(format!(
+                        "{} with {} GPU layers: {msg}",
+                        runtime.label, gpu_layers
+                    ));
+                }
+            }
+        }
+    }
+
+    // ---- Pass 2: clean CPU-only pass (fresh runtimes, layers forced to 0) ----
+    // Runs even if Pass 1 already tried layers=0, because that attempt may have
+    // been poisoned by an incompletely reaped GPU process.
+    let cpu_runtimes = runtime_discovery::ordered_runtime_candidates(0)?;
+    for runtime in cpu_runtimes {
+        match try_spawn_rerank_attempt(&runtime.path, model_path, 0).await {
+            Ok(session) => {
+                crate::knowledge_chat::debug_session::agent_log(
+                    "R",
+                    "llama_rerank.rs:spawn_rerank_server",
+                    "rerank_spawn_ok",
+                    serde_json::json!({
+                        "pass": "cpu",
+                        "runtime": runtime.label,
+                        "gpu_layers": 0,
+                        "base_url": session.base_url,
+                    }),
+                );
+                return Ok(session);
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                crate::knowledge_chat::debug_session::agent_log(
+                    "R",
+                    "llama_rerank.rs:spawn_rerank_server",
+                    "rerank_spawn_attempt_failed",
+                    serde_json::json!({
+                        "pass": "cpu",
+                        "runtime": runtime.label,
+                        "gpu_layers": 0,
+                        "error": msg.chars().take(500).collect::<String>(),
+                    }),
+                );
+                errors.push(format!("{} with 0 GPU layers (cpu pass): {msg}", runtime.label));
             }
         }
     }
 
     Err(AppError::InferenceError(format!(
-        "Could not start Qwen3/llama.cpp rerank server. Details:\n{}",
+        "Could not start Qwen3/llama.cpp rerank server after GPU then CPU fallback. Details:\n{}",
         errors.join("\n")
     )))
+}
+
+/// Thin GPU→CPU ladder for rerank. One optimistic GPU try, then 0.
+/// Long ladders (999/120/96/…) burned minutes and never reached a clean CPU start.
+fn rerank_gpu_layer_attempts(
+    model_path: &str,
+    requested_gpu_layers: i32,
+    force_cpu: bool,
+) -> Vec<i32> {
+    if force_cpu || requested_gpu_layers == 0 {
+        return vec![0];
+    }
+    let model_size = runtime_discovery::model_size_bytes(model_path);
+    let (_, _, free_vram, _) = runtime_discovery::hardware_memory_snapshot();
+    let partial = runtime_discovery::estimate_partial_gpu_layers(model_size, free_vram);
+
+    let gpu_try = if requested_gpu_layers > 0 {
+        if partial > 0 && partial < 999 {
+            requested_gpu_layers.min(partial)
+        } else {
+            requested_gpu_layers
+        }
+    } else if partial >= 999 {
+        999
+    } else if partial > 0 {
+        partial
+    } else {
+        return vec![0];
+    };
+
+    runtime_discovery::unique_descending_layers(vec![gpu_try, 0])
+}
+
+/// Kill a failed spawn and wait until it is actually gone so the next attempt
+/// (especially CPU after a hung Vulkan GPU try) is not poisoned.
+async fn kill_and_reap(child: &mut tokio::process::Child) {
+    let _ = child.kill().await;
+    let _ = child.wait().await;
+    // Vulkan / driver teardown can lag process exit on Windows iGPUs.
+    sleep(Duration::from_millis(400)).await;
 }
 
 async fn try_spawn_rerank_attempt(
@@ -312,6 +527,12 @@ async fn try_spawn_rerank_attempt(
 ) -> AppResult<WarmRerankSession> {
     let port = find_free_localhost_port()?;
     let base_url = format!("http://127.0.0.1:{port}");
+    let stderr_path = std::env::temp_dir().join(format!(
+        "nexus-rerank-{}-{}.log",
+        std::process::id(),
+        port
+    ));
+    let stderr_file = std::fs::File::create(&stderr_path).ok();
 
     let mut command = Command::new(runtime);
     command
@@ -320,13 +541,22 @@ async fn try_spawn_rerank_attempt(
         .arg("--reranking")
         .arg("--pooling")
         .arg("rank")
-        .arg("--embedding")
+        // Do NOT pass --embedding: it forces n_ubatch=512 and rejects typical
+        // query+snippet rerank payloads (~500–800 tokens) with HTTP 500.
         .arg("--host")
         .arg("127.0.0.1")
         .arg("--port")
         .arg(port.to_string())
         .arg("-c")
         .arg(RERANK_CONTEXT_SIZE.to_string())
+        .arg("-b")
+        .arg(RERANK_BATCH_SIZE.to_string())
+        .arg("-ub")
+        .arg(RERANK_BATCH_SIZE.to_string())
+        .arg("-np")
+        .arg("1")
+        .arg("--cache-ram")
+        .arg("0")
         .arg("--gpu-layers")
         .arg(gpu_layers.max(0).to_string());
 
@@ -334,21 +564,51 @@ async fn try_spawn_rerank_attempt(
         command.current_dir(parent);
     }
 
+    let mut command = command;
+    command.stdout(Stdio::null());
+    if let Some(file) = stderr_file {
+        command.stderr(Stdio::from(file));
+    } else {
+        command.stderr(Stdio::null());
+    }
+
     let child = command
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
         .kill_on_drop(true)
         .spawn()
         .map_err(|e| AppError::InferenceError(format!("Could not start rerank server: {e}")))?;
 
     let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(180))
+        .timeout(Duration::from_secs(RERANK_HTTP_TIMEOUT_SECS))
         .build()
         .map_err(|e| AppError::InferenceError(format!("Failed to create rerank client: {e}")))?;
 
     let health_url = format!("{base_url}/health");
-    let deadline = Instant::now() + Duration::from_secs(120);
+    // GPU offload either becomes ready quickly or hangs on iGPU OOM — fail fast.
+    // CPU load of Qwen3-Reranker-4B-Q4 is typically healthy in ~7–20s.
+    let health_secs = if gpu_layers > 0 { 25 } else { 90 };
+    let deadline = Instant::now() + Duration::from_secs(health_secs);
+    let mut child = child;
     while Instant::now() < deadline {
+        if let Ok(Some(status)) = child.try_wait() {
+            let tail = std::fs::read_to_string(&stderr_path).unwrap_or_default();
+            let snippet: String = tail
+                .chars()
+                .rev()
+                .take(900)
+                .collect::<String>()
+                .chars()
+                .rev()
+                .collect();
+            let _ = std::fs::remove_file(&stderr_path);
+            return Err(AppError::InferenceError(format!(
+                "Rerank server exited before ready. Exit status: {status}. {}",
+                if snippet.trim().is_empty() {
+                    String::new()
+                } else {
+                    format!("llama-server output:\n{snippet}")
+                }
+            )));
+        }
         if client
             .get(&health_url)
             .send()
@@ -356,6 +616,7 @@ async fn try_spawn_rerank_attempt(
             .map(|r| r.status().is_success())
             .unwrap_or(false)
         {
+            let _ = std::fs::remove_file(&stderr_path);
             return Ok(WarmRerankSession {
                 model_path: model_path.to_string(),
                 base_url,
@@ -367,9 +628,54 @@ async fn try_spawn_rerank_attempt(
         sleep(Duration::from_millis(250)).await;
     }
 
-    Err(AppError::InferenceError(
-        "Rerank server started but did not become healthy in time.".to_string(),
-    ))
+    // Timed out while still alive — this is the hung-GPU case. Must fully reap
+    // before the next attempt or CPU fallback is poisoned.
+    kill_and_reap(&mut child).await;
+    let tail = std::fs::read_to_string(&stderr_path).unwrap_or_default();
+    let snippet: String = tail
+        .chars()
+        .rev()
+        .take(900)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+    let _ = std::fs::remove_file(&stderr_path);
+    Err(AppError::InferenceError(format!(
+        "Rerank server started but did not become healthy within {health_secs}s (gpu_layers={gpu_layers}). {}",
+        if snippet.trim().is_empty() {
+            String::new()
+        } else {
+            format!("llama-server output:\n{snippet}")
+        }
+    )))
+}
+
+async fn post_rerank_batched(
+    client: &reqwest::Client,
+    base_url: &str,
+    query: &str,
+    documents: &[String],
+) -> AppResult<Vec<f64>> {
+    if documents.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut scores = vec![0.0f64; documents.len()];
+    for (batch_start, chunk) in documents.chunks(RERANK_HTTP_BATCH).enumerate() {
+        let offset = batch_start * RERANK_HTTP_BATCH;
+        let batch_scores = post_rerank(client, base_url, query, chunk).await?;
+        if batch_scores.len() != chunk.len() {
+            return Err(AppError::InferenceError(format!(
+                "Rerank batch score count mismatch at offset {offset}: got {}, expected {}",
+                batch_scores.len(),
+                chunk.len()
+            )));
+        }
+        for (i, score) in batch_scores.into_iter().enumerate() {
+            scores[offset + i] = score;
+        }
+    }
+    Ok(scores)
 }
 
 async fn post_rerank(
@@ -442,14 +748,37 @@ mod tests {
     #[test]
     fn detects_qwen3_gguf_reranker() {
         assert!(is_llama_rerank_model(
-            r"D:\NexusAI\models\rerankers\Qwen3-Reranker-4B-Q4_K_M.gguf"
+            r"D:\PocketMind\models\rerankers\Qwen3-Reranker-4B-Q4_K_M.gguf"
+        ));
+        assert!(is_llama_rerank_model(
+            r"D:\NexusAI\models\rerankers\custom-cross-encoder.gguf"
         ));
         assert!(!is_llama_rerank_model(
-            r"D:\NexusAI\models\rerankers\bge-reranker-base.onnx"
+            r"D:\PocketMind\models\rerankers\bge-reranker-base.onnx"
         ));
         assert!(!is_llama_rerank_model(
-            r"D:\NexusAI\models\embeddings\Qwen3-Embedding-8B.gguf"
+            r"D:\PocketMind\models\embeddings\Qwen3-Embedding-8B.gguf"
         ));
+    }
+
+    #[test]
+    fn probe_accepts_any_gguf_in_rerankers_folder() {
+        let tmp = std::env::temp_dir().join(format!(
+            "nexus-rerank-probe-any-{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&tmp);
+        let rerankers = tmp.join("rerankers");
+        std::fs::create_dir_all(&rerankers).unwrap();
+        let mut payload = b"GGUF".to_vec();
+        payload.extend(vec![0u8; crate::gguf::MIN_PLAUSIBLE_GGUF_BYTES as usize]);
+        std::fs::write(rerankers.join("my-custom-model.gguf"), &payload).unwrap();
+        let found = probe_qwen3_rerank_ggufs(tmp.to_str().unwrap()).unwrap();
+        assert!(
+            found.ends_with("my-custom-model.gguf"),
+            "expected any folder GGUF, got {found}"
+        );
+        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
@@ -457,7 +786,16 @@ mod tests {
         let tmp = std::env::temp_dir().join(format!("nexus-rerank-probe-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(tmp.join("rerankers")).unwrap();
-        assert!(probe_qwen3_rerank_ggufs(tmp.to_str().unwrap()).is_none());
+        let found = probe_qwen3_rerank_ggufs(tmp.to_str().unwrap());
+        // Empty local folder must not invent a path under tmp. On Windows the
+        // probe may still return a real GGUF from D:\NexusAI\models.
+        if let Some(path) = found {
+            let tmp_s = tmp.to_string_lossy();
+            assert!(
+                !path.starts_with(tmp_s.as_ref()),
+                "empty tmp dir should not yield a path under itself, got {path}"
+            );
+        }
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -482,6 +820,13 @@ mod tests {
             "expected preferred Q4_K_M candidate, got {found}"
         );
         let _ = std::fs::remove_dir_all(&tmp);
+    }
+
+    #[test]
+    fn rerank_layer_ladder_is_thin_and_ends_with_cpu() {
+        // force_cpu / requested 0 → CPU only
+        assert_eq!(rerank_gpu_layer_attempts("x.gguf", -1, true), vec![0]);
+        assert_eq!(rerank_gpu_layer_attempts("x.gguf", 0, false), vec![0]);
     }
 
     #[test]

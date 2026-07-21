@@ -1,7 +1,7 @@
-# Remove NexusAI data left on C drive after a successful move to D:\NexusAI.
+# Remove PocketMind Hybrid AI data left on C drive after a successful move to D:\PocketMind.
 # Default is dry-run (lists only). Pass -ConfirmCleanup to actually delete.
 param(
-  [string]$TargetRoot = 'D:\NexusAI',
+  [string]$TargetRoot = 'D:\PocketMind',
   [string]$LegacyProgramData = "$env:ProgramData\NexusAI",
   [string]$LegacyAppData = "$env:APPDATA\NexusAI",
   [switch]$ConfirmCleanup
@@ -38,7 +38,7 @@ function Remove-LegacyTree {
   Remove-Item -LiteralPath $Path -Recurse -Force
 }
 
-Write-Host '=== NexusAI legacy C drive storage cleanup ===' -ForegroundColor Cyan
+Write-Host '=== PocketMind Hybrid AI legacy C drive storage cleanup ===' -ForegroundColor Cyan
 Write-Host "Target (must exist): $TargetRoot"
 if (-not (Test-Path $TargetRoot)) {
   throw 'Target root missing. Run migrate_storage_to_d_drive.ps1 first.'
@@ -116,5 +116,5 @@ Write-Host ''
 if ($ConfirmCleanup) {
   Write-Host 'Cleanup complete.' -ForegroundColor Green
 } else {
-  Write-Host 'No files deleted. Add -ConfirmCleanup after you verify NexusAI works from the D drive.' -ForegroundColor Green
+  Write-Host 'No files deleted. Add -ConfirmCleanup after you verify PocketMind Hybrid AI works from the D drive.' -ForegroundColor Green
 }

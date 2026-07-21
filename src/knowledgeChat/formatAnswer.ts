@@ -73,10 +73,41 @@ function lightDisplayNormalize(text: string): string {
     .trim();
 }
 
+/**
+ * Split markdown so fenced code blocks are preserved verbatim.
+ * Supports ```lang fences and an unclosed trailing fence (common in streamed answers).
+ */
+function splitMarkdownPreservingFences(text: string): string[] {
+  const parts: string[] = [];
+  let cursor = 0;
+  const open = /```[^\n]*\n?/g;
+  while (cursor < text.length) {
+    open.lastIndex = cursor;
+    const start = open.exec(text);
+    if (!start) {
+      parts.push(text.slice(cursor));
+      break;
+    }
+    if (start.index > cursor) {
+      parts.push(text.slice(cursor, start.index));
+    }
+    const fenceStart = start.index;
+    const afterOpen = start.index + start[0].length;
+    const closeIdx = text.indexOf('```', afterOpen);
+    if (closeIdx < 0) {
+      // Keep the remainder as a code fence so prose transforms cannot shred it.
+      parts.push(text.slice(fenceStart));
+      break;
+    }
+    parts.push(text.slice(fenceStart, closeIdx + 3));
+    cursor = closeIdx + 3;
+  }
+  return parts;
+}
+
 /** Apply prose transforms without mutating fenced code blocks. */
 function transformOutsideFencedCode(text: string, transform: (segment: string) => string): string {
-  return text
-    .split(/(```[\s\S]*?```)/g)
+  return splitMarkdownPreservingFences(text)
     .map(part => (part.startsWith('```') ? part : transform(part)))
     .join('');
 }
@@ -177,6 +208,12 @@ export function formatKnowledgeAnswer(
 
 /** True when the text is essentially just a [Source: …] tag (no real answer). */
 export function isCitationOnlyStub(text: string): boolean {
+  // A sizable fenced code block is real evidence, not a citation-only stub.
+  const fenceBodies = [...text.matchAll(/```[^\n]*\n([\s\S]*?)```/g)]
+    .map(m => (m[1] || '').trim())
+    .filter(Boolean);
+  if (fenceBodies.some(body => body.length >= 40)) return false;
+
   const stripped = text
     .replace(/\[\s*Source:[^\]]+\]/gi, '')
     .replace(/^##\s+(?:Answer|Evidence|Explanation)\s*$/gim, '')
@@ -239,7 +276,9 @@ function stripMultiSourceNoise(text: string): string {
 }
 
 function stripProseSourceArtifacts(text: string): string {
-  const out = text
+  // Never run empty-paren / punctuation cleanup inside ``` fences — that shreds
+  // real code like `ChatView()`, `async () =>`, and `input.trim()`.
+  const out = transformOutsideFencedCode(text, segment => segment
     .replace(/\bAccording to\s+Source\s+\d+[^[\n.]*/gi, '')
     .replace(/\bAccording to\s+Source\s+\d+\s*[-–—][^[\]]+(?=\[Source:|\s*$)/gi, '')
     .replace(/\bfrom\s+source\s+(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s*(?:["'][^"']*["']|\.\.\.)?/gi, '')
@@ -251,12 +290,12 @@ function stripProseSourceArtifacts(text: string): string {
     .replace(/\[\.\.\.\]/g, '')
     .replace(/\(\s*\)/g, '')
     .replace(/page greater than page number twenty[- ]?seven/gi, 'Page 27')
-    .replace(/\s+([,.;:!?])/g, '$1');
+    .replace(/\s+([,.;:!?])/g, '$1'));
   return collapseInlineWhitespace(out).trim();
 }
 
 function stripMetaCommentary(text: string): string {
-  return text
+  return transformOutsideFencedCode(text, segment => segment
     .replace(/\*?Given (?:only |limitations|constraints)[\s\S]*$/i, '')
     .replace(/\*?Due to constraints[\s\S]*$/i, '')
     .replace(/\*?Note:\s*(?:Given|Due to|limitations|constraints)[\s\S]*$/i, '')
@@ -266,7 +305,7 @@ function stripMetaCommentary(text: string): string {
     .replace(/\bhowever, no explicit mention[\s\S]*?(?=\[Source:|$)/gi, '')
     .replace(/\bit cannot conclusively answer[\s\S]*?(?=\[Source:|$)/gi, '')
     .replace(/\bwithout speculation[\s\S]*?(?=\[Source:|$)/gi, '')
-    .replace(/\bTherefore\.\.\.\s*/gi, '')
+    .replace(/\bTherefore\.\.\.\s*/gi, ''))
     .trim();
 }
 

@@ -1,4 +1,4 @@
-# Nexus AI — operator guide
+# PocketMind Hybrid AI — operator guide
 
 ## First-time setup
 

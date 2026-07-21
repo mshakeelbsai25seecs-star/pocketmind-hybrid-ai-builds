@@ -1,4 +1,4 @@
-# NexusAI Enterprise Security Checklist
+# PocketMind Hybrid AI Enterprise Security Checklist
 
 ## Network security
 

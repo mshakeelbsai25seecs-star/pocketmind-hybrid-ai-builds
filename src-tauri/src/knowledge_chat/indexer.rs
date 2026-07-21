@@ -14,6 +14,9 @@ use crate::knowledge_chat::contextual_index::{
 use crate::knowledge_chat::db::{self, StoredChunkInput};
 use crate::knowledge_chat::db_entities::{self, StoredCodeEntityInput};
 use crate::knowledge_chat::filter::{is_usable_extracted_text_for_extension, normalized_text_fingerprint, should_skip_file, should_treat_index_message_as_skip};
+use crate::knowledge_chat::image_rag;
+use crate::knowledge_chat::ingest_enrich::{enrich_tables_and_figures, provenance_section_path};
+use crate::knowledge_chat::llm_ocr_repair::maybe_repair_ocr_markdown;
 use crate::knowledge_chat::ocr_repair::{is_ocr_markdown_name, repair_ocr_markdown};
 use crate::knowledge_chat::pdf_ocr::{ocr_pdf_to_markdown_sync, ocr_sidecar_path, pdf_needs_ocr};
 use crate::knowledge_chat::lexical::top_terms;
@@ -21,6 +24,9 @@ use crate::knowledge_chat::scanner::normalize_path;
 use crate::knowledge_chat::types::{KcCollectionStatus, KcFileRecord, KcIndexProgress, KcIndexResult, KC_MAX_CHARS_PER_FILE};
 use rayon::prelude::*;
 use sha2::{Digest, Sha256};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use crate::product;
 use tauri::Window;
 
@@ -53,6 +59,12 @@ struct IndexRunOptions {
     contextual_indexing: bool,
     semantic_chunking: bool,
     llm_contextual_summaries: bool,
+    caption_figures: bool,
+    llm_ocr_repair: bool,
+    store_image_rag_media: bool,
+    collection_id: String,
+    data_root: std::path::PathBuf,
+    ocr_engine_label: String,
 }
 
 pub fn index_lexical(
@@ -67,13 +79,39 @@ pub fn index_lexical(
     }
 
     db::update_collection_status(db, collection_id, KcCollectionStatus::Indexing, None)?;
-    emit_progress(window, collection_id, "prepare", 0, 0, None, "Preparing local index run...");
+    emit_progress(
+        window,
+        collection_id,
+        "prepare",
+        0,
+        0,
+        None,
+        "Preparing local index run...",
+        Some("prepare"),
+        Some(0),
+        Some(0),
+        Some(0),
+        Some("running"),
+    );
 
     let product_cfg = product::load_product_config(db);
+    let ocr_cfg = crate::ocr_settings::load_ocr_image_rag_config(db, false);
+    let collection = db::get_collection(db, collection_id)?;
+    let deploy = crate::deployment::load_deployment_config(db);
+    // Only write page media when collection opted in AND global Image RAG is enabled.
+    let store_media = collection.image_rag_opt_in
+        && collection.allow_cloud_media
+        && ocr_cfg.image_rag_enabled;
     let index_options = IndexRunOptions {
         contextual_indexing: product_cfg.enable_contextual_indexing,
         semantic_chunking: product_cfg.enable_semantic_chunking,
         llm_contextual_summaries: product_cfg.enable_llm_contextual_summaries,
+        caption_figures: ocr_cfg.ocr_caption_figures,
+        llm_ocr_repair: ocr_cfg.ocr_llm_repair,
+        store_image_rag_media: store_media,
+        collection_id: collection_id.to_string(),
+        data_root: std::path::PathBuf::from(&deploy.data_root),
+        ocr_engine_label: ocr_cfg.ocr_engine.clone(),
     };
 
     let files = db::list_pending_files(db, collection_id)?;
@@ -91,23 +129,154 @@ pub fn index_lexical(
         0,
         total,
         None,
-        "Extracting and chunking files in parallel...",
+        "Preparing files (scanned PDFs use OCR and can take several minutes each)...",
+        Some("extracting"),
+        Some(0),
+        Some(0),
+        Some(0),
+        Some("running"),
     );
 
-    let prepared: Vec<Result<PreparedFileIndex, (KcFileRecord, String)>> = files
-        .par_iter()
-        .map(|file| prepare_file_index(file, incremental, &index_options).map_err(|err| (file.clone(), err.to_string())))
-        .collect();
+    let prepared = if total == 0 {
+        Vec::new()
+    } else {
+        let window_owned = window.cloned();
+        let collection_id_owned = collection_id.to_string();
+        let files_done = Arc::new(AtomicUsize::new(0));
+        let files_failed = Arc::new(AtomicUsize::new(0));
+        let stop_heartbeat = Arc::new(AtomicBool::new(false));
+        let started = Instant::now();
+        let started_ms = now_ms();
+
+        // Heartbeat so the UI never looks frozen during long OCR of a single PDF.
+        if let Some(hb_window) = window_owned.clone() {
+            let hb_done = Arc::clone(&files_done);
+            let hb_failed = Arc::clone(&files_failed);
+            let hb_stop = Arc::clone(&stop_heartbeat);
+            let hb_collection = collection_id_owned.clone();
+            let hb_total = total;
+            std::thread::spawn(move || {
+                while !hb_stop.load(Ordering::Relaxed) {
+                    std::thread::sleep(Duration::from_secs(3));
+                    if hb_stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    let done = hb_done.load(Ordering::Relaxed);
+                    let failed = hb_failed.load(Ordering::Relaxed);
+                    let elapsed_ms = (now_ms() - started_ms).max(0);
+                    let payload = KcIndexProgress {
+                        collection_id: hb_collection.clone(),
+                        phase: "extract".to_string(),
+                        current: done,
+                        total: hb_total,
+                        file_name: None,
+                        message: format!(
+                            "Still working… {done}/{hb_total} files prepared ({failed} failed). Large PDFs with OCR can take many minutes each."
+                        ),
+                        detail: Some("heartbeat".to_string()),
+                        files_done: Some(done),
+                        files_failed: Some(failed),
+                        updated_at_ms: Some(now_ms()),
+                        elapsed_ms: Some(elapsed_ms),
+                        state: Some("running".to_string()),
+                    };
+                    let _ = hb_window.emit("kc-index-progress", payload);
+                }
+            });
+        }
+
+        let prepared: Vec<Result<PreparedFileIndex, (KcFileRecord, String)>> = files
+            .par_iter()
+            .map(|file| {
+                let elapsed_ms = started.elapsed().as_millis() as i64;
+                let done_so_far = files_done.load(Ordering::Relaxed);
+                emit_progress(
+                    window_owned.as_ref(),
+                    &collection_id_owned,
+                    "extract",
+                    done_so_far,
+                    total,
+                    Some(file.name.clone()),
+                    &format!(
+                        "Preparing {}… (OCR for scanned PDFs can take several minutes)",
+                        file.name
+                    ),
+                    Some("extracting"),
+                    Some(done_so_far),
+                    Some(files_failed.load(Ordering::Relaxed)),
+                    Some(elapsed_ms),
+                    Some("running"),
+                );
+
+                // Panics in extract/chunk (e.g. UTF-8 slice bugs) must not kill the rayon pool.
+                let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                    prepare_file_index(file, incremental, &index_options)
+                }))
+                .unwrap_or_else(|payload| {
+                    let msg = payload
+                        .downcast_ref::<String>()
+                        .map(|s| s.as_str())
+                        .or_else(|| payload.downcast_ref::<&str>().copied())
+                        .unwrap_or("panic while preparing file");
+                    Err(AppError::Unknown(format!(
+                        "Indexing panic for {}: {msg}",
+                        file.name
+                    )))
+                })
+                .map_err(|err| (file.clone(), err.to_string()));
+
+                let n = files_done.fetch_add(1, Ordering::Relaxed) + 1;
+                if result.is_err() {
+                    files_failed.fetch_add(1, Ordering::Relaxed);
+                }
+                let failed_n = files_failed.load(Ordering::Relaxed);
+                let elapsed_ms = started.elapsed().as_millis() as i64;
+                let (detail, message) = match &result {
+                    Ok(_) => (
+                        "prepared",
+                        format!("Prepared {n}/{total}: {}", file.name),
+                    ),
+                    Err((_, err)) => (
+                        "failed",
+                        format!("Failed {n}/{total}: {} — {err}", file.name),
+                    ),
+                };
+                emit_progress(
+                    window_owned.as_ref(),
+                    &collection_id_owned,
+                    "extract",
+                    n,
+                    total,
+                    Some(file.name.clone()),
+                    &message,
+                    Some(detail),
+                    Some(n),
+                    Some(failed_n),
+                    Some(elapsed_ms),
+                    Some("running"),
+                );
+                result
+            })
+            .collect();
+
+        stop_heartbeat.store(true, Ordering::Relaxed);
+        prepared
+    };
 
     for (index, result) in prepared.into_iter().enumerate() {
         emit_progress(
             window,
             collection_id,
-            "extract",
+            "write",
             index + 1,
             total,
             Some(files[index].name.clone()),
-            "Writing indexed chunks...",
+            &format!("Writing indexed chunks… {}/{}", index + 1, total),
+            Some("writing"),
+            Some(index + 1),
+            Some(failed_files),
+            None,
+            Some("running"),
         );
 
         match result {
@@ -232,24 +401,87 @@ fn prepare_file_index(
             .join("\n\n")
     };
 
+    let mut used_ocr = false;
     if file.extension.eq_ignore_ascii_case("pdf") && pdf_needs_ocr(&extracted, &context.warnings) {
         let sidecar = ocr_sidecar_path(std::path::Path::new(&path));
+        let mut sidecar_usable = false;
         if sidecar.is_file() {
             if let Ok(existing) = std::fs::read_to_string(&sidecar) {
                 if is_usable_extracted_text_for_extension(&existing, &file.extension).is_ok() {
                     extracted = existing;
+                    used_ocr = true;
+                    sidecar_usable = true;
+                } else {
+                    // Corrupt/poisoned sidecar — remove so OCR can refresh.
+                    let _ = std::fs::remove_file(&sidecar);
                 }
             }
-        } else if let Ok(ocr_text) = ocr_pdf_to_markdown_sync(&path) {
-            let _ = std::fs::write(&sidecar, &ocr_text);
-            extracted = ocr_text;
+        }
+        if !sidecar_usable {
+            match ocr_pdf_to_markdown_sync(&path) {
+                Ok(ocr_text) => {
+                    let _ = std::fs::write(&sidecar, &ocr_text);
+                    let raw_sidecar = sidecar.with_extension("raw.md");
+                    let _ = std::fs::write(&raw_sidecar, &ocr_text);
+                    extracted = ocr_text;
+                    used_ocr = true;
+                }
+                Err(err) => {
+                    eprintln!("OCR failed for {}: {err}", file.relative_path);
+                    // Scanned PDF with no usable text after OCR failure must not index as "success".
+                    if pdf_needs_ocr(&extracted, &[]) {
+                        return Err(AppError::Unknown(format!(
+                            "Could not read text from this PDF. Check that Python OCR is installed, then rebuild. ({err})"
+                        )));
+                    }
+                }
+            }
         }
     }
+    if file.extension.eq_ignore_ascii_case("pdf") && index_options.store_image_rag_media {
+        let _ = image_rag::maybe_store_pdf_page_previews(
+            std::path::Path::new(&path),
+            &index_options.collection_id,
+            &index_options.data_root,
+            8,
+        );
+    }
 
-    let extracted = if is_ocr_markdown_name(&file.name) || extracted.contains("## Page ") {
-        repair_ocr_markdown(&extracted)
+    // Docling / table-heavy markdown: use light path only — aggressive word-merge
+    // destroys pipe tables. Legacy OCR pages still get repair_ocr_markdown.
+    let is_docling = extracted.contains("Engine: docling");
+    let looks_table_heavy = extracted.matches('|').count() >= 12;
+    let extracted = if is_docling || looks_table_heavy {
+        if index_options.llm_ocr_repair && used_ocr {
+            let repaired_path = ocr_sidecar_path(std::path::Path::new(&path)).with_extension("repaired.md");
+            maybe_repair_ocr_markdown(&extracted, true, Some(&repaired_path))
+        } else {
+            extracted
+        }
+    } else if is_ocr_markdown_name(&file.name) || extracted.contains("## Page ") {
+        let light = repair_ocr_markdown(&extracted);
+        if index_options.llm_ocr_repair {
+            let repaired_path = ocr_sidecar_path(std::path::Path::new(&path)).with_extension("repaired.md");
+            maybe_repair_ocr_markdown(&light, true, Some(&repaired_path))
+        } else {
+            light
+        }
+    } else if index_options.llm_ocr_repair && used_ocr {
+        maybe_repair_ocr_markdown(&extracted, true, None)
     } else {
         extracted
+    };
+
+    let extracted = if index_options.caption_figures {
+        enrich_tables_and_figures(&extracted)
+    } else {
+        extracted
+    };
+
+    let ocr_engine_for_chunks = if used_ocr {
+        Some(index_options.ocr_engine_label.as_str())
+    } else {
+        None
     };
 
     is_usable_extracted_text_for_extension(&extracted, &file.extension).map_err(AppError::Unknown)?;
@@ -451,7 +683,7 @@ fn prepare_file_index(
                 page_end: chunk.page_end,
                 text: text.clone(),
                 parent_text: contextual_parent,
-                section_path: chunk.section_path,
+                section_path: provenance_section_path(&chunk.section_path, ocr_engine_for_chunks),
                 partition_id: partition.as_str().to_string(),
                 doc_type: chunk.doc_type,
                 text_fingerprint: normalized_text_fingerprint(&text),
@@ -518,7 +750,20 @@ pub fn finalize_index(
         outcome.total_files,
         outcome.total_files,
         None,
-        "Indexing complete.",
+        if outcome.failed_files > 0 {
+            "Indexing finished with some file failures."
+        } else {
+            "Indexing complete."
+        },
+        Some("complete"),
+        Some(outcome.total_files),
+        Some(outcome.failed_files),
+        None,
+        Some(if outcome.failed_files > 0 && outcome.indexed_files == 0 {
+            "failed"
+        } else {
+            "finished"
+        }),
     );
 
     Ok(KcIndexResult {
@@ -538,6 +783,13 @@ pub fn finalize_index(
     })
 }
 
+fn now_ms() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 fn emit_progress(
     window: Option<&Window>,
     collection_id: &str,
@@ -546,6 +798,11 @@ fn emit_progress(
     total: usize,
     file_name: Option<String>,
     message: &str,
+    detail: Option<&str>,
+    files_done: Option<usize>,
+    files_failed: Option<usize>,
+    elapsed_ms: Option<i64>,
+    state: Option<&str>,
 ) {
     if let Some(window) = window {
         let payload = KcIndexProgress {
@@ -555,6 +812,12 @@ fn emit_progress(
             total,
             file_name,
             message: message.to_string(),
+            detail: detail.map(|s| s.to_string()),
+            files_done,
+            files_failed,
+            updated_at_ms: Some(now_ms()),
+            elapsed_ms,
+            state: state.map(|s| s.to_string()),
         };
         let _ = window.emit("kc-index-progress", payload);
     }

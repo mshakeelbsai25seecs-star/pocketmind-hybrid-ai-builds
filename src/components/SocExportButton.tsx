@@ -38,7 +38,7 @@ export default function SocExportButton({
   };
 
   return (
-    <button type="button" onClick={exportFile} disabled={saving || disabled} className={`${className} flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed`} title={title || 'Exports are written locally only to paths under your configured NexusAI data roots.'}>
+    <button type="button" onClick={exportFile} disabled={saving || disabled} className={`${className} flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed`} title={title || 'Exports are written locally only to paths under your configured PocketMind Hybrid AI data roots.'}>
       {saved ? <CheckCircle2 className="w-4 h-4" /> : <Download className="w-4 h-4" />}
       {saving ? 'Saving...' : saved ? 'Saved' : label}
     </button>

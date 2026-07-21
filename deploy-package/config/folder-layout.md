@@ -19,8 +19,8 @@
 ```
 
 Default `{data_root}`:
-- Windows Server: `C:\ProgramData\NexusAI`
-- Linux: `/var/lib/nexusai`
+- Windows Server: `C:\ProgramData\PocketMind`
+- Linux: `/var/lib/pocketmind`
 
 Intake subfolders (optional, mirror your data pack):
 - `intake/policies`, `intake/rules`, `intake/parsers`, `intake/playbooks`, etc.

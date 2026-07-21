@@ -512,12 +512,35 @@ pub async fn stream_generate(
         if key.trim().is_empty() {
             return Err(AppError::InferenceError(format!("No API key saved for {provider}. Open Models → Online and save your provider key first.")));
         }
+        // #region agent log
+        crate::knowledge_chat::debug_session::agent_log(
+            "H3",
+            "commands.rs:stream_generate",
+            "remote_stream_start",
+            serde_json::json!({
+                "provider": provider,
+                "model_id": model_id,
+                "key_present": !key.trim().is_empty(),
+                "prompt_chars": request.prompt.len(),
+            }),
+        );
+        // #endregion
         let backend = Arc::new(crate::llm::remote::RemoteBackend::new(&provider, &key, &model_id));
 
         tokio::spawn(async move {
             let tx_for_error = tx.clone();
             let result = backend.generate_stream(request, tx).await;
             if let Err(e) = result {
+                // #region agent log
+                crate::knowledge_chat::debug_session::agent_log(
+                    "H3",
+                    "commands.rs:stream_generate",
+                    "remote_stream_error",
+                    serde_json::json!({
+                        "error": e.to_string(),
+                    }),
+                );
+                // #endregion
                 let _ = tx_for_error.send(GenerationChunk {
                     text: format!("\n\n**Generation error:** {e}"),
                     finish_reason: Some("error".to_string()),
@@ -585,6 +608,66 @@ pub async fn stream_generate(
 #[tauri::command]
 pub async fn stop_generation(state: State<'_, AppState>) -> AppResult<()> {
     state.local_backend.unload_model().await
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UnloadChatModelResult {
+    pub chat_unloaded: bool,
+    pub knowledge_engines_released: bool,
+    pub message: String,
+}
+
+/// Unload the local chat model from RAM/VRAM. Optionally also shut down
+/// Knowledge Chat embedding/rerank llama-server processes so memory is fully freed.
+///
+/// Default keeps KC embed/rerank warm — killing them forces multi-minute cold
+/// starts of Qwen3-Embedding / Qwen3-Reranker on the next Knowledge Chat question
+/// with no quality benefit (same models reload afterward).
+#[tauri::command]
+pub async fn unload_chat_model(
+    state: State<'_, AppState>,
+    release_knowledge_engines: Option<bool>,
+) -> AppResult<UnloadChatModelResult> {
+    let was_loaded = state.local_backend.is_loaded();
+    let release_kc = release_knowledge_engines.unwrap_or(false);
+
+    state.local_backend.unload_model().await?;
+
+    if release_kc {
+        state.kc_embed_pool.shutdown().await;
+        state.kc_rerank_pool.shutdown().await;
+    }
+
+    // #region agent log
+    crate::knowledge_chat::debug_session::agent_log(
+        "B",
+        "commands.rs:unload_chat_model",
+        "unload_chat_model_ok",
+        serde_json::json!({
+            "was_loaded": was_loaded,
+            "release_knowledge_engines": release_kc,
+            "chat_holds_gpu_after": crate::llm::runtime_discovery::chat_holds_gpu(),
+        }),
+    );
+    // #endregion
+
+    let message = if was_loaded {
+        if release_kc {
+            "Chat model unloaded and Knowledge Chat search engines released from memory.".to_string()
+        } else {
+            "Chat model unloaded from memory. Knowledge Chat search engines stayed warm for faster questions.".to_string()
+        }
+    } else if release_kc {
+        "No chat model was loaded. Knowledge Chat search engines were released if they were running.".to_string()
+    } else {
+        "No chat model was loaded in memory.".to_string()
+    };
+
+    Ok(UnloadChatModelResult {
+        chat_unloaded: was_loaded,
+        knowledge_engines_released: release_kc,
+        message,
+    })
 }
 
 // Characters
@@ -850,7 +933,7 @@ pub async fn download_model(
     let mut last_bytes = downloaded;
 
     loop {
-        let mut req = client.get(&url).header(USER_AGENT, "NexusAI/0.1 model-downloader");
+        let mut req = client.get(&url).header(USER_AGENT, "PocketMind Hybrid AI/0.1 model-downloader");
         if downloaded > 0 {
             req = req.header(RANGE, format!("bytes={}-", downloaded));
             emit_download_progress(&window, &id, &file_name, "resuming", downloaded, total, 0.0, retries, "Resuming from existing .part file...", started_at);
@@ -1153,7 +1236,7 @@ pub async fn export_backup(state: State<'_, AppState>) -> AppResult<BackupData> 
     };
 
     let backup = BackupData {
-        app: "NexusAI Desktop".to_string(),
+        app: "PocketMind Hybrid AI Desktop".to_string(),
         version: 2,
         exported_at: chrono::Utc::now().to_rfc3339(),
         conversations,
@@ -1180,7 +1263,7 @@ pub async fn export_backup(state: State<'_, AppState>) -> AppResult<BackupData> 
 #[tauri::command]
 pub async fn import_backup(state: State<'_, AppState>, backup: BackupData) -> AppResult<String> {
     if backup.app.trim().is_empty() || backup.version == 0 {
-        return Err(anyhow::anyhow!("This does not look like a valid NexusAI backup file.").into());
+        return Err(anyhow::anyhow!("This does not look like a valid PocketMind Hybrid AI backup file.").into());
     }
 
     let db = state.db.lock().await;
@@ -1356,6 +1439,77 @@ pub async fn set_product_config(
     Ok(saved)
 }
 
+#[tauri::command]
+pub async fn get_ocr_image_rag_config(
+    state: State<'_, AppState>,
+) -> AppResult<crate::ocr_settings::OcrImageRagConfig> {
+    let db = state.db.lock().await;
+    let key_ok = db
+        .get_api_key(crate::ocr_settings::IMAGE_RAG_PROVIDER)
+        .ok()
+        .flatten()
+        .map(|k| !k.is_empty())
+        .unwrap_or(false);
+    Ok(crate::ocr_settings::load_ocr_image_rag_config(&db, key_ok))
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SaveOcrImageRagRequest {
+    pub config: crate::ocr_settings::OcrImageRagConfig,
+    pub api_key: Option<String>,
+}
+
+#[tauri::command]
+pub async fn save_ocr_image_rag_config(
+    state: State<'_, AppState>,
+    request: SaveOcrImageRagRequest,
+) -> AppResult<crate::ocr_settings::OcrImageRagConfig> {
+    let db = state.db.lock().await;
+    crate::ocr_settings::save_ocr_image_rag_config(&db, &request.config)?;
+    if let Some(key) = request.api_key.as_ref().map(|k| k.trim().to_string()) {
+        if key.is_empty() {
+            let _ = db.delete_api_key(crate::ocr_settings::IMAGE_RAG_PROVIDER);
+        } else if key.len() > 8192 {
+            return Err(AppError::Unknown(
+                "Image RAG API key is too long.".to_string(),
+            ));
+        } else {
+            let encrypted = state
+                .crypto
+                .encrypt(&key)
+                .map_err(|e| AppError::Unknown(format!("Failed to encrypt Image RAG key: {e}")))?;
+            db.store_api_key(crate::ocr_settings::IMAGE_RAG_PROVIDER, &encrypted)
+                .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+        }
+    }
+    let key_ok = db
+        .get_api_key(crate::ocr_settings::IMAGE_RAG_PROVIDER)
+        .ok()
+        .flatten()
+        .map(|k| !k.is_empty())
+        .unwrap_or(false);
+    let saved = crate::ocr_settings::load_ocr_image_rag_config(&db, key_ok);
+    drop(db);
+    record_audit(
+        &state,
+        "ocr_image_rag.config_save",
+        "product",
+        "OCR / Image RAG settings saved",
+        None,
+        None,
+        true,
+    )
+    .await;
+    Ok(saved)
+}
+
+#[tauri::command]
+pub async fn test_image_rag_connection(
+    state: State<'_, AppState>,
+) -> AppResult<String> {
+    crate::knowledge_chat::image_rag::test_connection(&state).await
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LogAuditEventRequest {
     pub event_type: String,
@@ -1421,7 +1575,7 @@ fn soc_path_allowed(path: &str, config: &DeploymentConfig) -> bool {
 fn soc_path_error(path: &str, config: &DeploymentConfig) -> String {
     let roots = config.allowed_roots().join(", ");
     format!(
-        "Path is outside configured NexusAI data roots: {path}. Allowed roots: {roots}"
+        "Path is outside configured PocketMind Hybrid AI data roots: {path}. Allowed roots: {roots}"
     )
 }
 
@@ -2402,7 +2556,7 @@ fn auto_fit_plan_for_model(
             128,
             "CPU fallback".to_string(),
             "No real GPU backend library is bundled with llama-server".to_string(),
-            Some("NexusAI will run safely on CPU. GPU folders that lack libggml-metal / CUDA / Vulkan libraries cannot accelerate models. Bundle a real GPU-enabled llama.cpp runtime to enable offload.".to_string()),
+            Some("PocketMind Hybrid AI will run safely on CPU. GPU folders that lack libggml-metal / CUDA / Vulkan libraries cannot accelerate models. Bundle a real GPU-enabled llama.cpp runtime to enable offload.".to_string()),
             total_vram,
             free_vram,
         );
@@ -2415,7 +2569,7 @@ fn auto_fit_plan_for_model(
             128,
             "CPU fallback".to_string(),
             "No measurable dedicated VRAM detected".to_string(),
-            Some("NexusAI will use CPU mode. If this machine has an integrated GPU, Vulkan may still work when the Vulkan runtime and drivers are installed, but the app will not claim acceleration until it is confirmed.".to_string()),
+            Some("PocketMind Hybrid AI will use CPU mode. If this machine has an integrated GPU, Vulkan may still work when the Vulkan runtime and drivers are installed, but the app will not claim acceleration until it is confirmed.".to_string()),
             total_vram,
             free_vram,
         );
@@ -2429,7 +2583,7 @@ fn auto_fit_plan_for_model(
             if layers == 999 { 256 } else { 128 },
             "Automatic GPU-first mode".to_string(),
             "Selected model size is unknown; using a conservative GPU-first plan".to_string(),
-            Some("Run Scan Models or import the local GGUF so NexusAI can calculate a more accurate automatic plan.".to_string()),
+            Some("Run Scan Models or import the local GGUF so PocketMind Hybrid AI can calculate a more accurate automatic plan.".to_string()),
             total_vram,
             free_vram,
         );
@@ -2461,8 +2615,8 @@ fn auto_fit_plan_for_model(
             if model_size > 50 * 1_073_741_824 { 2048 } else { 4096 },
             128,
             "Automatic CPU + GPU split".to_string(),
-            format!("NexusAI will offload about {layers} layers and keep the remaining model in system RAM"),
-            Some("The model is larger than comfortable GPU memory, so NexusAI will try full GPU first, then partial GPU offload, then CPU fallback if needed.".to_string()),
+            format!("PocketMind Hybrid AI will offload about {layers} layers and keep the remaining model in system RAM"),
+            Some("The model is larger than comfortable GPU memory, so PocketMind Hybrid AI will try full GPU first, then partial GPU offload, then CPU fallback if needed.".to_string()),
             total_vram,
             free_vram,
         );
@@ -2475,7 +2629,7 @@ fn auto_fit_plan_for_model(
         if enough_ram { 128 } else { 64 },
         "CPU fallback".to_string(),
         if enough_ram { "Model does not fit GPU memory, but system RAM may be sufficient".to_string() } else { "Model may exceed available memory on this machine".to_string() },
-        Some("NexusAI will not remove the model from the catalog. On this machine it may require a smaller quantization or stronger hardware with more combined RAM/VRAM.".to_string()),
+        Some("PocketMind Hybrid AI will not remove the model from the catalog. On this machine it may require a smaller quantization or stronger hardware with more combined RAM/VRAM.".to_string()),
         total_vram,
         free_vram,
     )
@@ -2540,11 +2694,11 @@ pub async fn get_gpu_runtime_report(
         "fail"
     };
     let layout_message = if distinct_gpu_backends >= 1 {
-        "Multiple runtime modes are bundled with at least one real GPU backend, so NexusAI can auto-select and fall back safely."
+        "Multiple runtime modes are bundled with at least one real GPU backend, so PocketMind Hybrid AI can auto-select and fall back safely."
     } else if all_runtimes.len() >= 2 {
         "Multiple llama-server folders are present, but every scan found CPU-only libraries (no libggml-metal/cuda/vulkan). Auto-selection will stay on CPU until a real GPU runtime is bundled."
     } else if all_runtimes.len() == 1 {
-        "One llama.cpp runtime is bundled. NexusAI will work with that runtime, but full automatic GPU selection requires a real CUDA/Vulkan/Metal build."
+        "One llama.cpp runtime is bundled. PocketMind Hybrid AI will work with that runtime, but full automatic GPU selection requires a real CUDA/Vulkan/Metal build."
     } else {
         "No llama.cpp runtime was found."
     };
@@ -2618,7 +2772,7 @@ pub async fn get_gpu_runtime_report(
             "Selected runtime is CPU-only, but another bundled runtime has a GPU backend."
         } else {
             "No CUDA/Vulkan/Metal backend libraries were found next to any bundled llama-server. \
-Folders named metal/cuda/vulkan without matching libraries cannot accelerate models — NexusAI will use CPU."
+Folders named metal/cuda/vulkan without matching libraries cannot accelerate models — PocketMind Hybrid AI will use CPU."
         },
         Some(format!(
             "Selected: CUDA={}, Vulkan={}, Metal={} | Help text: CUDA={}, Vulkan={}, Metal={} | Flash attention CLI: {}",
@@ -2692,7 +2846,7 @@ It is functionally a CPU runtime — GPU offload plans will not be offered."
             "macos_metal",
             "macOS Metal runtime",
             "info",
-            "Metal acceleration is a macOS runtime option. On Windows, NexusAI uses CUDA or Vulkan when available.",
+            "Metal acceleration is a macOS runtime option. On Windows, PocketMind Hybrid AI uses CUDA or Vulkan when available.",
             None,
         ));
     }
@@ -2730,7 +2884,7 @@ It is functionally a CPU runtime — GPU offload plans will not be offered."
         "Automatic optimization plan",
         if recommended_gpu_layers == 0 { "info" } else { "pass" },
         &format!("Automatic plan: {recommended_mode} with GPU layers set to {recommended_gpu_layers}."),
-        Some(format!("{fit_status}. NexusAI will still attempt safe fallback if the first launch plan fails.")),
+        Some(format!("{fit_status}. PocketMind Hybrid AI will still attempt safe fallback if the first launch plan fails.")),
     ));
 
     Ok(GpuRuntimeReport {

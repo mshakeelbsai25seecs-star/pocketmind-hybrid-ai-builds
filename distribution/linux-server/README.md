@@ -1,22 +1,17 @@
-# NexusAI — Linux Server Package
+# PocketMind Hybrid AI — Linux Server Package
 
-Enterprise handoff kit for Linux server SOC pilots.
+Handoff kit for Linux server pilots.
 
 ## Contents
 
-Same documentation layout as Windows server: `docs/`, `config/`, `scripts/prepare-server.sh`.
+- `docs/` — user, admin, configuration, troubleshooting guides
+- `scripts/prepare-server.sh` — create data folders
 
-## Application binary
+## Quick start
 
-Stage from `../linux-desktop/payload/` after `npm run tauri build` on Linux.
+1. Run `./scripts/prepare-server.sh`.
+2. Install the desktop package from `../linux-desktop/`.
+3. Open the app → **Settings → Deployment** → **Save**.
+4. Scan and index company data before use.
 
-## Quick start (admin)
-
-```bash
-sudo bash scripts/prepare-server.sh /var/lib/nexusai
-export NEXUS_DATA_ROOT=/var/lib/nexusai
-export NEXUS_DEPLOY_MODE=server
-# Launch NexusAI → Settings → Deployment → Save
-```
-
-Default data root: `/var/lib/nexusai`
+Also see `../shared/docs/QUICK_START.md`.

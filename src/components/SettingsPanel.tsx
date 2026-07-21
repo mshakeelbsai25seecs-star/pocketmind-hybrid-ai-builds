@@ -41,7 +41,7 @@ export default function SettingsPanel() {
       <div className="max-w-3xl mx-auto space-y-6">
         <div>
           <h1 className="text-2xl font-bold mb-1">Settings</h1>
-          <p className="text-surface-500">Configure NexusAI to your preferences</p>
+          <p className="text-surface-500">Configure PocketMind Hybrid AI to your preferences</p>
         </div>
 
         <div className="flex gap-1 p-1 bg-surface-100 dark:bg-surface-900 rounded-lg w-fit">

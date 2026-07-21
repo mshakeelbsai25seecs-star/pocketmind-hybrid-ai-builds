@@ -1,4 +1,5 @@
 use crate::knowledge_chat::types::KcQueryRewriteResult;
+use serde::Deserialize;
 
 /// Common abbreviations expanded for retrieval (domain-neutral).
 const COMMON_ACRONYMS: &[(&str, &str)] = &[
@@ -61,6 +62,58 @@ pub fn rewrite_for_retrieval(query: &str) -> KcQueryRewriteResult {
         retrieval_query,
         expansions,
         vague,
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ConstrainedRewriteJson {
+    query: String,
+    #[serde(default)]
+    filters: Option<serde_json::Value>,
+}
+
+/// Parse LLM rewrite output that must be JSON `{"query":"...","filters":{}}`.
+/// On parse failure, returns `None` so callers keep the original user question.
+pub fn parse_constrained_llm_rewrite(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    // Allow fenced ```json blocks
+    let body = trimmed
+        .strip_prefix("```json")
+        .or_else(|| trimmed.strip_prefix("```"))
+        .map(|s| s.trim_end_matches('`').trim())
+        .unwrap_or(trimmed);
+    let start = body.find('{')?;
+    let end = body.rfind('}')?;
+    if end <= start {
+        return None;
+    }
+    let slice = &body[start..=end];
+    let parsed: ConstrainedRewriteJson = serde_json::from_str(slice).ok()?;
+    let q = parsed.query.trim().to_string();
+    if q.is_empty() {
+        None
+    } else {
+        let _ = parsed.filters; // reserved for future filter wiring
+        Some(q)
+    }
+}
+
+#[cfg(test)]
+mod constrained_tests {
+    use super::*;
+
+    #[test]
+    fn parses_json_rewrite() {
+        let q = parse_constrained_llm_rewrite(r#"{"query":"VPN timeout policy","filters":{}}"#);
+        assert_eq!(q.as_deref(), Some("VPN timeout policy"));
+    }
+
+    #[test]
+    fn rejects_freeform() {
+        assert!(parse_constrained_llm_rewrite("just rewrite this somehow").is_none());
     }
 }
 

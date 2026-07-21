@@ -2,7 +2,7 @@
 
 ## 1. Product positioning
 
-**Nexus SOC Offline — Fortinet R&D Copilot** is a local desktop prototype built from the existing Nexus AI app. It is designed as an offline SOC L3 and R&D copilot for Fortinet-focused environments.
+**Nexus SOC Offline — Fortinet R&D Copilot** is a local desktop prototype built from the existing PocketMind Hybrid AI app. It is designed as an offline SOC L3 and R&D copilot for Fortinet-focused environments.
 
 The prototype helps analysts and SOC engineers prepare, review, and document work around:
 
@@ -50,7 +50,7 @@ Added clearly labeled demo-only sample data for a VPN brute-force alert, generic
 
 ### Phase 8 — Safe local file export
 
-Added a small audited Tauri export command for UTF-8 text exports. Exports must fall under configured NexusAI data roots (see **Settings → Deployment**). Extensions are restricted to `.md`, `.txt`, `.json`, and `.xml`, and silent overwrite is prevented by default.
+Added a small audited Tauri export command for UTF-8 text exports. Exports must fall under configured PocketMind Hybrid AI data roots (see **Settings → Deployment**). Extensions are restricted to `.md`, `.txt`, `.json`, and `.xml`, and silent overwrite is prevented by default.
 
 ### Phase 9 — Presentation polish
 
@@ -72,7 +72,7 @@ The SOC prototype is designed around local/offline workflows:
 - Exports are written only through the safe local export command.
 - Demo sample data is bundled locally in the UI.
 
-The prototype does not require internet access for the SOC workflow. Any optional online model/provider behavior from the broader Nexus AI app should not be used during the Fortinet SOC offline demo unless the company explicitly approves it.
+The prototype does not require internet access for the SOC workflow. Any optional online model/provider behavior from the broader PocketMind Hybrid AI app should not be used during the Fortinet SOC offline demo unless the company explicitly approves it.
 
 ## 4. What is intentionally not implemented
 
@@ -93,7 +93,7 @@ These are roadmap items or customer-data-dependent features, not current prototy
 
 ## 5. Path policy and export restrictions
 
-All SOC scan, index, OCR, embedding, and export paths must stay under configured NexusAI deployment roots.
+All SOC scan, index, OCR, embedding, and export paths must stay under configured PocketMind Hybrid AI deployment roots.
 
 Configure in **Settings → Deployment** or via `NEXUS_DATA_ROOT` and related environment variables (see `distribution/shared/config/deployment.env.example`).
 
@@ -101,9 +101,9 @@ Default data roots:
 
 | Platform | Default |
 |----------|---------|
-| Windows | `C:\ProgramData\NexusAI` |
-| Linux | `/var/lib/nexusai` |
-| macOS | `~/Library/Application Support/NexusAI` |
+| Windows | `C:\ProgramData\PocketMind` |
+| Linux | `/var/lib/pocketmind` |
+| macOS | `~/Library/Application Support/PocketMind` |
 
 Supported export extensions:
 
@@ -116,7 +116,7 @@ Supported export extensions:
 
 Use this order during the demo:
 
-1. Open Nexus AI and go to **SOC Offline**.
+1. Open PocketMind Hybrid AI and go to **SOC Offline**.
 2. Start at the **Dashboard / Command Center** and explain the offline/local-only positioning.
 3. Show the **Prototype Scope** panel: no live FortiSIEM/FortiSOAR integration yet, no autonomous response actions, basic keyword retrieval only.
 4. Open **Demo Mode** and load the VPN brute-force demo sample.

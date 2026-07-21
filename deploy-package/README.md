@@ -1,4 +1,4 @@
-# NexusAI Enterprise Deployment Package (legacy path)
+# PocketMind Hybrid AI Enterprise Deployment Package (legacy path)
 
 **This folder is superseded by [`distribution/`](../distribution/README.md)** — the universal package-of-packages for Windows, macOS, Linux, desktop, and server deliverables.
 

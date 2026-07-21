@@ -1,9 +1,11 @@
 use crate::error::{AppError, AppResult};
+use crate::ocr_settings::{load_ocr_image_rag_config, OcrEngine};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{Mutex, OnceLock};
-
 const MAX_CONCURRENT_OCR: usize = 2;
+/// Bump when OCR CLI args / engines change so stale sidecars are not reused incorrectly.
+const OCR_CACHE_NAMESPACE: &str = "v2";
 
 fn ocr_semaphore() -> &'static Mutex<usize> {
     static SEMAPHORE: OnceLock<Mutex<usize>> = OnceLock::new();
@@ -22,42 +24,100 @@ pub fn pdf_ocr_available() -> bool {
     resolve_pdf_ocr_script().is_some() && resolve_python_executable().is_some()
 }
 
+pub fn python_available() -> bool {
+    resolve_python_executable().is_some()
+}
+
 pub fn resolve_pdf_ocr_script() -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Ok(value) = std::env::var("NEXUS_DATA_ROOT") {
         candidates.push(PathBuf::from(value).join("scripts").join("soc_pdf_ocr.py"));
     }
+    // Dev builds: src-tauri/ → repo root/scripts/
+    candidates.push(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("scripts")
+            .join("soc_pdf_ocr.py"),
+    );
     if let Ok(cwd) = std::env::current_dir() {
         candidates.push(cwd.join("scripts").join("soc_pdf_ocr.py"));
+        // Walk up a few parents (cwd may be src-tauri/ or target/debug/).
+        let mut walk = cwd;
+        for _ in 0..5 {
+            candidates.push(walk.join("scripts").join("soc_pdf_ocr.py"));
+            if !walk.pop() {
+                break;
+            }
+        }
     }
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
             candidates.push(parent.join("scripts").join("soc_pdf_ocr.py"));
-            candidates.push(
-                parent
-                    .join("..")
-                    .join("..")
-                    .join("scripts")
-                    .join("soc_pdf_ocr.py"),
-            );
+            let mut walk = parent.to_path_buf();
+            for _ in 0..6 {
+                candidates.push(walk.join("scripts").join("soc_pdf_ocr.py"));
+                if !walk.pop() {
+                    break;
+                }
+            }
         }
     }
     candidates.push(PathBuf::from("scripts").join("soc_pdf_ocr.py"));
-    candidates.into_iter().find(|path| path.is_file())
+    candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .and_then(|path| path.canonicalize().ok().or(Some(path)))
 }
 
-fn resolve_python_executable() -> Option<PathBuf> {
-    for candidate in ["python", "python3", "py"] {
-        if std::process::Command::new(candidate)
-            .arg("--version")
+pub fn resolve_python_executable() -> Option<PathBuf> {
+    // Prefer real interpreters; skip Windows Store python stubs that "succeed"
+    // --version but cannot run scripts.
+    for candidate in ["python3", "python", "py"] {
+        let Ok(output) = std::process::Command::new(candidate)
+            .args(["-c", "import sys; print(sys.executable)"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
             .output()
-            .map(|output| output.status.success())
-            .unwrap_or(false)
-        {
-            return Some(PathBuf::from(candidate));
+        else {
+            continue;
+        };
+        if !output.status.success() {
+            continue;
         }
+        let exe = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if exe.is_empty() {
+            continue;
+        }
+        let lower = exe.to_ascii_lowercase();
+        if lower.contains("windowsapps") || lower.contains("microsoft\\windowsapps") {
+            continue;
+        }
+        return Some(PathBuf::from(candidate));
     }
     None
+}
+
+fn python_probe_import(module: &str) -> bool {
+    let Some(python) = resolve_python_executable() else {
+        return false;
+    };
+    let code = format!("import {module}");
+    std::process::Command::new(python)
+        .args(["-c", &code])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+pub fn docling_importable() -> bool {
+    python_probe_import("docling")
+}
+
+pub fn opencv_available() -> bool {
+    python_probe_import("cv2")
 }
 
 fn ocr_cache_dir() -> PathBuf {
@@ -66,9 +126,12 @@ fn ocr_cache_dir() -> PathBuf {
     base
 }
 
-fn cache_key_for_pdf(pdf_path: &Path) -> String {
+fn cache_key_for_pdf(pdf_path: &Path, engine: &str, preprocess: bool) -> String {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
+    hasher.update(OCR_CACHE_NAMESPACE.as_bytes());
+    hasher.update(engine.as_bytes());
+    hasher.update(if preprocess { b"pre1" } else { b"pre0" });
     hasher.update(pdf_path.to_string_lossy().as_bytes());
     if let Ok(meta) = std::fs::metadata(pdf_path) {
         hasher.update(meta.len().to_le_bytes());
@@ -81,6 +144,25 @@ fn cache_key_for_pdf(pdf_path: &Path) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+fn load_engine_preprocess() -> (String, bool) {
+    // Best-effort settings without AppState: open a short-lived DB handle via settings file path.
+    // Indexer calls may not have db; fall back to env overrides then defaults.
+    if let Ok(engine) = std::env::var("NEXUS_OCR_ENGINE") {
+        let preprocess = std::env::var("NEXUS_OCR_PREPROCESS")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(true);
+        return (OcrEngine::parse(&engine).as_str().to_string(), preprocess);
+    }
+    if let Ok(db) = crate::database::Database::new() {
+        let cfg = load_ocr_image_rag_config(&db, false);
+        return (
+            OcrEngine::parse(&cfg.ocr_engine).as_str().to_string(),
+            cfg.ocr_preprocess,
+        );
+    }
+    (OcrEngine::Auto.as_str().to_string(), true)
+}
+
 /// Synchronous OCR for use inside the parallel indexer.
 pub fn ocr_pdf_to_markdown_sync(pdf_path: &str) -> AppResult<String> {
     let pdf = PathBuf::from(pdf_path.trim().trim_matches('"'));
@@ -91,7 +173,11 @@ pub fn ocr_pdf_to_markdown_sync(pdf_path: &str) -> AppResult<String> {
         )));
     }
 
-    let cache_path = ocr_cache_dir().join(format!("{}.md", cache_key_for_pdf(&pdf)));
+    let (engine, preprocess) = load_engine_preprocess();
+    let cache_path = ocr_cache_dir().join(format!(
+        "{}.md",
+        cache_key_for_pdf(&pdf, &engine, preprocess)
+    ));
     if cache_path.is_file() {
         if let Ok(existing) = std::fs::read_to_string(&cache_path) {
             if existing.trim().len() >= 48 {
@@ -126,18 +212,42 @@ pub fn ocr_pdf_to_markdown_sync(pdf_path: &str) -> AppResult<String> {
         .unwrap_or("document");
     let output_md = output_dir.join(format!("{stem}-kc-ocr.md"));
 
-    let output = std::process::Command::new(&python)
-        .arg(&script)
+    let engine_arg = OcrEngine::parse(&engine).as_str();
+    let mut cmd = std::process::Command::new(&python);
+    cmd.arg(&script)
         .arg(&pdf)
         .arg("--output")
         .arg(&output_md)
+        .arg("--engine")
+        .arg(engine_arg)
+        .arg("--dpi")
+        .arg("300");
+    if preprocess {
+        cmd.arg("--preprocess");
+    } else {
+        cmd.arg("--no-preprocess");
+    }
+
+    // No wall-clock kill: large scanned PDFs (dozens of pages @ 300 DPI) can
+    // legitimately take longer than a fixed timeout. Progress is visible via
+    // indexer heartbeats while this blocking call runs.
+    let mut child = cmd
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
-        .output()
-        .map_err(|e| AppError::Unknown(format!("Failed to run PDF OCR script: {e}")))?;
+        .spawn()
+        .map_err(|e| AppError::Unknown(format!("Failed to start PDF OCR script: {e}")))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+    let mut stderr = String::new();
+    if let Some(mut pipe) = child.stderr.take() {
+        use std::io::Read;
+        let _ = pipe.read_to_string(&mut stderr);
+    }
+
+    let status = child
+        .wait()
+        .map_err(|e| AppError::Unknown(format!("PDF OCR wait failed: {e}")))?;
+
+    if !status.success() {
         let _ = std::fs::remove_dir_all(&output_dir);
         return Err(AppError::Unknown(format!(
             "PDF OCR script failed: {}",
@@ -163,32 +273,53 @@ pub fn ocr_pdf_to_markdown_sync(pdf_path: &str) -> AppResult<String> {
     }
 
     let _ = std::fs::write(&cache_path, &markdown);
+    // Also write raw sidecar for LLM-repair path consumers
+    let raw_path = cache_path.with_extension("raw.md");
+    let _ = std::fs::write(&raw_path, &markdown);
     Ok(markdown)
 }
 
 /// OCR a PDF to markdown via `scripts/soc_pdf_ocr.py` for Knowledge Chat indexing.
 pub async fn ocr_pdf_to_markdown(pdf_path: &str) -> AppResult<String> {
-    ocr_pdf_to_markdown_sync(pdf_path)
+    tokio::task::spawn_blocking({
+        let path = pdf_path.to_string();
+        move || ocr_pdf_to_markdown_sync(&path)
+    })
+    .await
+    .map_err(|e| AppError::Unknown(format!("OCR task join failed: {e}")))?
 }
 
 pub fn ocr_sidecar_path(pdf_path: &Path) -> PathBuf {
-    ocr_cache_dir().join(format!("{}.md", cache_key_for_pdf(pdf_path)))
+    let (engine, preprocess) = load_engine_preprocess();
+    ocr_cache_dir().join(format!(
+        "{}.md",
+        cache_key_for_pdf(pdf_path, &engine, preprocess)
+    ))
 }
 
 struct OcrSlot;
 
 impl OcrSlot {
+    /// Wait up to ~30s for a slot instead of failing the whole PDF index immediately.
     fn acquire() -> AppResult<Self> {
-        let mut guard = ocr_semaphore()
-            .lock()
-            .map_err(|_| AppError::Unknown("OCR semaphore poisoned.".to_string()))?;
-        if *guard >= MAX_CONCURRENT_OCR {
-            return Err(AppError::Unknown(
-                "PDF OCR concurrency limit reached. Retry indexing shortly.".to_string(),
-            ));
+        for attempt in 0..60 {
+            {
+                let mut guard = ocr_semaphore()
+                    .lock()
+                    .map_err(|_| AppError::Unknown("OCR semaphore poisoned.".to_string()))?;
+                if *guard < MAX_CONCURRENT_OCR {
+                    *guard += 1;
+                    return Ok(Self);
+                }
+            }
+            if attempt + 1 == 60 {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
         }
-        *guard += 1;
-        Ok(Self)
+        Err(AppError::Unknown(
+            "PDF OCR is busy (concurrency limit). Retry indexing shortly.".to_string(),
+        ))
     }
 }
 

@@ -13,7 +13,7 @@ for dir in   "bin/llama.cpp/macos-arm64-metal"   "bin/llama.cpp/macos-arm64-cpu"
   fi
 done
 
-echo "Building NexusAI for macOS..."
+echo "Building PocketMind Hybrid AI for macOS..."
 npm install
 npm run build
 cd src-tauri

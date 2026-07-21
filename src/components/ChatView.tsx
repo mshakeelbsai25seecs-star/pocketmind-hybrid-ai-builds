@@ -6,7 +6,7 @@ import {
   Send, Square, Bot, User, Copy, Check, Trash2,
   Paperclip, Sparkles, AlertCircle, Download, MessageSquare,
   SlidersHorizontal, ClipboardCopy, RotateCcw, FileText, X,
-  UploadCloud, Info
+  UploadCloud, Info, Power
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -226,7 +226,7 @@ function attachmentContextBlock(
 
   const totalSections = items.reduce((sum, f) => sum + (f.chunk_count || f.chunks?.length || 1), 0);
   const lines: string[] = [
-    'NexusAI has indexed the user\'s local attachment(s) and retrieved a small set of relevant sections for this question.',
+    'PocketMind Hybrid AI has indexed the user\'s local attachment(s) and retrieved a small set of relevant sections for this question.',
     `Retrieved sections: ${ordered.length} of ${totalSections}. Attachment prompt budget: about ${plan.charBudget} characters.`,
     'Use only the retrieved sections below as document evidence. If information is missing, say that the indexed sections do not show it.',
     'Do not quote the entire document. Answer clearly with concise headings and bullets when useful.',
@@ -873,7 +873,7 @@ export default function ChatView() {
 
   const deleteChat = async () => {
     if (!activeConversationId) return;
-    if (!confirm('Delete this chat from NexusAI? This cannot be undone.')) return;
+    if (!confirm('Delete this chat from PocketMind Hybrid AI? This cannot be undone.')) return;
     await invoke('delete_conversation', { id: activeConversationId });
     removeConversationLocal(activeConversationId);
   };
@@ -886,6 +886,31 @@ export default function ChatView() {
       setGenerationError(humanError(err));
     } finally {
       setIsGenerating(false);
+      setGenerationStatus(null);
+    }
+  };
+
+  const unloadChatModel = async () => {
+    if (isGenerating) {
+      setGenerationError('Stop the current reply before unloading the model.');
+      return;
+    }
+    const isRemote = !!currentModel && (currentModel.startsWith('remote:') || currentModel.startsWith('enterprise:'));
+    if (isRemote) {
+      setGenerationError(null);
+      setGenerationStatus('Online/server models are not held in local memory.');
+      return;
+    }
+    try {
+      setGenerationStatus('Unloading model from memory...');
+      const result = await invoke<{ message: string }>('unload_chat_model', { releaseKnowledgeEngines: false });
+      // #region agent log
+      fetch('http://127.0.0.1:7414/ingest/28bf2132-0f52-40ef-96b9-4e681c1d7653',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d5a77'},body:JSON.stringify({sessionId:'7d5a77',runId:'unload-feature',hypothesisId:'B',location:'ChatView.tsx:unload',message:'fe_unload_chat_model',data:{ok:true},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      setGenerationError(null);
+      setGenerationStatus(result.message || 'Model unloaded from memory.');
+    } catch (err) {
+      setGenerationError(humanError(err));
       setGenerationStatus(null);
     }
   };
@@ -1067,7 +1092,7 @@ export default function ChatView() {
         : defaultParams;
 
       const defaultChatSystemPrompt = [
-        'You are NexusAI, a helpful offline desktop assistant.',
+        'You are PocketMind Hybrid AI, a helpful offline desktop assistant.',
         'Answer only the latest user message directly and naturally.',
         'Do not invent follow-up questions, fake user messages, quizzes, or extra prompts.',
         'Do not repeat words, phrases, paragraphs, or the user prompt.',
@@ -1237,7 +1262,7 @@ export default function ChatView() {
             <Sparkles className="w-8 h-8 text-white" />
           </div>
           <div>
-            <h2 className="text-2xl font-black text-surface-900 dark:text-surface-100 mb-2">NexusAI Desktop</h2>
+            <h2 className="text-2xl font-black text-surface-900 dark:text-surface-100 mb-2">PocketMind Hybrid AI Desktop</h2>
             <p className="text-surface-600 dark:text-surface-300">Select a model and start a chat.</p>
           </div>
           <div className="rounded-xl border border-surface-200 dark:border-surface-800 p-3 text-left bg-surface-50 dark:bg-surface-900">
@@ -1271,6 +1296,11 @@ export default function ChatView() {
         <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
           <button onClick={() => setShowTuning(v => !v)} className="btn-secondary text-sm flex items-center gap-2 whitespace-nowrap"><SlidersHorizontal className="w-4 h-4" /> Tuning</button>
           <button onClick={copyChat} className="btn-secondary text-sm flex items-center gap-2 whitespace-nowrap" title="Copy whole chat"><ClipboardCopy className="w-4 h-4" /> {copiedId === 'chat' ? 'Copied' : 'Copy chat'}</button>
+          {!isGenerating && (
+            <button onClick={() => void unloadChatModel()} className="btn-secondary text-sm flex items-center gap-2 whitespace-nowrap" title="Free RAM/VRAM by unloading the local chat model">
+              <Power className="w-4 h-4" /> Unload
+            </button>
+          )}
           {isGenerating ? (
             <button onClick={stopGeneration} className="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm flex items-center gap-2"><Square className="w-4 h-4" /> Stop</button>
           ) : (
@@ -1285,13 +1315,13 @@ export default function ChatView() {
             <label>Creativity
               <input className="input-field mt-1" type="number" step="0.05" min="0" max="2" value={defaultParams.temperature} onChange={e => setDefaultParams({ temperature: Number(e.target.value) })} />
             </label>
-            <label>Response length <span className="tuning-help" title="Maximum amount of text NexusAI can generate in one response.">?</span>
+            <label>Response length <span className="tuning-help" title="Maximum amount of text PocketMind Hybrid AI can generate in one response.">?</span>
               <input className="input-field mt-1" type="number" min="64" max="4096" value={defaultParams.max_tokens} onChange={e => setDefaultParams({ max_tokens: Number(e.target.value) })} />
             </label>
             <label>Memory window <span className="tuning-help" title="How much conversation and file context the model can consider at once. Larger values use more memory.">?</span>
               <input className="input-field mt-1" type="number" min="512" max="32768" value={defaultParams.context_size} onChange={e => setDefaultParams({ context_size: Number(e.target.value) })} />
             </label>
-            <label>GPU usage <span className="text-xs text-surface-400">(-1 Auto)</span> <span className="tuning-help" title="-1 lets NexusAI choose automatically. 0 uses CPU only. Higher values use more GPU memory.">?</span>
+            <label>GPU usage <span className="text-xs text-surface-400">(-1 Auto)</span> <span className="tuning-help" title="-1 lets PocketMind Hybrid AI choose automatically. 0 uses CPU only. Higher values use more GPU memory.">?</span>
               <input className="input-field mt-1" type="number" min="-1" max="999" value={defaultParams.gpu_layers} onChange={e => setDefaultParams({ gpu_layers: Number(e.target.value) })} />
             </label>
             <label>Processing batch <span className="tuning-help" title="How many tokens are processed together. Larger values may be faster but use more memory.">?</span>
@@ -1307,7 +1337,7 @@ export default function ChatView() {
               <button onClick={applySpeedPreset} className="btn-secondary text-sm">Auto fast preset</button>
               <button onClick={applyQualityPreset} className="btn-secondary text-sm">Auto quality preset</button>
               <button onClick={resetDefaultParams} className="btn-secondary text-sm flex items-center gap-1"><RotateCcw className="w-4 h-4" /> Reset automatic defaults</button>
-              <span className="text-xs text-surface-500 self-center">Runtime tip: GPU layers -1 lets NexusAI decide. It tries full GPU, then CPU + GPU split, then CPU fallback.</span>
+              <span className="text-xs text-surface-500 self-center">Runtime tip: GPU layers -1 lets PocketMind Hybrid AI decide. It tries full GPU, then CPU + GPU split, then CPU fallback.</span>
             </div>
           </div>
         </div>
@@ -1334,7 +1364,7 @@ export default function ChatView() {
       )}
 
       <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
-        {currentMessages.length === 0 && <div className="flex items-center justify-center h-32 text-surface-400 text-sm text-center">{currentModel ? 'Start a conversation below. Attach files when you want NexusAI to use local document context.' : 'Select a model before sending your first message.'}</div>}
+        {currentMessages.length === 0 && <div className="flex items-center justify-center h-32 text-surface-400 text-sm text-center">{currentModel ? 'Start a conversation below. Attach files when you want PocketMind Hybrid AI to use local document context.' : 'Select a model before sending your first message.'}</div>}
 
         {currentMessages.map((message) => (
           <div key={message.id} className={`group flex gap-3 sm:gap-4 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}>
@@ -1408,7 +1438,7 @@ export default function ChatView() {
 
           <div className="composer-shell flex items-end gap-2 sm:gap-3 p-2 sm:p-3">
             <button onClick={attachFiles} disabled={attachmentBusy} className="p-2 rounded-xl hover:bg-surface-200 dark:hover:bg-surface-700 transition-colors flex-shrink-0" title="Attach PDF, DOCX, text, code, spreadsheet, or image"><Paperclip className="w-5 h-5 text-surface-500" /></button>
-            <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} placeholder={currentModel ? 'Message NexusAI...' : 'Select a model before chatting...'} rows={1} disabled={!currentModel || isGenerating} className="flex-1 bg-transparent border-none focus:outline-none resize-none py-2 max-h-32 text-surface-900 dark:text-surface-100 placeholder:text-surface-400 disabled:opacity-60" style={{ minHeight: '24px' }} />
+            <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} placeholder={currentModel ? 'Message PocketMind Hybrid AI...' : 'Select a model before chatting...'} rows={1} disabled={!currentModel || isGenerating} className="flex-1 bg-transparent border-none focus:outline-none resize-none py-2 max-h-32 text-surface-900 dark:text-surface-100 placeholder:text-surface-400 disabled:opacity-60" style={{ minHeight: '24px' }} />
             <button onClick={isGenerating ? stopGeneration : () => void handleSend()} disabled={!isGenerating && !canSend} className={`p-2 rounded-xl transition-all shadow-md ${isGenerating ? 'bg-red-600 hover:bg-red-500 text-white' : canSend ? 'bg-gradient-to-br from-sky-600 via-blue-600 to-orange-500 hover:brightness-110 text-white shadow-sky-500/20' : 'bg-surface-200 dark:bg-surface-700 text-surface-400 cursor-not-allowed'}`} title={isGenerating ? 'Stop response' : !currentModel ? 'Select a model first' : 'Send'}>
               {isGenerating ? <Square className="w-5 h-5" /> : <Send className="w-5 h-5" />}
             </button>

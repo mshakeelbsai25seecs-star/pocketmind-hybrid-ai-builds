@@ -29,23 +29,24 @@ const STAGE_A_SYSTEM = [
   `Allowed labels: ${INTENT_LABELS.join(', ')}.`,
   'Disambiguation:',
   '- explain_symbol: explain one named function/class/symbol (NOT a full file listing).',
-  '- list_symbols_in_file: list functions/classes/exports in a named file (NOT explain one body).',
+  '- list_symbols_in_file: inventory names/line numbers of functions/classes/exports in a file (NOT explain what they do).',
   '- locate_definition: where is X defined / which file (short locate, not full explain).',
   '- file_imports: what does a file import (not symbol list / explain).',
   '- env_var: environment variable name and/or default (including "from the environment" / timeout default).',
   '- error_code: named error code meaning.',
   '- runbook_step: what should I do / first incident steps.',
   '- timeline: how long / duration.',
-  '- general: none of the above.',
+  '- general: none of the above — including "what does each/every function do/for" (behavior of multiple symbols).',
 ].join(' ');
 
 const STAGE_B_SYSTEM = [
   'You pick the best answer strategy for a question given retrieval snippets.',
   'Reply with JSON only: {"intent":"<label>"}.',
   `Allowed labels: ${INTENT_LABELS.join(', ')}.`,
-  'Prefer list_symbols_in_file when the question asks what functions/methods/classes are in a file',
-  'and snippets show multiple symbols in that file.',
+  'Prefer list_symbols_in_file only when the question asks for a name inventory (what/which/list functions are in a file)',
+  'and snippets show multiple symbols — NOT when it asks what each function does/is for/purpose.',
   'Prefer explain_symbol for one named symbol with explain/describe verbs.',
+  'Prefer general when the question asks to explain what each/every function/method does or is for.',
   'Prefer locate_definition for where/which-file questions about a named symbol.',
   'Prefer env_var when the question asks for an environment variable name and/or its default',
   '(including "from the environment" / timeout default) — not locate_definition.',
@@ -92,6 +93,10 @@ export function vetoSearchIntent(question: string): QueryIntent | null {
   ) {
     return 'env_var';
   }
+  // Behavior-of-each questions must not be forced into a name inventory.
+  if (wantsPerSymbolBehaviorExplanation(q)) {
+    return null;
+  }
   // /what functions|methods|classes are (defined|exported) in .+\.(tsx?|py|rs)/i
   if (
     /\b(what|which|list)\s+(the\s+)?(functions|methods|classes|exports)\b/i.test(question)
@@ -137,6 +142,11 @@ export function classifyRulesSearchIntent(question: string): QueryIntent {
     return 'timeline';
   }
 
+  // "What does each function do?" is multi-symbol behavior → general (LLM), not a list inventory.
+  if (wantsPerSymbolBehaviorExplanation(q)) {
+    return 'general';
+  }
+
   if (isListSymbolsQuestion(q) && extractFileHint(question)) {
     return 'list_symbols_in_file';
   }
@@ -178,6 +188,9 @@ export function classifyRulesAnswerIntent(
   if (veto) return veto;
 
   const q = question.toLowerCase();
+  if (wantsPerSymbolBehaviorExplanation(q)) {
+    return 'general';
+  }
   const fileHint = extractFileHint(question);
   if (fileHint && isListSymbolsQuestion(q)) {
     const sameFileSymbols = hits.filter(h => {
@@ -371,7 +384,28 @@ function looksLikeFilename(name: string): boolean {
   return /[a-zA-Z0-9]/.test(stem);
 }
 
+/**
+ * True when the user wants behavior/purpose for multiple symbols in a file
+ * ("what does each function do"), not a bare name inventory.
+ */
+export function wantsPerSymbolBehaviorExplanation(q: string): boolean {
+  const text = q.toLowerCase();
+  if (!(text.includes('function') || text.includes('method') || text.includes('class') || text.includes('symbol'))) {
+    return false;
+  }
+  const asksBehavior = /\b(do|does|did|doing|for|purpose|responsible|role|mean|means|handle|handles)\b/.test(text)
+    || /\b(explain|describe|walk me through)\b/.test(text);
+  if (!asksBehavior) return false;
+  return (
+    /\b(each|every|all the|all of the)\b/.test(text)
+    || /\bwhat (each|every)\b/.test(text)
+    || /\b(tell me|explain|describe)\b[\s\S]{0,40}\b(each|every)\b/.test(text)
+    || /\bwhat (is|are) (each|every)\b/.test(text)
+  );
+}
+
 function isListSymbolsQuestion(q: string): boolean {
+  if (wantsPerSymbolBehaviorExplanation(q)) return false;
   return q.includes('functions defined in')
     || q.includes('methods defined in')
     || q.includes('classes defined in')

@@ -1,8 +1,8 @@
-# NexusAI Admin Handover Guide
+# PocketMind Hybrid AI Admin Handover Guide
 
 ## What the admin receives
 
-- NexusAI client app for employees.
+- PocketMind Hybrid AI client app for employees.
 - Server deployment profile selected for the company hardware.
 - Model server endpoint.
 - Access token policy.
@@ -48,4 +48,4 @@ Check GPU utilization, CPU fallback, model size, context length, and number of c
 
 ### Authentication failure
 
-Verify the token in NexusAI and rotate the server token if necessary.
+Verify the token in PocketMind Hybrid AI and rotate the server token if necessary.

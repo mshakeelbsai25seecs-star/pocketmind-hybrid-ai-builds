@@ -2,9 +2,14 @@
 
 ```text
 payload/
-├── NexusAI_*.AppImage
+├── PocketMind Hybrid AI_*.AppImage
 ├── nexus-ai_*.deb          # when deb bundle enabled
-└── bin/llama.cpp/linux-*/
+├── INSTALL.md
+├── WHAT_IS_INCLUDED.md
+└── bin/llama.cpp/
+    ├── cpu/
+    ├── cuda/
+    └── vulkan/
 ```
 
 Models and company-data are customer-supplied.

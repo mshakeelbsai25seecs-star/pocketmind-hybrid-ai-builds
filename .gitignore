@@ -42,6 +42,14 @@ _recover_out.txt
 
 # Runtime binaries / large local assets (keep out of git)
 bin/
+dist-zips/
+distribution/**/payload/
+
+# Models & customer data (never commit GGUF weights or SOC corpora)
+models/
+*.gguf
+**/models/**/*.gguf
+company-data/
 
 # OS / temp
 *.tmp

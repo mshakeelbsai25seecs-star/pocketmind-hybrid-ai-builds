@@ -5,7 +5,7 @@ Welcome to Acme Corp Security Engineering.
 ## Timeline
 
 Standard onboarding takes **five business days** and covers account provisioning, VPN setup,
-security training, and tool access for NexusAI and the SOC knowledge base.
+security training, and tool access for PocketMind Hybrid AI and the SOC knowledge base.
 
 ## Day 1 checklist
 

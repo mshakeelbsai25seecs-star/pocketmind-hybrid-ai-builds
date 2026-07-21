@@ -1,4 +1,4 @@
-"""Application configuration loader for NexusAI services."""
+"""Application configuration loader for PocketMind Hybrid AI services."""
 
 import os
 

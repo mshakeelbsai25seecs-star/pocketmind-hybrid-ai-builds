@@ -124,8 +124,9 @@ pub fn create_collection(
             "INSERT INTO kc_collections (
                 id, name, root_path, status, embedding_model_path, dense_status,
                 file_count, indexed_file_count, chunk_count, dense_chunk_count, indexed_char_count,
-                last_error, created_at, updated_at, last_indexed_at, folder_category, partition_config_json
-            ) VALUES (?1, ?2, ?3, 'draft', ?4, 'not_configured', 0, 0, 0, 0, 0, NULL, ?5, ?5, NULL, ?6, ?7)",
+                last_error, created_at, updated_at, last_indexed_at, folder_category, partition_config_json,
+                image_rag_opt_in, allow_cloud_media
+            ) VALUES (?1, ?2, ?3, 'draft', ?4, 'not_configured', 0, 0, 0, 0, 0, NULL, ?5, ?5, NULL, ?6, ?7, 0, 0)",
             params![id, name, root_path, embedding_model_path, now, folder_category, partition_json],
         )
         .map_err(|e| AppError::DatabaseError(e.to_string()))?;
@@ -158,7 +159,9 @@ pub fn list_collections(db: &Database) -> AppResult<Vec<KcCollection>> {
             "SELECT id, name, root_path, status, embedding_model_path, dense_status,
                     file_count, indexed_file_count, chunk_count, dense_chunk_count, indexed_char_count,
                     last_error, created_at, updated_at, last_indexed_at, folder_category, partition_config_json,
-                    COALESCE(code_entity_count, 0) AS code_entity_count
+                    COALESCE(code_entity_count, 0) AS code_entity_count,
+                    COALESCE(image_rag_opt_in, 0) AS image_rag_opt_in,
+                    COALESCE(allow_cloud_media, 0) AS allow_cloud_media
              FROM kc_collections ORDER BY updated_at DESC",
         )
         .map_err(|e| AppError::DatabaseError(e.to_string()))?;
@@ -175,7 +178,9 @@ pub fn get_collection(db: &Database, id: &str) -> AppResult<KcCollection> {
             "SELECT id, name, root_path, status, embedding_model_path, dense_status,
                     file_count, indexed_file_count, chunk_count, dense_chunk_count, indexed_char_count,
                     last_error, created_at, updated_at, last_indexed_at, folder_category, partition_config_json,
-                    COALESCE(code_entity_count, 0) AS code_entity_count
+                    COALESCE(code_entity_count, 0) AS code_entity_count,
+                    COALESCE(image_rag_opt_in, 0) AS image_rag_opt_in,
+                    COALESCE(allow_cloud_media, 0) AS allow_cloud_media
              FROM kc_collections WHERE id = ?1",
             params![id],
             map_collection_row,
@@ -748,6 +753,37 @@ pub fn load_chunk_ids_containing_text(
     Ok(rows)
 }
 
+/// Load same-file neighbors at `chunk_index ± 1` (empty if none).
+pub fn load_adjacent_file_chunks(
+    db: &Database,
+    collection_id: &str,
+    file_id: &str,
+    chunk_index: i64,
+) -> AppResult<Vec<LoadedChunk>> {
+    let prev = chunk_index - 1;
+    let next = chunk_index + 1;
+    let sql = format!(
+        "SELECT {CHUNK_SELECT_COLUMNS}
+         FROM kc_chunks c
+         JOIN kc_files f ON f.id = c.file_id
+         WHERE c.collection_id = ?1 AND c.file_id = ?2 AND c.chunk_index IN (?3, ?4)
+         ORDER BY c.chunk_index ASC"
+    );
+    let mut stmt = db
+        .conn()
+        .prepare(&sql)
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    let rows = stmt
+        .query_map(
+            params![collection_id, file_id, prev, next],
+            map_loaded_chunk_row,
+        )
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    Ok(rows)
+}
+
 pub fn load_chunks_by_ids(
     db: &Database,
     collection_id: &str,
@@ -1001,7 +1037,30 @@ fn map_collection_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<KcCollection>
         folder_category,
         partition_config,
         code_entity_count: row.get::<_, i64>(17).unwrap_or(0),
+        image_rag_opt_in: row.get::<_, i64>(18).unwrap_or(0) != 0,
+        allow_cloud_media: row.get::<_, i64>(19).unwrap_or(0) != 0,
     })
+}
+
+pub fn update_collection_image_rag_flags(
+    db: &Database,
+    collection_id: &str,
+    image_rag_opt_in: bool,
+    allow_cloud_media: bool,
+) -> AppResult<()> {
+    let now = Utc::now().timestamp();
+    db.conn()
+        .execute(
+            "UPDATE kc_collections SET image_rag_opt_in = ?1, allow_cloud_media = ?2, updated_at = ?3 WHERE id = ?4",
+            params![
+                if image_rag_opt_in { 1 } else { 0 },
+                if allow_cloud_media { 1 } else { 0 },
+                now,
+                collection_id
+            ],
+        )
+        .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+    Ok(())
 }
 
 fn map_file_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<KcFileRecord> {

@@ -1,6 +1,7 @@
 import type { KcGroundedContext, KcGroundedContextSource, KcSearchHit, KcSearchResult, QueryIntent } from './types';
 import { normalizeQueryIntent } from './types';
 import { extractQuerySymbols } from './fileSelection';
+import { wantsPerSymbolBehaviorExplanation } from './intentClassify';
 import { tryExtractiveFromAttachedSources } from './prompts';
 
 export type KcEvidenceMode = 'concise' | 'evidence_explanation';
@@ -18,10 +19,20 @@ export function isWeakStructuredCodeAnswer(text: string): boolean {
     || (lower.includes('is defined as:') && text.length < 200);
 }
 
-export function resolveStructuredAnswer(searchResult: KcSearchResult): string | null {
+export function resolveStructuredAnswer(
+  searchResult: KcSearchResult,
+  question?: string,
+): string | null {
   const answer = searchResult.structured_answer;
   if (!answer || answer.confidence < MIN_STRUCTURED_CONFIDENCE) return null;
   const intent = normalizeQueryIntent(answer.intent) ?? answer.intent;
+  if (
+    question
+    && wantsPerSymbolBehaviorExplanation(question)
+    && (intent === 'list_symbols_in_file' || /defines these (functions|symbols):/i.test(answer.answer_text))
+  ) {
+    return null;
+  }
   if (
     (intent === 'explain_symbol' || intent === 'code_symbol')
     && isWeakStructuredCodeAnswer(answer.answer_text)

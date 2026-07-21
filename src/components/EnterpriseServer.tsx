@@ -194,7 +194,7 @@ export default function EnterpriseServer() {
 
   const copyReport = async () => {
     const text = [
-      'NexusAI Organization Server Configuration',
+      'PocketMind Hybrid AI Organization Server Configuration',
       `Endpoint: ${baseUrl || '(not set)'}`,
       `Selected model: ${selectedModel || '(not set)'}`,
       `Token saved: ${apiKeySaved ? 'yes' : apiKey.trim() ? 'pending save' : 'no'}`,
@@ -218,7 +218,7 @@ export default function EnterpriseServer() {
             </div>
             <h1 className="text-3xl lg:text-4xl font-black tracking-tight gradient-text">Private AI for the whole company</h1>
             <p className="text-surface-600 dark:text-surface-300 leading-relaxed">
-              Connect NexusAI to a company-owned OpenAI-compatible inference server. Employees keep using the same Windows, macOS, and mobile clients while large models run on internal GPU servers with centralized access control.
+              Connect PocketMind Hybrid AI to a company-owned OpenAI-compatible inference server. Employees keep using the same Windows, macOS, and mobile clients while large models run on internal GPU servers with centralized access control.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-3 text-sm min-w-[18rem]">
@@ -257,7 +257,7 @@ export default function EnterpriseServer() {
                 placeholder="http://192.168.1.50:8000/v1"
                 className="input-field mt-2"
               />
-              <span className="text-xs text-surface-500 mt-1 block">Use the internal LAN/VPN URL. If /v1 is missing, NexusAI will add it automatically.</span>
+              <span className="text-xs text-surface-500 mt-1 block">Use the internal LAN/VPN URL. If /v1 is missing, PocketMind Hybrid AI will add it automatically.</span>
             </label>
 
             <label className="block">
@@ -344,7 +344,7 @@ export default function EnterpriseServer() {
               </label>
               <p className="text-xs text-surface-500">
                 When enabled, dense indexing and query embedding are offloaded to the organization server's
-                <code className="mx-1">/v1/embeddings</code> endpoint. NexusAI falls back to local embeddings automatically if the server is unreachable, so retrieval never silently degrades.
+                <code className="mx-1">/v1/embeddings</code> endpoint. PocketMind Hybrid AI falls back to local embeddings automatically if the server is unreachable, so retrieval never silently degrades.
               </p>
 
               {embeddingsEnabled && (
@@ -453,7 +453,7 @@ export default function EnterpriseServer() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {[
           ['1. Deploy server', 'Company IT deploys vLLM, TGI, or llama.cpp server on GPU hardware.'],
-          ['2. Connect clients', 'Employees enter the private endpoint in NexusAI and select the server model.'],
+          ['2. Connect clients', 'Employees enter the private endpoint in PocketMind Hybrid AI and select the server model.'],
           ['3. Scale hardware', 'Add more GPUs or stronger servers behind the same endpoint without changing the client app.'],
         ].map(([title, body]) => (
           <div key={title} className="premium-card p-5">

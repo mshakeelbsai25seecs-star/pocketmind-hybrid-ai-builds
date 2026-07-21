@@ -4,7 +4,7 @@ cd "$(dirname "$0")"
 docker compose up -d
 cat <<'MSG'
 Ollama started.
-OpenAI-compatible base URL for NexusAI can usually be:
+OpenAI-compatible base URL for PocketMind Hybrid AI can usually be:
 http://SERVER_IP:11434/v1
 
 Pull a model first, for example:

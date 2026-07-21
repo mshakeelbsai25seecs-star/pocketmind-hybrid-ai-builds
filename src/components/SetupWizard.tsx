@@ -10,7 +10,7 @@ export default function SetupWizard() {
   const [step, setStep] = useState(0);
   const [diag, setDiag] = useState<RuntimeDiagnostics | null>(null);
   const [busy, setBusy] = useState(false);
-  const steps = ['Welcome', 'Runtime check', 'Models folder', 'First model', 'Ready'];
+  const steps = ['Welcome', 'Engine check', 'Models folder', 'First model', 'Ready'];
 
   const refresh = async () => {
     setBusy(true);
@@ -54,31 +54,31 @@ export default function SetupWizard() {
           <div className="flex items-center gap-3 mb-6">
             <div className="w-12 h-12 rounded-2xl bg-primary-500 text-white flex items-center justify-center"><Sparkles className="w-6 h-6" /></div>
             <div>
-              <h1 className="text-3xl font-black">NexusAI setup</h1>
-              <p className="text-surface-500">Prepare NexusAI for local model use before testers start using the app.</p>
+              <h1 className="text-3xl font-black">PocketMind Hybrid AI setup</h1>
+              <p className="text-surface-500">A short checklist so you can chat with a local model on this computer.</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2 mb-8">
             {steps.map((s, i) => <span key={s} className={`px-3 py-1 rounded-full text-xs font-semibold ${i <= step ? 'bg-primary-500 text-white' : 'bg-surface-100 dark:bg-surface-800 text-surface-500'}`}>{i + 1}. {s}</span>)}
           </div>
 
-          {step === 0 && <Panel icon={Sparkles} title="Welcome to NexusAI Desktop" desc="This wizard checks the local runtime, confirms the model folder, and helps import the first GGUF model. You can skip it, but setup gives testers a smoother first run." />}
-          {step === 1 && <Panel icon={Wrench} title="Runtime check" desc="NexusAI needs llama-server.exe and its DLL files in bin\\llama.cpp or next to the app.">
+          {step === 0 && <Panel icon={Sparkles} title="Welcome to PocketMind Hybrid AI Desktop" desc="This wizard checks that the local engine is ready, confirms your models folder, and helps you import the first chat model. You can skip it and set things up later." />}
+          {step === 1 && <Panel icon={Wrench} title="Engine check" desc="PocketMind Hybrid AI needs its local engine files (llama-server) under bin/llama.cpp or next to the app.">
             <button onClick={refresh} className="btn-secondary mb-4" disabled={busy}>{busy ? 'Checking...' : 'Run check'}</button>
-            <CheckRow ok={!!diag?.llama_server_found} label="llama-server.exe found" detail={diag?.llama_server_path || diag?.llama_server_error || 'Not checked yet'} />
-            <CheckRow ok={!!diag?.llama_server_help_ok} label="llama-server can start" detail={diag?.llama_server_help_ok ? 'Help command succeeded.' : 'Copy llama-server.exe and DLLs from the same llama.cpp release.'} />
+            <CheckRow ok={!!diag?.llama_server_found} label="Local engine found" detail={diag?.llama_server_path || diag?.llama_server_error || 'Not checked yet'} />
+            <CheckRow ok={!!diag?.llama_server_help_ok} label="Local engine can start" detail={diag?.llama_server_help_ok ? 'Startup check succeeded.' : 'Copy the matching llama-server files from the same release package.'} />
           </Panel>}
-          {step === 2 && <Panel icon={FolderSearch} title="Choose models folder" desc="This folder is where NexusAI scans/downloads GGUF models. You can still import models from anywhere.">
+          {step === 2 && <Panel icon={FolderSearch} title="Choose models folder" desc="This is where PocketMind Hybrid AI looks for chat models. You can still import a model from any location.">
             <div className="grid md:grid-cols-[1fr_auto] gap-3">
               <input className="input-field" value={store.modelsDir} onChange={e => store.setModelsDir(e.target.value)} />
               <button onClick={chooseFolder} className="btn-secondary">Browse</button>
             </div>
           </Panel>}
-          {step === 3 && <Panel icon={HardDrive} title="Import the first model" desc="Use TinyLlama, Phi-3 Mini, Qwen small models, or Mistral for first validation. Specialized medical models should not be used as the default general assistant.">
-            <button onClick={importModel} className="btn-primary flex items-center gap-2"><Download className="w-4 h-4" /> Import .gguf</button>
+          {step === 3 && <Panel icon={HardDrive} title="Import the first model" desc="Start with a small general chat model (for example Phi-3 Mini or Qwen). Specialized medical models should not be your everyday assistant.">
+            <button onClick={importModel} className="btn-primary flex items-center gap-2"><Download className="w-4 h-4" /> Import model</button>
             <p className="text-sm text-surface-500 mt-3 break-all">Selected: {store.currentModel || 'None yet'}</p>
           </Panel>}
-          {step === 4 && <Panel icon={ShieldCheck} title="Ready for testing" desc="Core setup is complete. Before sharing a build, open Diagnostics and run a Model Health Check from Models.">
+          {step === 4 && <Panel icon={ShieldCheck} title="You are ready" desc="Setup is complete. Open Diagnostics if you want a health check, or finish and start using the app.">
             <div className="grid sm:grid-cols-2 gap-3">
               <button onClick={() => store.setActiveView('diagnostics')} className="btn-secondary">Open Diagnostics</button>
               <button onClick={finish} className="btn-primary">Finish setup</button>

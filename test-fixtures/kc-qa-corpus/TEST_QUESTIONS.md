@@ -1,6 +1,6 @@
 # Suggested QA questions
 
-Ask these in Knowledge Chat with the **NexusAI QA Corpus** collection selected.
+Ask these in Knowledge Chat with the **PocketMind Hybrid AI QA Corpus** collection selected.
 
 ## Code partition
 - What does `handleSend` do in ChatView.tsx?
@@ -8,7 +8,7 @@ Ask these in Knowledge Chat with the **NexusAI QA Corpus** collection selected.
 - What Rust function validates JWT tokens?
 
 ## Documentation
-- What are the three layers in the NexusAI architecture?
+- What are the three layers in the PocketMind Hybrid AI architecture?
 - How long does new-hire onboarding take?
 
 ## Runbooks

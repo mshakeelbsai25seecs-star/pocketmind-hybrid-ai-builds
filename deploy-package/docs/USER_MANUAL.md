@@ -1,12 +1,12 @@
-# NexusAI User Manual
+# PocketMind Hybrid AI User Manual
 
-## What is NexusAI?
+## What is PocketMind Hybrid AI?
 
-NexusAI is a desktop application for security analysts. It helps you triage alerts, draft FortiSIEM/FortiSOAR artifacts, validate parser/playbook XML, and ask questions about **your company's own policies and SOPs** — using AI that runs on your organization's server, not in the public cloud.
+PocketMind Hybrid AI is a desktop application for security analysts. It helps you triage alerts, draft FortiSIEM/FortiSOAR artifacts, validate parser/playbook XML, and ask questions about **your company's own policies and SOPs** — using AI that runs on your organization's server, not in the public cloud.
 
 ## Before you start
 
-1. Your IT team must install NexusAI and configure server paths (**Settings → Deployment**).
+1. Your IT team must install PocketMind Hybrid AI and configure server paths (**Settings → Deployment**).
 2. An admin must index the company data folder (**Fortinet Copilot → Grounded SOC Knowledge → Scan & Index**).
 3. You must select a local AI model (**Models**).
 
@@ -54,4 +54,4 @@ Import and select GGUF models stored on the server.
 
 ## Getting help
 
-See `TROUBLESHOOTING.md` in this package or contact your internal NexusAI administrator.
+See `TROUBLESHOOTING.md` in this package or contact your internal PocketMind Hybrid AI administrator.

@@ -16,7 +16,7 @@ fn is_soc_system_prompt(system: &str) -> bool {
 }
 
 fn nexus_formatting_system_prompt(custom: Option<&str>) -> String {
-    let base = "You are NexusAI. Answer the latest user message directly. Use plain, clean Markdown. Put headings, bullet points, numbered points, and fenced code blocks on separate lines. Use inline code for single keywords. Use fenced code blocks only for complete runnable examples. Do not output LaTeX, TikZ, PGF, Asymptote, tabular, graph, or diagram source unless the user explicitly asks for that exact format. Do not invent follow-up questions or repeat yourself.";
+    let base = "You are PocketMind Hybrid AI. Answer the latest user message directly. Use plain, clean Markdown. Put headings, bullet points, numbered points, and fenced code blocks on separate lines. Use inline code for single keywords. Use fenced code blocks only for complete runnable examples. Do not output LaTeX, TikZ, PGF, Asymptote, tabular, graph, or diagram source unless the user explicitly asks for that exact format. Do not invent follow-up questions or repeat yourself.";
     match custom {
         Some(value) if !value.trim().is_empty()
             && (is_knowledge_system_prompt(value) || is_soc_system_prompt(value)) =>
@@ -76,7 +76,7 @@ impl RemoteBackend {
             "deepseek" => "https://platform.deepseek.com/api_keys".to_string(),
             "mistral" => "https://console.mistral.ai/api-keys/".to_string(),
             "gemini" => "https://aistudio.google.com/app/apikey".to_string(),
-            "enterprise" => "Ask your company administrator for the internal NexusAI server token.".to_string(),
+            "enterprise" => "Ask your company administrator for the internal PocketMind Hybrid AI server token.".to_string(),
             _ => "".to_string(),
         }
     }
@@ -212,7 +212,7 @@ impl InferenceBackend for RemoteBackend {
         if self.provider == "openrouter" {
             req = req
                 .header("HTTP-Referer", "https://nexusai.local")
-                .header("X-Title", "NexusAI Desktop");
+                .header("X-Title", "PocketMind Hybrid AI Desktop");
         }
 
         let response = req.send().await.map_err(|e| {

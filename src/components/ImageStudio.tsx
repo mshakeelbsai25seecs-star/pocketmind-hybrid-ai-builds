@@ -112,7 +112,7 @@ export default function ImageStudio() {
           <div className="absolute -right-20 -top-20 w-64 h-64 rounded-full bg-white/20 blur-3xl" />
           <div className="relative flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
             <div className="min-w-0">
-              <p className="text-xs sm:text-sm uppercase tracking-[0.2em] sm:tracking-[0.25em] text-primary-200 font-semibold">NexusAI Image Studio</p>
+              <p className="text-xs sm:text-sm uppercase tracking-[0.2em] sm:tracking-[0.25em] text-primary-200 font-semibold">PocketMind Hybrid AI Image Studio</p>
               <h1 className="text-2xl sm:text-3xl font-black mt-2 leading-tight">Image generation studio</h1>
               <p className="text-primary-100/80 mt-2 max-w-3xl text-sm sm:text-base">Generate with supported online providers, manage image model options, and clearly track offline image runtimes that are not enabled yet.</p>
             </div>

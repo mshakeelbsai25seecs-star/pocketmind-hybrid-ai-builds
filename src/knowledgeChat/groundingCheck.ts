@@ -58,9 +58,10 @@ export function groundingCheck(
   minOverlap = 0.35,
   attachedSources?: KcGroundedContextSource[] | null,
 ): boolean {
-  if (!answer.trim()) return false;
+  if (!answer?.trim()) return false;
+  const safeHits = Array.isArray(hits) ? hits : [];
 
-  const sourceText = sourceCorpus(hits, question, attachedSources);
+  const sourceText = sourceCorpus(safeHits, question || '', attachedSources);
   if (!sourceText) return false;
 
   const querySymbols = extractQuerySymbols(question).map(s => s.toLowerCase());
@@ -72,11 +73,9 @@ export function groundingCheck(
     return score >= 0.12;
   }
 
-  if (querySymbols.some(symbol => sourceText.includes(symbol))) {
-    return true;
-  }
-
   const answerLower = answer.toLowerCase();
+  // Symbol in sources alone is not enough — require the answer also references it
+  // (or answer↔source token overlap below).
   if (querySymbols.some(symbol => answerLower.includes(symbol) && sourceText.includes(symbol))) {
     return true;
   }
@@ -92,7 +91,14 @@ export function groundingCheck(
 
   const keyPhrases = answer.match(KEY_PHRASE_PATTERN) ?? [];
   if (keyPhrases.length === 0) {
-    return sourceText.length > 40 && answer.trim().length >= 40;
+    // Fail closed for fluent lowercase hallucinations: require modest token overlap.
+    const answerTokens = answerLower
+      .split(/[^a-z0-9_]+/)
+      .filter(t => t.length >= 4)
+      .slice(0, 40);
+    if (!answerTokens.length || sourceText.length < 40) return false;
+    const hit = answerTokens.filter(t => sourceText.includes(t)).length;
+    return hit / answerTokens.length >= Math.max(0.2, minOverlap * 0.6);
   }
 
   const matched = keyPhrases.filter(phrase => sourceText.includes(phrase.toLowerCase()));

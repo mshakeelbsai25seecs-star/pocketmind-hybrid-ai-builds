@@ -1,7 +1,7 @@
-# Move NexusAI heavy storage from C: to D:\NexusAI (models, indexes, app DB, HNSW, cache).
+# Move PocketMind Hybrid AI heavy storage from C: to D:\PocketMind (models, indexes, app DB, HNSW, cache).
 # Safe to re-run: only copies files that are missing on D:.
 param(
-  [string]$TargetRoot = "D:\NexusAI",
+  [string]$TargetRoot = "D:\PocketMind",
   [string]$LegacyProgramData = "$env:ProgramData\NexusAI",
   [string]$LegacyAppData = "$env:APPDATA\NexusAI"
 )
@@ -30,7 +30,7 @@ function Copy-TreeIfMissing {
   return $count
 }
 
-Write-Host "=== NexusAI storage migration to $TargetRoot ===" -ForegroundColor Cyan
+Write-Host "=== PocketMind Hybrid AI storage migration to $TargetRoot ===" -ForegroundColor Cyan
 
 $folders = @(
   @{ Name = "models"; Source = Join-Path $LegacyProgramData "models"; Dest = Join-Path $TargetRoot "models" },
@@ -66,5 +66,5 @@ foreach ($item in $folders) {
 }
 
 Write-Host ""
-Write-Host "Done. Restart NexusAI - it defaults to $TargetRoot when the D drive is present." -ForegroundColor Green
+Write-Host "Done. Restart PocketMind Hybrid AI - it defaults to $TargetRoot when the D drive is present." -ForegroundColor Green
 Write-Host "Optional: set NEXUS_DATA_ROOT=$TargetRoot for a custom location."

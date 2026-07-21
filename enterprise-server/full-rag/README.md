@@ -1,8 +1,21 @@
-# NexusAI Full Server RAG (pilot)
+# PocketMind Hybrid AI Full Server RAG (pilot)
 
 Private GPU/CPU stack that runs embeddings, reranking, LLM, and a Knowledge Chat
 gateway. Desktop clients send **prompts + Bearer token only** — indexing and
 retrieval stay on the server.
+
+## Supported / unsupported
+
+| Environment | Status |
+|---|---|
+| Linux x86_64 + Docker Compose v2 + NVIDIA (Container Toolkit working) | Supported (`gpu` / `gpu-small`) |
+| Linux x86_64 + Docker, no GPU or toolkit broken | Supported (`cpu` auto-fallback) |
+| Windows Server via **WSL2 Ubuntu + Docker** | Supported — see [docs/WSL2_WINDOWS_SERVER.md](docs/WSL2_WINDOWS_SERVER.md) |
+| ARM / Apple Silicon / macOS Metal | Not supported for this package |
+| Native Windows Docker Desktop (no WSL Linux engine) | Not supported |
+| Air-gapped (no registry / Hugging Face) | Not supported in this pass — use online install |
+
+Paths `/opt/nexusai/{models,data}` are for **this Docker stack**. They are not the desktop data dirs (`/var/lib/pocketmind` or `C:\ProgramData\PocketMind`).
 
 ## Ports
 
@@ -14,73 +27,56 @@ retrieval stay on the server.
 | rerank | 8003 | Qwen3-Reranker (`/v1/rerank`) |
 | gateway | 8080 | Auth + Knowledge Chat + admin index |
 
+## One-shot install (recommended)
+
+```bash
+cd enterprise-server/full-rag   # or the full-rag folder from the server zip
+cp .env.example .env            # optional: edit paths / URLs
+chmod +x scripts/*.sh
+./scripts/install.sh
+./scripts/smoke_test.sh
+```
+
+`install.sh` will:
+
+1. Run preflight (arch, Docker, ports, disk/RAM, Hugging Face / registry)
+2. Select profile: `gpu`, `gpu-small` (unknown or &lt;20 GiB VRAM), or `cpu` (writes `NEXUS_DEPLOY_PROFILE` in `.env`)
+3. Probe real Docker GPU access (not just `nvidia-smi`)
+4. Create data dirs — defaults `/opt/nexusai/{models,data}`, auto-fallback to `~/nexusai/...` if not writable
+5. Download GGUFs (retries; GGUF magic + size checks; skips existing good files)
+6. `docker compose up -d --build` with the right overlays (base is CPU-safe; GPU devices only in `docker-compose.gpu.yml`)
+7. Healthgate all services (LLM, embeds, rerank, gateway)
+8. Print gateway URL + Bearer token
+
+### Useful flags
+
+```bash
+./scripts/install.sh --cpu              # force CPU overlay
+./scripts/install.sh --gpu              # require working NVIDIA-in-Docker
+./scripts/install.sh --skip-models      # GGUFs already on disk
+./scripts/install.sh --no-seed          # skip optional qa-corpus copy
+./scripts/install.sh --allow-busy-ports # do not fail if ports look busy
+```
+
+`scripts/setup.sh` still works; it delegates to `install.sh`.
+
 ## Locked admin workflow
 
 1. Copy document folders to `/opt/nexusai/data/collections/<name>/` on the server.
 2. Index with `./scripts/index_collection.sh <name>`.
 3. Give employees the gateway URL (`http://<server>:8080/v1`) and Bearer token.
 
-## One-shot setup (Linux NVIDIA)
-
-```bash
-cd enterprise-server/full-rag
-cp .env.example .env
-# optional: edit model URLs / paths in .env
-chmod +x scripts/*.sh
-./scripts/setup.sh
-```
-
-`setup.sh` will:
-
-- Check Docker / Compose
-- Create `/opt/nexusai/models` and `/opt/nexusai/data` (or paths from `.env`)
-- Download GGUFs via `download_models.sh` (HF URLs configurable in `.env`)
-- Generate `NEXUSAI_SERVER_TOKEN` if missing
-- `docker compose up -d --build`
-- Wait for gateway `/health`
-- Optionally seed `collections/qa-corpus` from repo `test-fixtures/kc-qa-corpus`
-- Print gateway URL + token
-
-### CPU fallback
-
-```bash
-./scripts/setup.sh --cpu
-# or:
-docker compose -f docker-compose.yml -f docker-compose.cpu.yml up -d --build
-```
-
 ## Index a collection
 
 ```bash
-# After copying files into /opt/nexusai/data/collections/qa-corpus
 ./scripts/index_collection.sh qa-corpus
-
-# Force rebuild
-./scripts/index_collection.sh qa-corpus --rebuild
-```
-
-Docker exec alternative:
-
-```bash
-docker exec -it nexusai-rag-gateway sh
-curl -X POST http://127.0.0.1:8080/v1/admin/index \
-  -H "Authorization: Bearer $NEXUSAI_SERVER_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"name":"qa-corpus","rebuild":false}'
+./scripts/index_collection.sh my-docs --rebuild
 ```
 
 ## Seed QA corpus
 
-`setup.sh` copies `test-fixtures/kc-qa-corpus` → `/opt/nexusai/data/collections/qa-corpus`
-when the fixture exists next to this package in a full repo checkout.
-
-Manual:
-
-```bash
-mkdir -p /opt/nexusai/data/collections/qa-corpus
-cp -a ../../test-fixtures/kc-qa-corpus/. /opt/nexusai/data/collections/qa-corpus/
-./scripts/index_collection.sh qa-corpus
-```
+`install.sh` copies `test-fixtures/kc-qa-corpus` → `/opt/nexusai/data/collections/qa-corpus`
+when the fixture exists in a full repo checkout.
 
 ## Gateway API
 
@@ -98,28 +94,20 @@ cp -a ../../test-fixtures/kc-qa-corpus/. /opt/nexusai/data/collections/qa-corpus
 2. Enable **Server RAG (Knowledge Chat on org gateway)**.
 3. Open Knowledge Chat — collections load from the gateway; chat skips local embed/search.
 
-Local Knowledge Chat mode is unchanged when Server RAG is off.
-
 ## Optional nginx
 
 Copy `nginx/nexus-rag.conf` into your nginx `conf.d` and point TLS at the gateway.
-
-## Host binary (without Docker gateway image)
-
-```bash
-cd src-tauri
-cargo build --release --bin nexus-rag-gateway
-export NEXUS_DATA_ROOT=/opt/nexusai/data
-export NEXUSAI_SERVER_TOKEN=...
-export LLM_BASE_URL=http://127.0.0.1:8000/v1
-export EMBED_CODE_URL=http://127.0.0.1:8001/v1
-export EMBED_KNOWLEDGE_URL=http://127.0.0.1:8002/v1
-export NEXUS_RERANK_URL=http://127.0.0.1:8003
-export BIND=0.0.0.0:8080
-./target/release/nexus-rag-gateway
-```
 
 ## Volumes
 
 - `${NEXUS_MODELS_HOST}` → `/models` (GGUFs)
 - `${NEXUS_DATA_HOST}` → `/opt/nexusai/data` (collections + gateway SQLite)
+
+## Validate before a customer deploy
+
+On a GPU Linux box and once with `--cpu`:
+
+```bash
+./scripts/install.sh
+./scripts/smoke_test.sh
+```

@@ -34,7 +34,7 @@ export default function EvalPanel() {
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-surface-500">Retrieval Eval</p>
           <h2 className="text-xl font-black text-surface-950 dark:text-white">Golden Query Harness</h2>
           <p className="mt-1 text-xs text-surface-500 dark:text-surface-400">
-            Run golden queries against the active collection using the same retrieval path as chat (server embed + dense rerank).
+            Run sample questions against the current folder using the same search path as chat.
           </p>
         </div>
         <div className="flex flex-col sm:flex-row gap-2 shrink-0">
@@ -83,6 +83,10 @@ export default function EvalPanel() {
             <Metric
               label="Avg lexical faithfulness"
               value={(result.average_lexical_faithfulness ?? 0).toFixed(2)}
+            />
+            <Metric
+              label="Avg hybrid log-rank"
+              value={(result.average_hybrid_log_rank ?? 0).toFixed(2)}
             />
           </div>
 

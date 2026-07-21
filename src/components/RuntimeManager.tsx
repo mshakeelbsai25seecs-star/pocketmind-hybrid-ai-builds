@@ -63,7 +63,7 @@ export default function RuntimeManager() {
       batch_size: report?.auto_batch_size || report?.recommended_batch_size || 256,
       flash_attention: !!report?.supports_flash_attention,
     });
-    setMessage('Applied Automatic Optimizer. NexusAI will try full GPU offload first, then reduce GPU layers automatically, then fall back to CPU if needed.');
+    setMessage('Applied Automatic Optimizer. PocketMind Hybrid AI will try full GPU offload first, then reduce GPU layers automatically, then fall back to CPU if needed.');
   };
 
   const applyCpuSafe = () => {
@@ -89,12 +89,12 @@ export default function RuntimeManager() {
       batch_size: 256,
       flash_attention: !!report?.supports_flash_attention,
     });
-    setMessage('Applied maximum GPU offload. The backend will still fall back automatically if the selected runtime cannot load the model.');
+    setMessage('Applied maximum GPU plan. The app will still fall back automatically if the engine cannot load the model.');
   };
 
   const copyReport = async () => {
     const text = [
-      'NexusAI GPU Runtime Report',
+      'PocketMind Hybrid AI GPU Runtime Report',
       `Runtime path: ${report?.llama_server_path || 'missing'}`,
       `Runtime found: ${report?.runtime_found}`,
       `GPU layers supported: ${report?.supports_gpu_layers}`,
@@ -120,7 +120,7 @@ export default function RuntimeManager() {
       ...(report?.checks || []).map(c => `[${c.status.toUpperCase()}] ${c.label}: ${c.message}${c.detail ? ` (${c.detail})` : ''}`)
     ].join('\n');
     await navigator.clipboard.writeText(text);
-    setMessage('GPU runtime report copied.');
+    setMessage('Engine report copied.');
   };
 
   return (
@@ -129,16 +129,16 @@ export default function RuntimeManager() {
         <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-4">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full border border-primary-500/30 bg-primary-500/10 px-3 py-1 text-xs font-bold uppercase tracking-[0.18em] text-primary-600 dark:text-primary-300 mb-3">
-              <Monitor className="w-4 h-4" /> Runtime Control
+              <Monitor className="w-4 h-4" /> Performance
             </div>
-            <h1 className="text-3xl sm:text-4xl font-black tracking-tight">Universal Runtime Manager</h1>
+            <h1 className="text-3xl sm:text-4xl font-black tracking-tight">Runtime Manager</h1>
             <p className="text-surface-500 mt-2 max-w-3xl">
-              Verify bundled llama.cpp runtimes and let NexusAI choose the safest high-performance launch plan automatically. On Windows it can use CPU, CUDA, or Vulkan runtimes; on macOS it can use CPU or Metal runtimes. The optimizer prioritizes full GPU offload, then CPU + GPU split, then CPU fallback if the selected model or drivers cannot support GPU loading.
+              Check that the local engine is installed and let PocketMind Hybrid AI pick a safe speed plan. It prefers GPU when available, then a GPU + CPU mix, then CPU-only if needed.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <button onClick={run} disabled={busy} className="btn-primary flex items-center gap-2">
-              <RefreshCcw className={`w-4 h-4 ${busy ? 'animate-spin' : ''}`} /> Scan runtime
+              <RefreshCcw className={`w-4 h-4 ${busy ? 'animate-spin' : ''}`} /> Scan engine
             </button>
             <button onClick={copyReport} className="btn-secondary flex items-center gap-2">
               <Terminal className="w-4 h-4" /> Copy report
@@ -155,11 +155,11 @@ export default function RuntimeManager() {
             value={activeMode}
             ok={store.defaultParams.gpu_layers !== 0 && !!report?.gpu_acceleration_available}
           />
-          <Metric icon={ShieldCheck} label="Runtime" value={report?.runtime_found ? 'Found' : 'Missing'} ok={!!report?.runtime_found} />
+          <Metric icon={ShieldCheck} label="Engine" value={report?.runtime_found ? 'Found' : 'Missing'} ok={!!report?.runtime_found} />
           <Metric
             icon={Zap}
-            label="GPU acceleration"
-            value={report?.gpu_acceleration_available ? 'Backend ready' : report?.supports_gpu_layers ? 'Flags only (CPU)' : 'Not available'}
+            label="GPU speed-up"
+            value={report?.gpu_acceleration_available ? 'Ready' : report?.supports_gpu_layers ? 'CPU only' : 'Not available'}
             ok={!!report?.gpu_acceleration_available}
           />
           <Metric
@@ -174,8 +174,8 @@ export default function RuntimeManager() {
           <div className="glass-panel rounded-3xl p-5 sm:p-6 space-y-5">
             <div className="flex items-start justify-between gap-4">
               <div>
-                <h2 className="text-2xl font-black">Automatic launch strategy</h2>
-                <p className="text-sm text-surface-500 mt-1">NexusAI now defaults to an automatic optimizer: full GPU offload first, calculated CPU + GPU split second, and CPU fallback last. Manual profiles remain available for validation and troubleshooting.</p>
+                <h2 className="text-2xl font-black">Automatic speed plan</h2>
+                <p className="text-sm text-surface-500 mt-1">By default, PocketMind Hybrid AI uses the GPU when it can, a mixed plan when memory is tight, and CPU-only as a fallback. Manual profiles below are for testing.</p>
               </div>
               <span className="rounded-full bg-surface-100 dark:bg-surface-900 px-3 py-1 text-xs font-semibold text-surface-500">{fileName(store.currentModel)}</span>
             </div>
@@ -183,34 +183,34 @@ export default function RuntimeManager() {
             <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-4">
               <ProfileCard
                 icon={BrainCircuit}
-                title="Automatic Optimizer"
-                desc="Default setting. Uses GPU when a real backend library is bundled, then reduces GPU layers, then falls back to CPU if needed."
-                details={`${report?.auto_gpu_layers ?? report?.recommended_gpu_layers ?? -1} planned layers • ${report?.fit_status || 'Scan runtime for fit status'}`}
+                title="Automatic"
+                desc="Default. Uses the GPU when available, then eases off if memory is tight, then falls back to CPU."
+                details={`${report?.auto_gpu_layers ?? report?.recommended_gpu_layers ?? -1} planned layers • ${report?.fit_status || 'Scan engine for fit status'}`}
                 onClick={applyAutoOptimizer}
-                button="Use Automatic Optimizer"
+                button="Use Automatic"
                 disabled={!report?.runtime_found}
               />
               <ProfileCard
                 icon={Cpu}
                 title="CPU Safe"
-                desc="Most reliable. Use this for CPU-only devices, unknown drivers, or first-run validation."
+                desc="Most reliable. Use on CPU-only machines, unknown drivers, or first-run checks."
                 details="GPU layers 0 • Context 2048 • Batch 128"
                 onClick={applyCpuSafe}
                 button="Use CPU Safe"
               />
               <ProfileCard
                 icon={Zap}
-                title="Calculated Split"
-                desc="Uses the automatic fit calculation directly when full GPU memory is not enough. Good for large models on mixed CPU+GPU systems."
+                title="Balanced split"
+                desc="Shares work between GPU and CPU when the model does not fit fully in GPU memory."
                 details={`${report?.auto_gpu_layers ?? report?.recommended_gpu_layers ?? 16} GPU layers • Context ${report?.auto_context_size ?? report?.recommended_context_size ?? 4096}`}
                 onClick={applyBalancedGpu}
-                button="Use Calculated Split"
+                button="Use Balanced Split"
                 disabled={!report?.gpu_acceleration_available}
               />
               <ProfileCard
                 icon={Rocket}
-                title="Force Maximum GPU"
-                desc="For qualified hardware and enterprise workstations. Attempts maximum offload while backend fallback still protects the app if loading fails."
+                title="Maximum GPU"
+                desc="Pushes as much as possible onto the GPU. The app still falls back safely if loading fails."
                 details="GPU layers 999 • Context 4096 • Batch 256"
                 onClick={applyMaxGpu}
                 button="Use Max GPU"
@@ -226,24 +226,24 @@ export default function RuntimeManager() {
             )}
 
             <div className="rounded-2xl border border-primary-400/20 bg-primary-50/80 dark:bg-primary-950/20 p-4 text-sm">
-              <p className="font-bold text-primary-700 dark:text-primary-300">Automatic strategy</p>
-              <p className="text-surface-600 dark:text-surface-300 mt-1">{report?.auto_strategy || 'Run Scan runtime to calculate the automatic launch plan.'}</p>
+              <p className="font-bold text-primary-700 dark:text-primary-300">Current plan</p>
+              <p className="text-surface-600 dark:text-surface-300 mt-1">{report?.auto_strategy || 'Run Scan engine to calculate the automatic plan.'}</p>
               {report?.fit_status && <p className="text-xs text-surface-500 mt-2">Fit status: {report.fit_status}</p>}
             </div>
 
             <div className="grid md:grid-cols-2 gap-3 text-sm">
-              <Info label="llama-server path" value={report?.llama_server_path || 'Missing'} />
+              <Info label="Engine path" value={report?.llama_server_path || 'Missing'} />
               <Info label="Selected local model" value={selectedModelPath || (isRemote ? 'Online model selected — GPU settings do not apply' : 'No local model selected')} />
               <Info label="Selected model size" value={fmtBytes(report?.selected_model_size_bytes)} />
-              <Info label="NVIDIA driver" value={report?.nvidia_smi_ok ? 'nvidia-smi works' : 'Not detected / not NVIDIA'} />
-              <Info label="Vulkan diagnostics" value={report?.vulkaninfo_ok ? 'vulkaninfo works' : 'vulkaninfo unavailable'} />
+              <Info label="NVIDIA driver" value={report?.nvidia_smi_ok ? 'Detected' : 'Not detected / not NVIDIA'} />
+              <Info label="Vulkan check" value={report?.vulkaninfo_ok ? 'Available' : 'Not available'} />
               <Info
-                label="GPU acceleration"
-                value={report?.gpu_acceleration_available ? 'Real GPU backend libraries found' : 'Not available (CPU-only libraries)'}
+                label="GPU speed-up"
+                value={report?.gpu_acceleration_available ? 'GPU libraries found' : 'Not available (CPU only)'}
               />
-              <Info label="Backend libraries" value={`CUDA ${report?.supports_cuda_hint ? 'yes' : 'no'} • Vulkan ${report?.supports_vulkan_hint ? 'yes' : 'no'} • Metal ${report?.supports_metal_hint ? 'yes' : 'no'}`} />
-              <Info label="macOS runtime layout" value="Use macos-arm64-metal/cpu for Apple Silicon and macos-x64-metal/cpu for Intel Macs. Metal folders must include libggml-metal to count as GPU-capable." />
-              <Info label="Combined VRAM estimate" value={`${fmtBytes(report?.estimated_available_vram_bytes)} available / ${fmtBytes(report?.estimated_total_vram_bytes)} total`} />
+              <Info label="GPU support" value={`CUDA ${report?.supports_cuda_hint ? 'yes' : 'no'} • Vulkan ${report?.supports_vulkan_hint ? 'yes' : 'no'} • Metal ${report?.supports_metal_hint ? 'yes' : 'no'}`} />
+              <Info label="macOS engines" value="Apple Silicon: macos-arm64-metal/cpu. Intel Mac: macos-x64-metal/cpu. Metal folders need libggml-metal for GPU." />
+              <Info label="GPU memory estimate" value={`${fmtBytes(report?.estimated_available_vram_bytes)} available / ${fmtBytes(report?.estimated_total_vram_bytes)} total`} />
               <Info label="Available system RAM" value={fmtBytes(report?.estimated_available_ram_bytes)} />
             </div>
           </div>
@@ -252,12 +252,12 @@ export default function RuntimeManager() {
             <h2 className="text-2xl font-black">Detected GPUs</h2>
             {(report?.detected_gpus || []).length === 0 && (
               <div className="rounded-2xl border border-dashed border-surface-300 dark:border-surface-700 p-5 text-sm text-surface-500">
-                No GPU was detected by the current scanner. CPU mode remains fully supported. If a supported GPU is available and the correct drivers/runtimes are bundled, NexusAI can use CUDA/Vulkan on Windows/Linux or the matching Metal runtime on macOS.
+                No GPU was detected. CPU mode still works. With the right drivers and bundled engines, PocketMind Hybrid AI can use NVIDIA/AMD/Intel GPU support on Windows/Linux or Metal on Mac.
               </div>
             )}
             {!report?.gpu_acceleration_available && (report?.detected_gpus || []).length > 0 && (
               <div className="rounded-2xl border border-amber-400/30 bg-amber-50 dark:bg-amber-950/20 p-4 text-sm text-amber-800 dark:text-amber-200">
-                Hardware GPUs were detected, but the bundled llama.cpp runtimes are CPU-only (no Metal/CUDA/Vulkan libraries). Detection alone does not enable acceleration.
+                A GPU was detected, but the bundled engines are CPU-only. Seeing a GPU is not enough — the matching GPU engine files must be installed.
               </div>
             )}
             {(report?.detected_gpus || []).map((gpu, i) => (
@@ -268,14 +268,14 @@ export default function RuntimeManager() {
                     <p className="text-sm text-surface-500">{fmtBytes(gpu.vram_total_bytes)} VRAM • score {gpu.compute_score}</p>
                   </div>
                   <span className={`text-xs rounded-full px-2 py-1 font-bold ${gpu.is_metal_capable || gpu.is_cuda_capable || gpu.is_vulkan_capable ? 'bg-green-500/10 text-green-500' : 'bg-surface-200 dark:bg-surface-800 text-surface-500'}`}>
-                    {gpu.is_metal_capable || gpu.is_cuda_capable || gpu.is_vulkan_capable ? 'Usable for offload' : 'Detected (display/iGPU)'}
+                    {gpu.is_metal_capable || gpu.is_cuda_capable || gpu.is_vulkan_capable ? 'Can speed up chat' : 'Display GPU only'}
                   </span>
                 </div>
                 <div className="mt-3 flex flex-wrap gap-2 text-xs">
-                  {gpu.is_cuda_capable && <Badge>CUDA capable</Badge>}
-                  {gpu.is_vulkan_capable && <Badge>Vulkan capable</Badge>}
-                  {gpu.is_metal_capable && <Badge>Metal capable</Badge>}
-                  {!gpu.is_cuda_capable && !gpu.is_vulkan_capable && !gpu.is_metal_capable && <Badge>Not used for LLM offload</Badge>}
+                  {gpu.is_cuda_capable && <Badge>CUDA</Badge>}
+                  {gpu.is_vulkan_capable && <Badge>Vulkan</Badge>}
+                  {gpu.is_metal_capable && <Badge>Metal</Badge>}
+                  {!gpu.is_cuda_capable && !gpu.is_vulkan_capable && !gpu.is_metal_capable && <Badge>Not used for chat speed-up</Badge>}
                 </div>
               </div>
             ))}
@@ -284,18 +284,18 @@ export default function RuntimeManager() {
 
         <div className="glass-panel rounded-3xl overflow-hidden">
           <div className="p-5 border-b border-surface-200 dark:border-surface-800">
-            <h2 className="text-xl font-black">GPU readiness checks</h2>
+            <h2 className="text-xl font-black">Readiness checks</h2>
           </div>
           <div className="divide-y divide-surface-200 dark:divide-surface-800">
             {(report?.checks || []).map(check => <CheckLine key={check.id} check={check} />)}
-            {!report && <div className="p-5 text-surface-500">Scan runtime to see checks.</div>}
+            {!report && <div className="p-5 text-surface-500">Scan engine to see checks.</div>}
           </div>
         </div>
 
         <div className="rounded-3xl border border-surface-200 dark:border-surface-800 bg-surface-50 dark:bg-surface-950 p-5 text-sm text-surface-500">
-          <p className="font-bold text-surface-800 dark:text-surface-100 mb-2">Universal runtime packaging</p>
+          <p className="font-bold text-surface-800 dark:text-surface-100 mb-2">How engines are packaged</p>
           <p>
-            NexusAI uses one application build with separate runtime folders. Auto mode prioritizes the fastest safe launch path available on the current machine: CUDA for NVIDIA on Windows/Linux, Vulkan where available, Metal on macOS, then CPU fallback. Large models remain available for organizations with qualified hardware; if a machine cannot load them, NexusAI reports the fit issue instead of removing the model or crashing.
+            One app build, with separate engine folders for CPU and GPU. Auto mode picks the fastest safe option on this machine (NVIDIA CUDA, Vulkan, Mac Metal, or CPU). If a model is too large, PocketMind Hybrid AI reports the issue instead of crashing.
           </p>
         </div>
       </div>

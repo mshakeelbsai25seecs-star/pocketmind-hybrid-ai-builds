@@ -12,11 +12,11 @@ use crate::knowledge_chat::types::{KcCollection, KcCollectionStatus, KcQaCorpusB
 use std::path::{Path, PathBuf};
 use tauri::Window;
 
-pub const QA_COLLECTION_NAME: &str = "NexusAI QA Corpus";
+pub const QA_COLLECTION_NAME: &str = "PocketMind Hybrid AI QA Corpus";
 const QA_COLLECTION_SETTING: &str = "kc.qa_collection_id";
 const QA_CORPUS_DIR_NAME: &str = "qa-corpus";
 
-/// Runtime path: `{NEXUS_DATA_ROOT}/qa-corpus` (default `D:\NexusAI\qa-corpus`).
+/// Runtime path: `{NEXUS_DATA_ROOT}/qa-corpus` (default `D:\PocketMind\qa-corpus`).
 pub fn qa_corpus_runtime_path() -> PathBuf {
     deployment::preferred_data_root().join(QA_CORPUS_DIR_NAME)
 }

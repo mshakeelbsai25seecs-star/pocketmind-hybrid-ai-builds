@@ -1,4 +1,4 @@
-# Weekly C: maintenance for NexusAI dev machines.
+# Weekly C: maintenance for PocketMind Hybrid AI dev machines.
 # Safe to re-run. Closes nothing automatically — stop tauri/cargo first for best results.
 param(
   [switch]$Aggressive
@@ -25,7 +25,7 @@ function Remove-IfExists([string]$Path, [string]$Label) {
   return $before
 }
 
-Write-Host '=== NexusAI C: maintenance ===' -ForegroundColor Cyan
+Write-Host '=== PocketMind Hybrid AI C: maintenance ===' -ForegroundColor Cyan
 $volBefore = Get-Volume -DriveLetter C
 $freeBefore = [math]::Round($volBefore.SizeRemaining / 1GB, 2)
 Write-Host "C: free before: ${freeBefore} GB"
@@ -33,7 +33,7 @@ Write-Host "C: free before: ${freeBefore} GB"
 $freed = 0.0
 
 # Cursor / VS Code sandbox cargo caches (biggest regrow item when TEMP points to C:)
-foreach ($tempRoot in @($env:TEMP, "$env:LOCALAPPDATA\Temp", 'D:\NexusAI\cache\tmp')) {
+foreach ($tempRoot in @($env:TEMP, "$env:LOCALAPPDATA\Temp", 'D:\PocketMind\cache\tmp')) {
   if (-not $tempRoot) { continue }
   $sandbox = Join-Path $tempRoot 'cursor-sandbox-cache'
   $freed += Remove-IfExists $sandbox 'cursor-sandbox-cache'
@@ -41,7 +41,7 @@ foreach ($tempRoot in @($env:TEMP, "$env:LOCALAPPDATA\Temp", 'D:\NexusAI\cache\t
 
 # Stale temp files (older than 2 days)
 $cutoff = (Get-Date).AddDays(-2)
-foreach ($tempRoot in @($env:TEMP, "$env:LOCALAPPDATA\Temp", 'D:\NexusAI\cache\tmp')) {
+foreach ($tempRoot in @($env:TEMP, "$env:LOCALAPPDATA\Temp", 'D:\PocketMind\cache\tmp')) {
   if (-not (Test-Path -LiteralPath $tempRoot)) { continue }
   Get-ChildItem -LiteralPath $tempRoot -Force -ErrorAction SilentlyContinue |
     Where-Object { $_.LastWriteTime -lt $cutoff } |

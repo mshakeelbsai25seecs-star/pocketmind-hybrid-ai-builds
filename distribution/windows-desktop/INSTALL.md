@@ -1,36 +1,53 @@
-# Install NexusAI on Windows (desktop)
+# Install PocketMind Hybrid AI (Windows)
 
-## Requirements
+## What you need
 
 - Windows 10 or 11 (64-bit)
-- 16 GB RAM minimum (32 GB+ recommended for larger models)
-- Optional: NVIDIA GPU with recent drivers for CUDA acceleration
+- 16 GB RAM or more
+- Optional: NVIDIA GPU for faster inference
 
-## Steps
+## Recommended: portable tester folder
 
-1. Extract the zip to a folder such as `C:\NexusAI\`.
-2. Open `payload\NexusAI.exe` (or the portable folder exe after staging).
-3. If Windows SmartScreen appears, choose **More info → Run anyway** (signed builds skip this).
-4. On first launch: **Settings → Deployment** → verify paths → **Save**.
-5. Copy GGUF models to the configured `models\` folder.
-6. Copy company SOC data to `company-data\`.
-7. **Fortinet Copilot → Grounded SOC Knowledge** → Scan & Index.
+The tester zip is meant to be run **from the unzipped folder**, not only from setup.exe.
 
-## WebView2
+1. Unzip the package (for example `C:\PocketMind\`).
+2. Open the `PocketMind` folder (or the folder that contains the `.exe` and `bin\`).
+3. Confirm you see:
+   - `PocketMind Hybrid AI.exe` (or similar)
+   - `bin\llama.cpp\` with `cpu\` (and optionally `cuda\`, `vulkan\`)
+4. Double-click the `.exe`.
+5. If Windows asks, choose **More info → Run anyway**.
+6. Go to **Settings → Deployment**, confirm folders, then **Save**.
+7. Put chat / embedding / reranker `.gguf` models in the models folder shown in Settings.
+8. Knowledge Chat → add a folder → **Scan** → **Build Index** → ask in your own words.
 
-Tauri bundles WebView2. If the app fails to start, install the [WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/).
+### Data folder
 
-## GPU acceleration
+On Windows the app prefers **`D:\PocketMind`** when the D: drive exists (models, indexes, cache).  
+If D: is missing, it falls back to a user-writable location.  
+`C:\ProgramData\PocketMind` is **not** the primary app data root.
 
-1. **Runtime** page → scan bundled runtimes.
-2. Use **Automatic Optimizer** (default) or **CPU Safe** for troubleshooting.
-3. Confirm `bin\llama.cpp\cuda\llama-server.exe` exists for NVIDIA machines.
+## About setup.exe / MSI
+
+The NSIS/MSI installers (if present) install the app binary. They **do not always include** the `bin\llama.cpp` runtimes next to the installed app.
+
+- Prefer the **portable `.exe` + `bin\`** layout from this zip for tester builds.
+- If you use setup.exe, also copy the zip’s `bin\llama.cpp` tree next to the installed executable, or keep using the portable folder.
+
+## Optional: faster GPU
+
+Open **Runtime**, click **Scan engine**, and keep **Automatic**.
 
 ## Uninstall
 
-Delete the install folder. App data remains under `C:\ProgramData\NexusAI` unless you remove it manually.
+Delete the unzip / install folder. App data may remain under `D:\PocketMind` (or the path shown in Settings).
 
-## Support docs
+## Optional: better PDF OCR (Knowledge Chat)
 
-- `../shared/docs/QUICK_START.md`
-- Server rollout: `../windows-server/docs/USER_MANUAL.md`
+Offline OCR uses Python. For layout-aware Docling OCR and OpenCV preprocess:
+
+```
+pip install pymupdf pillow pytesseract opencv-python-headless docling
+```
+
+Docling models are **not** bundled in tester zips. Without these packages, PocketMind falls back to legacy Tesseract / Windows OCR. Online Image RAG stays off unless you enable it in Settings and per collection.

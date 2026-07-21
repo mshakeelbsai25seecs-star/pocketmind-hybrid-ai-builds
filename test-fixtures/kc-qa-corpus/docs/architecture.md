@@ -1,6 +1,6 @@
-# NexusAI Architecture Overview
+# PocketMind Hybrid AI Architecture Overview
 
-NexusAI is a privacy-first desktop assistant built with Tauri, React, and local llama.cpp runtimes.
+PocketMind Hybrid AI is a privacy-first desktop assistant built with Tauri, React, and local llama.cpp runtimes.
 
 ## Three layers
 
@@ -15,4 +15,4 @@ indexed lexically and optionally with dense vectors, then retrieved at question 
 
 ## Storage
 
-Production deployments store models and indexes under `D:\NexusAI` on Windows workstations.
+Production deployments store models and indexes under `D:\PocketMind` on Windows workstations.

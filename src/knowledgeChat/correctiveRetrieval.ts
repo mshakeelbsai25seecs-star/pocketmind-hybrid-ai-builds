@@ -27,11 +27,15 @@ export function needsCorrectiveRetrieval(searchResult: KcSearchResult): boolean 
 
 /**
  * Extractive / structured answers short-circuit CRAG — no extra retrieval.
+ * When LLM orchestration owns the path, never skip: the model may still request
+ * a refined search even if a structured inventory exists.
  */
 export function shouldSkipCorrectiveRetrieval(
   hasStructuredAnswer: boolean,
   hasExtractivePreview: boolean,
+  preferLlmOrchestration = false,
 ): boolean {
+  if (preferLlmOrchestration) return false;
   return hasStructuredAnswer || hasExtractivePreview;
 }
 
@@ -68,4 +72,4 @@ export function shouldPreferCorrectiveResult(
 }
 
 export const CORRECTIVE_RETRIEVAL_NOTICE =
-  'Corrective retrieval: re-searched with tightened query.';
+  'Refined the search and looked again.';

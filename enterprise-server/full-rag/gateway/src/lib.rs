@@ -1,4 +1,4 @@
-//! NexusAI Full Server RAG gateway.
+//! PocketMind Hybrid AI Full Server RAG gateway.
 //!
 //! Opens SQLite under `NEXUS_DATA_ROOT`, indexes folders from
 //! `collections/<name>/`, and serves Knowledge Chat over HTTP with Bearer auth.

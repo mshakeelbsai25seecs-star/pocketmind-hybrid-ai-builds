@@ -1,35 +1,37 @@
-# Install NexusAI on Linux (desktop)
+# Install PocketMind Hybrid AI (Linux)
 
-## Requirements
+## What you need
 
-- Ubuntu 22.04+ or equivalent glibc-based distro
-- 16 GB RAM minimum
-- Optional: Vulkan drivers for GPU offload
+- Ubuntu 22.04+ (or similar)
+- 16 GB RAM or more
 
 ## AppImage
 
 ```bash
-chmod +x NexusAI_*.AppImage
-./NexusAI_*.AppImage
+chmod +x "PocketMind Hybrid AI_"*.AppImage
+./"PocketMind Hybrid AI_"*.AppImage
 ```
 
 ## Debian package
 
 ```bash
 sudo dpkg -i nexus-ai_*.deb
-sudo apt-get install -f   # if dependencies missing
+sudo apt-get install -f
 nexus-ai
 ```
 
-## First-run setup
+## First run
 
-1. **Settings → Deployment** → paths → **Save**
-2. Create data folders: `sudo mkdir -p /var/lib/nexusai && sudo chown $USER /var/lib/nexusai` (or use home directory via env)
-3. Add models and company data
-4. Scan & index in Fortinet Copilot
+1. Open **Settings → Deployment**, check folders, then **Save**.
+2. Add chat models and (optional) company data.
+3. Scan and index folders in the app before asking questions.
 
-## Environment (optional)
+Data usually lives in `~/.local/share/PocketMind`.
 
-```bash
-export NEXUS_DATA_ROOT=$HOME/.local/share/nexusai
-```
+## Optional: better PDF OCR (Knowledge Chat)
+
+`ash
+pip3 install pymupdf pillow pytesseract opencv-python-headless docling
+`
+
+Docling models are not bundled by default. Online Image RAG remains off unless enabled globally and per collection.

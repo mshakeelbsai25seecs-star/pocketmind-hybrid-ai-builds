@@ -12,7 +12,9 @@ use crate::knowledge_chat::query::decompose_query;
 use crate::knowledge_chat::query_rewrite::rewrite_for_retrieval;
 use crate::knowledge_chat::rerank::rerank_hits;
 use crate::knowledge_chat::partitions::{KcPartitionId, KcSearchScope};
+use crate::knowledge_chat::adjacent_expand::expand_adjacent_chunk_hits;
 use crate::knowledge_chat::parent_merge::auto_merge_parent_hits;
+use crate::knowledge_chat::filter::normalized_text_fingerprint;
 use crate::knowledge_chat::retrieval_config::RetrievalConfig;
 use crate::knowledge_chat::search_filters::{derive_search_filters_with_intent, filters_are_empty};
 use crate::knowledge_chat::types::{
@@ -58,12 +60,12 @@ pub fn hybrid_search_begin(db: &Database, request: KcSearchRequest) -> AppResult
     let collection = db::get_collection(db, &request.collection_id)?;
     if collection.status != KcCollectionStatus::Ready {
         return Err(AppError::Unknown(
-            "Collection is not ready. Scan and build the index before searching.".to_string(),
+            "This folder is not ready yet. Scan it, then build the index before asking questions.".to_string(),
         ));
     }
     if collection.chunk_count <= 0 && collection.code_entity_count <= 0 {
         return Err(AppError::Unknown(
-            "Collection has no indexed chunks. Rebuild the index before searching.".to_string(),
+            "Nothing is indexed in this folder yet. Build or rebuild the index, then try again.".to_string(),
         ));
     }
 
@@ -110,7 +112,19 @@ pub fn hybrid_search_begin(db: &Database, request: KcSearchRequest) -> AppResult
 
     dedupe_hits(&mut merged_hits);
     filter_meta_hits(&mut merged_hits);
-    // Cross-rerank removed from hot path — ONNX cross-encoder + source confidence handle final ranking.
+
+    // Auto file-name filters can zero out hits on a wrong guess — retry once unfiltered.
+    let mut auto_filters_applied = auto_filters_applied;
+    if merged_hits.is_empty() && auto_filters_applied.is_some() {
+        request.filters = None;
+        auto_filters_applied = None;
+        for sub_query in &sub_queries {
+            let mut partial = search_single(db, &request, sub_query, rerank_pool, config.rrf_k)?;
+            merged_hits.append(&mut partial.hits);
+        }
+        dedupe_hits(&mut merged_hits);
+        filter_meta_hits(&mut merged_hits);
+    }
 
     let fts_available = fts::fts_search(db, &request.collection_id, &retrieval_query, 1)
         .map(|rows| !rows.is_empty())
@@ -167,8 +181,12 @@ pub fn hybrid_search_complete(
     }
     apply_relevant_snippets(&retrieval_query, &mut hits);
     apply_source_confidence(&retrieval_query, &mut hits);
+    let (expanded_hits, adjacent_expand_applied) =
+        expand_adjacent_chunk_hits(db, &pending.request.collection_id, &hits)?;
+    hits = expanded_hits;
     let (merged_hits, parent_merge_applied) = auto_merge_parent_hits(&hits);
     hits = merged_hits;
+    dedupe_near_duplicate_hits(&mut hits);
     hits.truncate(pending.top_k);
     let auto_filters_applied = pending.auto_filters_applied.clone();
 
@@ -289,6 +307,7 @@ pub fn hybrid_search_complete(
         },
         symbol_entities,
         parent_merge_applied,
+        adjacent_expand_applied,
         auto_filters_applied,
         pipeline_trace: None,
     })
@@ -332,6 +351,7 @@ fn intent_short_circuit_result(pending: HybridSearchPending, intent: KcIntentMat
         intent_source: None,
         symbol_entities: Vec::new(),
         parent_merge_applied: false,
+        adjacent_expand_applied: false,
         auto_filters_applied,
         pipeline_trace: None,
     }
@@ -511,6 +531,7 @@ fn search_single(
         intent_source: None,
         symbol_entities: Vec::new(),
         parent_merge_applied: false,
+        adjacent_expand_applied: false,
         auto_filters_applied: None,
         pipeline_trace: None,
     })
@@ -547,6 +568,7 @@ fn empty_result(request: &KcSearchRequest, query: &str) -> KcSearchResult {
         intent_source: None,
         symbol_entities: Vec::new(),
         parent_merge_applied: false,
+        adjacent_expand_applied: false,
         auto_filters_applied: None,
         pipeline_trace: None,
     }
@@ -652,6 +674,68 @@ fn fts_score_map(
 fn dedupe_hits(hits: &mut Vec<KcSearchHit>) {
     let mut seen = std::collections::HashSet::new();
     hits.retain(|hit| seen.insert(hit.chunk.id.clone()));
+}
+
+/// Collapse near-duplicate content that appears under different paths/chunk ids.
+/// Tie-break with fused score, then longer evidence, then stable chunk id.
+fn dedupe_near_duplicate_hits(hits: &mut Vec<KcSearchHit>) {
+    if hits.len() < 2 {
+        return;
+    }
+    let mut best_by_key: HashMap<String, usize> = HashMap::new();
+    for (idx, hit) in hits.iter().enumerate() {
+        let key = near_duplicate_key(hit);
+        match best_by_key.get(&key).copied() {
+            None => {
+                best_by_key.insert(key, idx);
+            }
+            Some(prev) => {
+                if is_better_duplicate_hit(&hits[idx], &hits[prev]) {
+                    best_by_key.insert(key, idx);
+                }
+            }
+        }
+    }
+    let keep: HashSet<usize> = best_by_key.values().copied().collect();
+    let mut idx = 0usize;
+    hits.retain(|_| {
+        let retain = keep.contains(&idx);
+        idx += 1;
+        retain
+    });
+    for (rank, hit) in hits.iter_mut().enumerate() {
+        hit.rank = rank + 1;
+    }
+}
+
+fn near_duplicate_key(hit: &KcSearchHit) -> String {
+    let fp = normalized_text_fingerprint(&hit.chunk.text);
+    let basename = std::path::Path::new(&hit.chunk.file_name)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(&hit.chunk.file_name)
+        .to_ascii_lowercase();
+    let section = hit
+        .chunk
+        .section_path
+        .as_deref()
+        .or(Some(hit.chunk.title.as_str()))
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    // Prefer content fingerprint; basename+section catches truncated equal clones.
+    format!("{fp}|{basename}|{section}")
+}
+
+fn is_better_duplicate_hit(candidate: &KcSearchHit, incumbent: &KcSearchHit) -> bool {
+    if (candidate.fused_score - incumbent.fused_score).abs() > 1e-9 {
+        return candidate.fused_score > incumbent.fused_score;
+    }
+    let cand_len = candidate.chunk.text.len();
+    let inc_len = incumbent.chunk.text.len();
+    if cand_len != inc_len {
+        return cand_len > inc_len;
+    }
+    candidate.chunk.id < incumbent.chunk.id
 }
 
 fn filter_meta_hits(hits: &mut Vec<KcSearchHit>) {
@@ -1007,5 +1091,62 @@ mod tests {
         vectors.insert(KcPartitionId::Code, vec![1.0, 0.0]);
         let chunk = loaded("code", Some(vec![1.0, 0.0, 0.0]));
         assert_eq!(dense_score_for_chunk(&chunk, &vectors), 0.0);
+    }
+
+    fn hit_with_text(id: &str, path: &str, name: &str, text: &str, score: f64) -> KcSearchHit {
+        KcSearchHit {
+            chunk: KcChunkRecord {
+                id: id.to_string(),
+                collection_id: "c1".to_string(),
+                file_id: id.to_string(),
+                file_name: name.to_string(),
+                file_path: path.to_string(),
+                chunk_index: 0,
+                title: "Section".to_string(),
+                start_char: 0,
+                end_char: text.len() as i64,
+                text: text.to_string(),
+                top_terms: vec![],
+                has_dense: false,
+                parent_text: None,
+                section_path: Some("Document > Section".to_string()),
+                doc_type: Some("document".to_string()),
+                partition_id: Some("general".to_string()),
+                context_text: None,
+                line_start: Some(1),
+                line_end: Some(2),
+                page_start: None,
+                page_end: None,
+                source_type: "chunk".to_string(),
+                entity_kind: None,
+                entity_name: None,
+                source_confidence: None,
+                parse_mode: None,
+            },
+            retrieval_mode: KcRetrievalMode::HybridDense,
+            keyword_score: score,
+            lexical_score: score,
+            dense_score: score,
+            fts_score: score,
+            rerank_score: score,
+            fused_score: score,
+            rank: 1,
+            relevant_snippet: None,
+        }
+    }
+
+    #[test]
+    fn near_duplicate_hits_collapse_across_paths() {
+        let body = "Identical policy body used in two folder copies for indexing tests.";
+        let mut hits = vec![
+            hit_with_text("a", r"copy_a\policy.txt", "policy.txt", body, 0.5),
+            hit_with_text("b", r"copy_b\policy.txt", "policy.txt", body, 0.9),
+            hit_with_text("c", r"other\notes.txt", "notes.txt", "Unrelated notes content here.", 0.4),
+        ];
+        dedupe_near_duplicate_hits(&mut hits);
+        assert_eq!(hits.len(), 2);
+        assert!(hits.iter().any(|h| h.chunk.id == "b"));
+        assert!(hits.iter().any(|h| h.chunk.id == "c"));
+        assert!(!hits.iter().any(|h| h.chunk.id == "a"));
     }
 }

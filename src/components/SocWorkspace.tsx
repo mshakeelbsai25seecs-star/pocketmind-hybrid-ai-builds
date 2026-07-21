@@ -133,7 +133,7 @@ export default function SocWorkspace() {
       const autoBlock = buildSocAutoKnowledgeContextBlock(grounded.retrieval, grounded.error || undefined);
       const safePrompt = prompt.length > 9000
         ? [
-          'You are Nexus AI Fortinet SOC Copilot.',
+          'You are PocketMind Hybrid AI Fortinet SOC Copilot.',
           'The original SOC prompt/context was large, so this compact summary is used to stay within local model context limits.',
           'Use Copy Prompt or local exports for the full artifact. Do not claim live FortiSIEM/FortiSOAR integration.',
           '',

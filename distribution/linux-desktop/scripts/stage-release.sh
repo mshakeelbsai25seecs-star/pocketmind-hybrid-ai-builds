@@ -3,7 +3,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-OUT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/payload"
+DESKTOP_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+OUT_DIR="$DESKTOP_DIR/payload"
 BUNDLE="$REPO_ROOT/src-tauri/target/release/bundle"
 
 echo "Staging Linux desktop release to $OUT_DIR"
@@ -19,11 +20,27 @@ for sub in appimage deb; do
   fi
 done
 
-if [[ -d "$REPO_ROOT/bin" ]]; then
-  rm -rf "$OUT_DIR/bin"
-  cp -R "$REPO_ROOT/bin" "$OUT_DIR/bin"
-  copied=true
+# Copy ONLY Linux llama.cpp backends: cpu, cuda, vulkan (never macos-* folders).
+LLAMA_SRC="$REPO_ROOT/bin/llama.cpp"
+LLAMA_DST="$OUT_DIR/bin/llama.cpp"
+if [[ -d "$LLAMA_SRC" ]]; then
+  rm -rf "$LLAMA_DST"
+  mkdir -p "$LLAMA_DST"
+  for backend in cpu cuda vulkan; do
+    if [[ -d "$LLAMA_SRC/$backend" ]]; then
+      cp -R "$LLAMA_SRC/$backend" "$LLAMA_DST/$backend"
+      echo "Copied bin/llama.cpp/$backend"
+      copied=true
+    fi
+  done
 fi
+
+for doc in INSTALL.md WHAT_IS_INCLUDED.md README.md; do
+  if [[ -f "$DESKTOP_DIR/$doc" ]]; then
+    cp "$DESKTOP_DIR/$doc" "$OUT_DIR/$doc"
+    echo "Copied $doc"
+  fi
+done
 
 mkdir -p "$OUT_DIR/models/embeddings"
 
@@ -32,4 +49,4 @@ if [[ "$copied" != true ]]; then
   exit 1
 fi
 
-echo "Done."
+echo "Done. Zip only this payload/ folder + docs — never the git repo. See distribution/CLIENT_HANDOFF.md."

@@ -1,18 +1,18 @@
 # Package overview
 
-NexusAI ships as **seven sibling packages** under `distribution/`. Each package is designed to be zipped and handed to IT or analysts without requiring the full source repository.
+PocketMind Hybrid AI ships as **seven sibling packages** under `distribution/`. Each package is designed to be zipped and handed to IT or analysts without requiring the full source repository.
 
 ## Desktop packages (end-user installs)
 
 ### Windows desktop (`windows-desktop/`)
 
-- **Payload:** `NexusAI.exe`, WebView2 runtime deps, `bin/llama.cpp/{cpu,cuda,vulkan}/`
+- **Payload:** `PocketMind Hybrid AI.exe`, WebView2 runtime deps, `bin/llama.cpp/{cpu,cuda,vulkan}/`
 - **Docs:** `INSTALL.md`, `WHAT_IS_INCLUDED.md`
 - **Script:** `scripts/stage-release.ps1` copies from `src-tauri/target/release/bundle/`
 
 ### macOS desktop (`macos-desktop/`)
 
-- **Payload:** `NexusAI.app` or `.dmg`, `bin/llama.cpp/macos-{arm64,x64}-{metal,cpu}/`
+- **Payload:** `PocketMind Hybrid AI.app` or `.dmg`, `bin/llama.cpp/macos-{arm64,x64}-{metal,cpu}/`
 - **Build note:** Must be built on macOS or macOS CI.
 - **Script:** `scripts/stage-release.sh`
 
@@ -26,18 +26,18 @@ NexusAI ships as **seven sibling packages** under `distribution/`. Each package 
 ### Windows server (`windows-server/`)
 
 - Same desktop binary plus **admin** documentation.
-- `scripts/prepare-server.ps1` creates `C:\ProgramData\NexusAI` tree.
+- `scripts/prepare-server.ps1` creates `C:\ProgramData\PocketMind` tree.
 - Includes `USER_MANUAL.md`, `ADMIN_DEPLOYMENT_GUIDE.md`, `CONFIGURATION.md`, `TROUBLESHOOTING.md`.
 
 ### Linux server (`linux-server/`)
 
-- Same as Windows server but paths under `/var/lib/nexusai`.
+- Same as Windows server but paths under `/var/lib/pocketmind`.
 - `scripts/prepare-server.sh`
 
 ### macOS server (`macos-server/`)
 
 - For shared Mac mini / Mac Studio SOC pilots.
-- Default root: `/Library/Application Support/NexusAI` when `NEXUS_DEPLOY_MODE=server`.
+- Default root: `/Library/Application Support/PocketMind` when `NEXUS_DEPLOY_MODE=server`.
 
 ## Shared assets (`shared/`)
 

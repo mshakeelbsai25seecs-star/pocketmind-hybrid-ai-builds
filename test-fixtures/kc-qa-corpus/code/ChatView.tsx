@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
 /**
- * ChatView renders the main chat UI for the NexusAI desktop client.
+ * ChatView renders the main chat UI for the PocketMind Hybrid AI desktop client.
  * It displays messages, handles keyboard shortcuts, and sends user input to the backend.
  */
 export default function ChatView() {

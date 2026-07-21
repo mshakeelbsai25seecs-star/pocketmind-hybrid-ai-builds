@@ -33,6 +33,16 @@ export interface AnswerContext {
   productConfig: ProductConfig | null | undefined;
   explorerMode: boolean;
   answerRoute: AnswerRoute;
+  /**
+   * When true (online API answer model), skip extractive/evidence short-circuits
+   * so the selected remote model actually synthesizes the answer.
+   */
+  preferOnlineLlm?: boolean;
+  /**
+   * When true, the LLM owns interpretation + answering. Specialist structured /
+   * extractive / weak-grounding stages are demoted so they do not short-circuit.
+   */
+  preferLlmOrchestration?: boolean;
   /** Pre-rendered deterministic answers (null when not applicable). */
   structuredAnswer: string | null;
   extractivePreview: string | null;
@@ -74,17 +84,28 @@ function answerIntent(ctx: AnswerContext): QueryIntent {
   return effectiveAnswerIntent(ctx.searchResult);
 }
 
+function llmOwnsAnswer(ctx: AnswerContext): boolean {
+  return !!ctx.preferLlmOrchestration || !!ctx.preferOnlineLlm;
+}
+
 const stages: AnswerStage[] = [
   {
     id: 'structured',
     // Specialists only when answer_intent matches (structured already intent-tagged).
-    canHandle: ctx => ctx.answerRoute === 'structured' && !!ctx.structuredAnswer,
+    // Skipped when LLM orchestration owns interpretation of the question.
+    canHandle: ctx =>
+      !llmOwnsAnswer(ctx)
+      && ctx.answerRoute === 'structured'
+      && !!ctx.structuredAnswer,
     execute: async ctx => ({ text: ctx.formatAnswer(ctx.structuredAnswer!, true) }),
   },
   {
     id: 'extractive-code-symbol',
     // Prefer extractive only for explain_symbol — list/locate use structured instead.
-    canHandle: ctx => !!ctx.extractivePreview && answerIntent(ctx) === 'explain_symbol',
+    canHandle: ctx =>
+      !llmOwnsAnswer(ctx)
+      && !!ctx.extractivePreview
+      && answerIntent(ctx) === 'explain_symbol',
     execute: async ctx => ({ text: ctx.formatAnswer(ctx.extractivePreview!, true) }),
   },
   {
@@ -99,6 +120,7 @@ const stages: AnswerStage[] = [
       && (
         isMultiFileQuestion(ctx.question)
         || answerIntent(ctx) === 'general'
+        || !!ctx.preferLlmOrchestration
       ),
     execute: async ctx => {
       const text = await ctx.resolveExplorer();
@@ -107,7 +129,7 @@ const stages: AnswerStage[] = [
   },
   {
     id: 'evidence',
-    canHandle: ctx => ctx.answerRoute === 'evidence',
+    canHandle: ctx => !llmOwnsAnswer(ctx) && ctx.answerRoute === 'evidence',
     execute: async ctx => {
       const text = ctx.resolveEvidence();
       return text ? { text } : null;
@@ -115,15 +137,20 @@ const stages: AnswerStage[] = [
   },
   {
     id: 'not-found',
-    canHandle: ctx => ctx.answerRoute === 'not_found',
+    // With LLM orchestration, empty/weak retrieval still attempts synthesis after
+    // the panel's re-retrieve loop; only hard-stop when route is not_found and
+    // we are not letting the model decide.
+    canHandle: ctx => ctx.answerRoute === 'not_found' && !llmOwnsAnswer(ctx),
     execute: async ctx => ctx.resolveNotFound(),
   },
   {
     // Local Corrective RAG gate: weak grounding after the (optional) pre-pipeline
     // re-search still blocks LLM synthesis — prefer evidence / extractive / not-found.
     // The actual corrective re-retrieve runs in KnowledgeChatPanel (max 1 extra search).
+    // Skipped when LLM orchestration / online models own the answer path.
     id: 'corrective-rag',
-    canHandle: ctx => isWeakGrounding(ctx.contextHits, ctx.productConfig),
+    canHandle: ctx =>
+      !llmOwnsAnswer(ctx) && isWeakGrounding(ctx.contextHits, ctx.productConfig),
     execute: async ctx => {
       if (ctx.extractivePreview && answerIntent(ctx) === 'explain_symbol') {
         return { text: ctx.formatAnswer(ctx.extractivePreview, true) };
@@ -138,12 +165,14 @@ const stages: AnswerStage[] = [
   },
   {
     id: 'llm-synthesis',
-    // Never synthesize when extractive already answered an explain_symbol question.
-    // general skips false extractive (extractivePreview gated above).
-    canHandle: ctx => !(
-      !!ctx.extractivePreview
-      && answerIntent(ctx) === 'explain_symbol'
-    ),
+    // Never synthesize when extractive already answered an explain_symbol question
+    // on the legacy specialist path. Orchestration / online always reach the LLM.
+    canHandle: ctx =>
+      llmOwnsAnswer(ctx)
+      || !(
+        !!ctx.extractivePreview
+        && answerIntent(ctx) === 'explain_symbol'
+      ),
     execute: async ctx => ctx.resolveLlm(),
   },
 ];

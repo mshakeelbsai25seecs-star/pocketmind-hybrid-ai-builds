@@ -1,6 +1,6 @@
-# NexusAI Universal Distribution Bundle
+# PocketMind Hybrid AI Universal Distribution Bundle
 
-This folder is the **master package of packages** for shipping NexusAI on every supported platform. Each subfolder is a self-contained deliverable with its own install guide, payload area, and scripts.
+This folder is the **master package of packages** for shipping PocketMind Hybrid AI on every supported platform. Each subfolder is a self-contained deliverable with its own install guide, payload area, and scripts.
 
 ## Choose your package
 
@@ -19,7 +19,7 @@ This folder is the **master package of packages** for shipping NexusAI on every 
 1. Read [`scripts/BUILD_ALL.md`](scripts/BUILD_ALL.md).
 2. Build on the **target OS** (or CI runner for that OS): `npm run tauri build`.
 3. Run the matching stage script to copy artifacts into the package `payload/` folder.
-4. Zip the platform folder (e.g. `NexusAI-Windows-Desktop-v0.1.0.zip`) and ship with models/docs as needed.
+4. Zip the platform folder (e.g. `PocketMind Hybrid AI-Windows-Desktop-v0.1.0.zip`) and ship with models/docs as needed.
 
 ## Default data paths (all platforms)
 
@@ -27,10 +27,10 @@ Paths are configurable in **Settings → Deployment** or via environment variabl
 
 | OS | Default data root |
 |----|-------------------|
-| Windows | `C:\ProgramData\NexusAI` |
-| Linux | `/var/lib/nexusai` |
-| macOS (workstation) | `~/Library/Application Support/NexusAI` |
-| macOS (server mode) | `/Library/Application Support/NexusAI` |
+| Windows | `C:\ProgramData\PocketMind` |
+| Linux | `/var/lib/pocketmind` |
+| macOS (workstation) | `~/Library/Application Support/PocketMind` |
+| macOS (server mode) | `/Library/Application Support/PocketMind` |
 
 Override with `NEXUS_DATA_ROOT`.
 

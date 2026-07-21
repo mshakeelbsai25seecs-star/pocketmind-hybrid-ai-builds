@@ -44,7 +44,7 @@ export const DEFAULT_PRODUCT_CONFIG: ProductConfig = {
   knowledge_chat_mode: 'folder_qa',
 };
 
-export const SOC_APP_NAME = 'Nexus AI — Fortinet SOC Copilot';
+export const SOC_APP_NAME = 'PocketMind Hybrid AI — Fortinet SOC Copilot';
 
 export const SOC_ARTIFACT_DISCLAIMER =
   'Draft for analyst review. Human approval is required before any response action in your environment.';

@@ -24,7 +24,7 @@ const sections = [
     title: 'Attachments',
     items: [
       'Text PDFs, DOCX, TXT, CSV, JSON, and code files are extracted locally.',
-      'Scanned PDFs and image understanding require OCR or vision support. NexusAI will show a limitation message when text extraction is not available.',
+      'Scanned PDFs and image understanding require OCR or vision support. PocketMind Hybrid AI will show a limitation message when text extraction is not available.',
       'Large files are summarized into prompt-safe context instead of being dumped into the visible chat.',
     ],
   },
@@ -50,9 +50,9 @@ const sections = [
     icon: AlertTriangle,
     title: 'Troubleshooting',
     items: [
-      'If chat does not respond, run Diagnostics and check llama-server.exe and selected model path.',
-      'If output repeats or appears unrelated, use Model Health Check and try a general instruct model such as Mistral, Phi, or Qwen.',
-      'If the local engine becomes stuck, use Diagnostics → Stop Local Engine, then run Runtime → Scan runtime.',
+      'If chat does not respond, run Diagnostics and check that the local engine and selected model path are ready.',
+      'If output repeats or appears unrelated, use Model Health Check and try a general chat model such as Mistral, Phi, or Qwen.',
+      'If the local engine becomes stuck, use Diagnostics → Stop Local Engine, then open Runtime → Scan engine.',
     ],
   },
 ];
@@ -64,9 +64,9 @@ export default function HelpCenter() {
         <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 text-sm font-semibold mb-4">
           <HelpCircle className="w-4 h-4" /> Help Center
         </div>
-        <h1 className="text-4xl font-black tracking-tight">NexusAI desktop guide</h1>
+        <h1 className="text-4xl font-black tracking-tight">PocketMind Hybrid AI desktop guide</h1>
         <p className="text-surface-600 dark:text-surface-400 mt-2 max-w-3xl">
-          A tester-friendly guide for running offline models, using attachments, diagnosing runtime issues, and understanding privacy.
+          A short guide for offline models, attachments, performance checks, and privacy.
         </p>
       </section>
 
@@ -98,7 +98,7 @@ export default function HelpCenter() {
             <div>
               <h2 className="font-bold text-primary-900 dark:text-primary-200">PocketMind parity checklist for desktop</h2>
               <p className="text-sm text-primary-800 dark:text-primary-300 mt-1">
-                NexusAI Desktop now follows a production-oriented feature checklist: offline chat, online providers, model categories, Image Studio, prompt library, diagnostics, storage, backup/restore, runtime recovery, and clear tester guidance.
+                PocketMind Hybrid AI Desktop now follows a production-oriented feature checklist: offline chat, online providers, model categories, Image Studio, prompt library, diagnostics, storage, backup/restore, runtime recovery, and clear tester guidance.
               </p>
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">

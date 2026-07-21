@@ -53,12 +53,12 @@ export function pathPlaceholder(config: DeploymentConfig | null | undefined, kin
   if (root) return root;
   if (isWindowsPlatform()) {
     return kind === 'models'
-      ? 'D:\\NexusAI\\models'
-      : 'D:\\NexusAI\\company-data';
+      ? 'D:\\PocketMind\\models'
+      : 'D:\\PocketMind\\company-data';
   }
   return kind === 'models'
-    ? '/var/lib/nexusai/models'
-    : '/var/lib/nexusai/company-data';
+    ? '/var/lib/pocketmind/models'
+    : '/var/lib/pocketmind/company-data';
 }
 
 export function embeddingModelPlaceholder(config: DeploymentConfig | null | undefined): string {

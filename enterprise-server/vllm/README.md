@@ -24,7 +24,7 @@ For multi-GPU:
 curl http://localhost:8000/v1/models
 ```
 
-From NexusAI, use:
+From PocketMind Hybrid AI, use:
 
 ```text
 Organization Server URL: http://SERVER_IP:8000/v1

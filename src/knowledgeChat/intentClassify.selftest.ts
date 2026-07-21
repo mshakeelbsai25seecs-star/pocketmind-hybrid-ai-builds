@@ -37,6 +37,22 @@ assert(
   'rules explain',
 );
 assert(
+  classifyRulesSearchIntent(
+    'tell me what each function inside chatView.tsx is for and what it does.',
+  ) === 'general',
+  'each-function behavior is general not list',
+);
+assert(
+  classifyRulesSearchIntent(
+    'explain what each function does in the chatView.tsx file',
+  ) === 'general',
+  'explain-each is general not list',
+);
+assert(
+  classifyRulesSearchIntent('What functions are defined in ChatView.tsx?') === 'list_symbols_in_file',
+  'pure inventory still list',
+);
+assert(
   classifyRulesSearchIntent('what are the imports in config_loader.py') === 'file_imports',
   'rules imports',
 );

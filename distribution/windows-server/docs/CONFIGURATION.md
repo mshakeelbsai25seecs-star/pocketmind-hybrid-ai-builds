@@ -1,4 +1,4 @@
-# NexusAI Configuration Reference
+# PocketMind Hybrid AI Configuration Reference
 
 ## In-app configuration
 
@@ -8,7 +8,7 @@
 
 | Setting | Windows default | Linux default | macOS default |
 |---------|-----------------|---------------|---------------|
-| Data root | `C:\ProgramData\NexusAI` | `/var/lib/nexusai` | `~/Library/Application Support/NexusAI` |
+| Data root | `C:\ProgramData\PocketMind` | `/var/lib/pocketmind` | `~/Library/Application Support/PocketMind` |
 | Models | `{data_root}/models` | same | same |
 | Embedding model | `{data_root}/models/embeddings/...gguf` | same | same |
 | Company data | `{data_root}/company-data` | same | same |

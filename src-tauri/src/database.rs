@@ -304,7 +304,45 @@ impl Database {
         self.migrate_kc_v5()?;
         self.migrate_kc_v6()?;
         self.migrate_kc_v7()?;
+        self.migrate_kc_v8()?;
 
+        Ok(())
+    }
+
+    fn migrate_kc_v8(&self) -> Result<()> {
+        let alters = [
+            "ALTER TABLE kc_collections ADD COLUMN image_rag_opt_in INTEGER NOT NULL DEFAULT 0",
+            "ALTER TABLE kc_collections ADD COLUMN allow_cloud_media INTEGER NOT NULL DEFAULT 0",
+        ];
+        for sql in alters {
+            match self.conn.execute(sql, []) {
+                Ok(_) => {}
+                Err(e) => {
+                    let msg = e.to_string().to_ascii_lowercase();
+                    // SQLite: "duplicate column name" — safe to ignore.
+                    if !msg.contains("duplicate column") {
+                        return Err(e);
+                    }
+                }
+            }
+        }
+        // Only stamp schema v8 when both columns are actually present.
+        let mut stmt = self.conn.prepare("PRAGMA table_info(kc_collections)")?;
+        let cols: Vec<String> = stmt
+            .query_map([], |row| row.get::<_, String>(1))?
+            .filter_map(|r| r.ok())
+            .collect();
+        let has_opt_in = cols.iter().any(|c| c == "image_rag_opt_in");
+        let has_allow = cols.iter().any(|c| c == "allow_cloud_media");
+        if !has_opt_in || !has_allow {
+            // Do not stamp v8 — retry on next startup instead of claiming success.
+            eprintln!("migrate_kc_v8: image_rag columns missing; schema version not bumped");
+            return Ok(());
+        }
+        self.conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES ('kc_schema_version', '8')",
+            [],
+        )?;
         Ok(())
     }
 

@@ -1,8 +1,8 @@
-# NexusAI Admin Deployment Guide
+# PocketMind Hybrid AI Admin Deployment Guide
 
 ## Overview
 
-Deploy NexusAI as an offline SOC copilot on a dedicated Windows Server or Linux host. Analysts connect via RDP/remote desktop or distributed desktop installs pointing at shared data paths.
+Deploy PocketMind Hybrid AI as an offline SOC copilot on a dedicated Windows Server or Linux host. Analysts connect via RDP/remote desktop or distributed desktop installs pointing at shared data paths.
 
 ## Hardware guidelines
 
@@ -28,12 +28,12 @@ Deliver the release bundle from `src-tauri/target/release/` plus `bin/llama.cpp/
 
 **Windows Server (PowerShell as Administrator):**
 ```powershell
-.\deploy-package\scripts\prepare-windows-server.ps1 -DataRoot "C:\ProgramData\NexusAI"
+.\deploy-package\scripts\prepare-windows-server.ps1 -DataRoot "C:\ProgramData\PocketMind"
 ```
 
 **Linux:**
 ```bash
-sudo bash deploy-package/scripts/prepare-linux-server.sh /var/lib/nexusai
+sudo bash deploy-package/scripts/prepare-linux-server.sh /var/lib/pocketmind
 ```
 
 ### 3. Install models
@@ -57,7 +57,7 @@ Copy `deploy-package/config/deployment.env.example` and set on the server or ser
 
 | Variable | Purpose |
 |----------|---------|
-| `NEXUS_DATA_ROOT` | Root for all NexusAI data |
+| `NEXUS_DATA_ROOT` | Root for all PocketMind Hybrid AI data |
 | `NEXUS_MODELS_DIR` | GGUF models folder |
 | `NEXUS_SOC_DATA_ROOT` | Company knowledge for SOC |
 | `NEXUS_EXPORT_DIR` | Default export folder |
@@ -68,7 +68,7 @@ Copy `deploy-package/config/deployment.env.example` and set on the server or ser
 
 ### 6. First launch checklist
 
-1. Start NexusAI.
+1. Start PocketMind Hybrid AI.
 2. **Settings → Deployment** → verify paths → **Save deployment settings**.
 3. **Models** → scan folder → import GGUF.
 4. **Fortinet Copilot → Grounded SOC Knowledge** → Link Collection → Scan & Index.

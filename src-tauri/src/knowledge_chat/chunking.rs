@@ -34,6 +34,8 @@ const CHILD_OVERLAP: usize = 120;
 const PARENT_WINDOW: usize = 2400;
 const SEMANTIC_CHILD_TARGET: usize = 1200;
 const SEMANTIC_CHILD_OVERLAP: usize = 160;
+/// Keep a complete structured/XML element intact up to this many chars when child-splitting.
+const STRUCTURED_ELEMENT_CAP: usize = 4500;
 /// LlamaIndex CodeSplitter-style defaults (line windows with overlap).
 const CODE_SPLITTER_LINES: usize = 40;
 const CODE_SPLITTER_OVERLAP_LINES: usize = 15;
@@ -81,15 +83,68 @@ fn chunk_document_with_sizes(
     }
 
     let doc_type = infer_doc_type(extension);
+    let is_structured = doc_type == "structured";
+    // Structured docs (XML/JSON/YAML): larger parent windows so related fields stay mergeable.
+    let parent_target = if is_structured {
+        PARENT_WINDOW
+    } else {
+        child_target * 2
+    };
+    // Allow whole structured sections up to the element cap (avoids mid-block cuts).
+    let section_keep_budget = if is_structured {
+        STRUCTURED_ELEMENT_CAP.min(parent_target.max(child_target))
+    } else {
+        child_target
+    };
     let sections = annotate_section_offsets(&normalized, split_sections(&normalized, extension, file_name));
     let mut out = Vec::new();
     let mut index = 0i64;
 
     for section in sections {
-        let parent_blocks = split_parent_blocks(&section.body, child_target * 2);
+        let section_body = section.body.trim();
+        // Tree-first packing (Datapizza NodeSplitter idea): keep whole section if under budget.
+        if !section_body.is_empty() && section_body.chars().count() <= section_keep_budget {
+            let chunk_text = normalize_chunk_text(section_body);
+            if chunk_text.len() >= 40 {
+                let abs_start = section.start_char;
+                let abs_end = section.start_char + section.body.chars().count();
+                let (title, section_path) =
+                    refine_section_labels(&section.title, &section.path, &chunk_text);
+                out.push(StructuredChunk {
+                    index,
+                    title,
+                    section_path,
+                    start_char: abs_start as i64,
+                    end_char: abs_end as i64,
+                    line_start: line_number_at(&normalized, abs_start),
+                    line_end: line_number_at(&normalized, abs_end),
+                    page_start: section.page_start,
+                    page_end: section.page_end,
+                    text: chunk_text.clone(),
+                    parent_text: chunk_text,
+                    doc_type: doc_type.clone(),
+                });
+                index += 1;
+            }
+            continue;
+        }
+
+        let parent_blocks = if is_structured {
+            split_parent_blocks_preserving_structure(&section.body, parent_target)
+        } else {
+            split_parent_blocks_preserving_tables(&section.body, parent_target)
+        };
         for parent in parent_blocks {
             let parent_text = normalize_chunk_text(&parent);
-            let child_slices = split_child_slices_with_offsets(&parent, child_target, child_overlap);
+            let child_slices = if is_structured {
+                split_child_slices_with_offsets_preserving_structure(
+                    &parent,
+                    child_target,
+                    child_overlap,
+                )
+            } else {
+                split_child_slices_with_offsets_preserving_tables(&parent, child_target, child_overlap)
+            };
             for (child, rel_start, rel_end) in child_slices {
                 let chunk_text = normalize_chunk_text(&child);
                 if chunk_text.len() < 40 {
@@ -225,22 +280,56 @@ fn parse_page_number(label: &str) -> Option<i32> {
         .filter(|value| *value > 0)
 }
 
+/// Advance `idx` forward to the next UTF-8 char boundary (or `text.len()`).
+fn ceil_char_boundary(text: &str, mut idx: usize) -> usize {
+    if idx >= text.len() {
+        return text.len();
+    }
+    while idx < text.len() && !text.is_char_boundary(idx) {
+        idx += 1;
+    }
+    idx
+}
+
+/// Move `idx` backward to the previous UTF-8 char boundary (or 0).
+fn floor_char_boundary(text: &str, mut idx: usize) -> usize {
+    if idx >= text.len() {
+        return text.len();
+    }
+    while idx > 0 && !text.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    idx
+}
+
+/// Byte offset of the char after the one that starts at `idx` (must be a boundary).
+fn advance_one_char(text: &str, idx: usize) -> usize {
+    let idx = floor_char_boundary(text, idx);
+    if idx >= text.len() {
+        return text.len();
+    }
+    idx + text[idx..].chars().next().map(|c| c.len_utf8()).unwrap_or(1)
+}
+
 fn annotate_section_offsets(full: &str, sections: Vec<Section>) -> Vec<AnnotatedSection> {
     let mut cursor = 0usize;
     sections
         .into_iter()
         .map(|section| {
+            cursor = ceil_char_boundary(full, cursor);
             let needle: String = section.body.chars().take(120).collect();
             let start = if needle.is_empty() {
                 cursor
-            } else if let Some(pos) = full[cursor..].find(&needle) {
+            } else if let Some(pos) = full.get(cursor..).and_then(|tail| tail.find(&needle)) {
                 cursor + pos
             } else if let Some(pos) = full.find(&needle) {
                 pos
             } else {
                 cursor
             };
-            cursor = start.saturating_add(1);
+            let start = floor_char_boundary(full, start);
+            // Advance by a full Unicode scalar — `start + 1` can land inside '•' / emoji.
+            cursor = advance_one_char(full, start);
             let page_start = parse_page_number(&section.path)
                 .or_else(|| parse_page_number(&section.title));
             AnnotatedSection {
@@ -729,6 +818,35 @@ pub fn truncate_title(title: &str) -> String {
 }
 
 fn split_xml_sections(text: &str) -> Vec<Section> {
+    // Prefer generic root-child element splits (works for any XML schema).
+    let child_spans = find_xml_direct_child_spans(text);
+    if child_spans.len() >= 2 {
+        let mut sections = Vec::new();
+        for (start, end) in child_spans {
+            if end <= start
+                || end > text.len()
+                || !text.is_char_boundary(start)
+                || !text.is_char_boundary(end)
+            {
+                continue;
+            }
+            let body = text[start..end].trim().to_string();
+            if body.len() < 40 {
+                continue;
+            }
+            let title = xml_section_title(&body);
+            sections.push(Section {
+                title: title.clone(),
+                path: format!("XML > {title}"),
+                body,
+            });
+        }
+        if sections.len() >= 2 {
+            return sections;
+        }
+    }
+
+    // Fallback: common structural start-tag markers (generic names).
     let markers = [
         "<Rule ",
         "<Rule>",
@@ -737,8 +855,14 @@ fn split_xml_sections(text: &str) -> Vec<Section> {
         "<EventGroup",
         "<Event ",
         "<event ",
+        "<Item ",
+        "<Item>",
+        "<Entry ",
+        "<Entry>",
         "<pattern",
         "<Pattern",
+        "<section",
+        "<Section",
     ];
     let mut split_at: Vec<usize> = vec![0];
     let lower = text.to_lowercase();
@@ -1095,6 +1219,410 @@ fn split_parent_blocks(text: &str, target: usize) -> Vec<String> {
     blocks
 }
 
+fn is_markdown_table_line(line: &str) -> bool {
+    let t = line.trim();
+    t.starts_with('|') && t.contains('|')
+}
+
+/// Split on blank lines but keep contiguous markdown table rows as one unit.
+fn split_parent_blocks_preserving_tables(text: &str, target: usize) -> Vec<String> {
+    let units = extract_table_aware_units(text);
+    if units.is_empty() {
+        return split_parent_blocks(text, target);
+    }
+    let mut blocks = Vec::new();
+    let mut current = String::new();
+    for unit in units {
+        let unit_len = unit.chars().count();
+        // Oversized table kept intact (prefer not splitting mid-table).
+        if is_markdown_table_block(&unit) && unit_len > target {
+            if !current.trim().is_empty() {
+                blocks.push(current.trim().to_string());
+                current.clear();
+            }
+            blocks.push(unit.trim().to_string());
+            continue;
+        }
+        if current.chars().count() + unit_len + 2 > target && !current.is_empty() {
+            blocks.push(current.trim().to_string());
+            current.clear();
+        }
+        if !current.is_empty() {
+            current.push_str("\n\n");
+        }
+        current.push_str(&unit);
+    }
+    if !current.trim().is_empty() {
+        blocks.push(current.trim().to_string());
+    }
+    blocks
+}
+
+fn is_markdown_table_block(text: &str) -> bool {
+    let lines: Vec<&str> = text.lines().filter(|l| !l.trim().is_empty()).collect();
+    lines.len() >= 2 && lines.iter().filter(|l| is_markdown_table_line(l)).count() >= 2
+}
+
+fn extract_table_aware_units(text: &str) -> Vec<String> {
+    let mut units = Vec::new();
+    let mut buf = String::new();
+    let mut in_table = false;
+    for line in text.lines() {
+        let table_line = is_markdown_table_line(line);
+        if table_line {
+            if !in_table && !buf.trim().is_empty() {
+                units.push(buf.trim().to_string());
+                buf.clear();
+            }
+            in_table = true;
+            if !buf.is_empty() {
+                buf.push('\n');
+            }
+            buf.push_str(line);
+            continue;
+        }
+        if in_table {
+            units.push(buf.trim().to_string());
+            buf.clear();
+            in_table = false;
+        }
+        if line.trim().is_empty() {
+            if !buf.trim().is_empty() {
+                units.push(buf.trim().to_string());
+                buf.clear();
+            }
+        } else {
+            if !buf.is_empty() {
+                buf.push('\n');
+            }
+            buf.push_str(line);
+        }
+    }
+    if !buf.trim().is_empty() {
+        units.push(buf.trim().to_string());
+    }
+    units
+}
+
+fn split_child_slices_with_offsets_preserving_tables(
+    text: &str,
+    target: usize,
+    overlap: usize,
+) -> Vec<(String, usize, usize)> {
+    if is_markdown_table_block(text) && text.chars().count() <= target * 2 {
+        // Keep table as a single child when reasonably sized.
+        return vec![(text.to_string(), 0, text.len())];
+    }
+    split_child_slices_with_offsets(text, target, overlap)
+}
+
+fn looks_like_xml_block(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    trimmed.starts_with('<') && trimmed.contains('>')
+}
+
+/// Split parent blocks for structured docs: pack complete XML element units first.
+fn split_parent_blocks_preserving_structure(text: &str, target: usize) -> Vec<String> {
+    let units = extract_structure_aware_units(text);
+    if units.len() <= 1 {
+        return split_parent_blocks_preserving_tables(text, target);
+    }
+    let mut blocks = Vec::new();
+    let mut current = String::new();
+    for unit in units {
+        let unit_len = unit.chars().count();
+        if looks_like_xml_block(&unit) && unit_len > target && unit_len <= STRUCTURED_ELEMENT_CAP {
+            if !current.trim().is_empty() {
+                blocks.push(current.trim().to_string());
+                current.clear();
+            }
+            blocks.push(unit.trim().to_string());
+            continue;
+        }
+        if current.chars().count() + unit_len + 2 > target && !current.is_empty() {
+            blocks.push(current.trim().to_string());
+            current.clear();
+        }
+        if !current.is_empty() {
+            current.push_str("\n\n");
+        }
+        current.push_str(&unit);
+    }
+    if !current.trim().is_empty() {
+        blocks.push(current.trim().to_string());
+    }
+    if blocks.is_empty() {
+        split_parent_blocks_preserving_tables(text, target)
+    } else {
+        blocks
+    }
+}
+
+fn split_child_slices_with_offsets_preserving_structure(
+    text: &str,
+    target: usize,
+    overlap: usize,
+) -> Vec<(String, usize, usize)> {
+    let char_len = text.chars().count();
+    // Keep a complete structured/XML block intact when under the element cap.
+    if looks_like_xml_block(text) && char_len <= STRUCTURED_ELEMENT_CAP {
+        return vec![(text.to_string(), 0, text.len())];
+    }
+    let spans = find_xml_direct_child_spans(text);
+    if spans.len() >= 2 {
+        return pack_byte_spans_as_children(text, &spans, target);
+    }
+    split_child_slices_with_offsets_preserving_tables(text, target, overlap)
+}
+
+fn extract_structure_aware_units(text: &str) -> Vec<String> {
+    let spans = find_xml_direct_child_spans(text);
+    if spans.len() >= 2 {
+        return spans
+            .into_iter()
+            .filter_map(|(s, e)| {
+                if e > s && e <= text.len() && text.is_char_boundary(s) && text.is_char_boundary(e) {
+                    let body = text[s..e].trim();
+                    if body.is_empty() {
+                        None
+                    } else {
+                        Some(body.to_string())
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect();
+    }
+    extract_table_aware_units(text)
+}
+
+fn pack_byte_spans_as_children(
+    text: &str,
+    spans: &[(usize, usize)],
+    target: usize,
+) -> Vec<(String, usize, usize)> {
+    let mut out = Vec::new();
+    let mut pack_start = None::<usize>;
+    let mut pack_end = 0usize;
+    let mut pack_chars = 0usize;
+
+    let flush = |start: usize, end: usize, out: &mut Vec<(String, usize, usize)>| {
+        if end > start && text.is_char_boundary(start) && text.is_char_boundary(end) {
+            let slice = text[start..end].to_string();
+            if !slice.trim().is_empty() {
+                out.push((slice, start, end));
+            }
+        }
+    };
+
+    for &(s, e) in spans {
+        if e <= s || e > text.len() || !text.is_char_boundary(s) || !text.is_char_boundary(e) {
+            continue;
+        }
+        let unit_chars = text[s..e].chars().count();
+        if unit_chars > STRUCTURED_ELEMENT_CAP {
+            if let Some(ps) = pack_start.take() {
+                flush(ps, pack_end, &mut out);
+                pack_chars = 0;
+            }
+            // Oversized: fall back to normal child split inside the unit.
+            for (child, rel_s, rel_e) in split_child_slices_with_offsets(&text[s..e], target, CHILD_OVERLAP)
+            {
+                out.push((child, s + rel_s, s + rel_e));
+            }
+            continue;
+        }
+        if unit_chars > target {
+            if let Some(ps) = pack_start.take() {
+                flush(ps, pack_end, &mut out);
+                pack_chars = 0;
+            }
+            flush(s, e, &mut out);
+            continue;
+        }
+        if pack_start.is_some() && pack_chars + unit_chars > target {
+            if let Some(ps) = pack_start.take() {
+                flush(ps, pack_end, &mut out);
+            }
+            pack_chars = 0;
+        }
+        if pack_start.is_none() {
+            pack_start = Some(s);
+            pack_chars = 0;
+        }
+        pack_end = e;
+        pack_chars += unit_chars;
+    }
+    if let Some(ps) = pack_start {
+        flush(ps, pack_end, &mut out);
+    }
+    if out.is_empty() {
+        split_child_slices_with_offsets(text, target, CHILD_OVERLAP)
+    } else {
+        out
+    }
+}
+
+/// Byte spans of direct child elements under the first root element (generic XML).
+fn find_xml_direct_child_spans(text: &str) -> Vec<(usize, usize)> {
+    let bytes = text.as_bytes();
+    let mut i = 0usize;
+    // Skip leading whitespace / prolog / comments until first root start tag.
+    while i < bytes.len() {
+        if bytes[i] != b'<' {
+            i += 1;
+            continue;
+        }
+        if bytes.get(i + 1) == Some(&b'?') || bytes.get(i + 1) == Some(&b'!') {
+            i += 1;
+            while i < bytes.len() && bytes[i] != b'>' {
+                i += 1;
+            }
+            i = i.saturating_add(1);
+            continue;
+        }
+        break;
+    }
+    let Some((root_name, mut pos, root_self_closing)) = parse_xml_start_tag(bytes, i) else {
+        return Vec::new();
+    };
+    if root_self_closing {
+        return Vec::new();
+    }
+    let mut depth = 1i32;
+    let mut children = Vec::new();
+    let mut child_start = None::<usize>;
+
+    while pos < bytes.len() {
+        if bytes[pos] != b'<' {
+            pos += 1;
+            continue;
+        }
+        if bytes.get(pos + 1) == Some(&b'/') {
+            let close_at = pos;
+            let Some((name, next)) = parse_xml_end_tag(bytes, pos) else {
+                pos += 1;
+                continue;
+            };
+            depth -= 1;
+            if depth == 1 {
+                if let Some(start) = child_start.take() {
+                    children.push((start, next.min(bytes.len())));
+                }
+            } else if depth == 0 && name.eq_ignore_ascii_case(&root_name) {
+                break;
+            } else if depth == 0 {
+                // Unexpected close; stop.
+                let _ = close_at;
+                break;
+            }
+            pos = next;
+            continue;
+        }
+        if bytes.get(pos + 1) == Some(&b'!') || bytes.get(pos + 1) == Some(&b'?') {
+            pos += 1;
+            while pos < bytes.len() && bytes[pos] != b'>' {
+                pos += 1;
+            }
+            pos = pos.saturating_add(1);
+            continue;
+        }
+        let start = pos;
+        let Some((_name, next, self_closing)) = parse_xml_start_tag(bytes, pos) else {
+            pos += 1;
+            continue;
+        };
+        if depth == 1 {
+            child_start = Some(start);
+        }
+        if self_closing {
+            if depth == 1 {
+                if let Some(cs) = child_start.take() {
+                    children.push((cs, next.min(bytes.len())));
+                }
+            }
+        } else {
+            depth += 1;
+        }
+        pos = next;
+    }
+    children
+}
+
+fn parse_xml_start_tag(bytes: &[u8], at: usize) -> Option<(String, usize, bool)> {
+    if at >= bytes.len() || bytes[at] != b'<' || bytes.get(at + 1) == Some(&b'/') {
+        return None;
+    }
+    let mut i = at + 1;
+    let name_start = i;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c.is_ascii_alphanumeric() || c == b'_' || c == b':' || c == b'-' || c == b'.' {
+            i += 1;
+        } else {
+            break;
+        }
+    }
+    if i == name_start {
+        return None;
+    }
+    let name = String::from_utf8_lossy(&bytes[name_start..i]).to_string();
+    let mut in_quote: Option<u8> = None;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if let Some(q) = in_quote {
+            if c == q {
+                in_quote = None;
+            }
+            i += 1;
+            continue;
+        }
+        if c == b'"' || c == b'\'' {
+            in_quote = Some(c);
+            i += 1;
+            continue;
+        }
+        if c == b'/' && bytes.get(i + 1) == Some(&b'>') {
+            i += 2;
+            return Some((name, i, true));
+        }
+        if c == b'>' {
+            i += 1;
+            return Some((name, i, false));
+        }
+        i += 1;
+    }
+    None
+}
+
+fn parse_xml_end_tag(bytes: &[u8], at: usize) -> Option<(String, usize)> {
+    if at + 2 >= bytes.len() || bytes[at] != b'<' || bytes[at + 1] != b'/' {
+        return None;
+    }
+    let mut i = at + 2;
+    let name_start = i;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if c.is_ascii_alphanumeric() || c == b'_' || c == b':' || c == b'-' || c == b'.' {
+            i += 1;
+        } else {
+            break;
+        }
+    }
+    if i == name_start {
+        return None;
+    }
+    let name = String::from_utf8_lossy(&bytes[name_start..i]).to_string();
+    while i < bytes.len() && bytes[i] != b'>' {
+        i += 1;
+    }
+    if i < bytes.len() && bytes[i] == b'>' {
+        i += 1;
+    }
+    Some((name, i))
+}
+
 fn split_child_slices(text: &str, target: usize, overlap: usize) -> Vec<String> {
     let chars: Vec<char> = text.chars().collect();
     if chars.len() <= target {
@@ -1151,12 +1679,58 @@ mod tests {
         assert!(chunks.iter().any(|chunk| chunk.title.contains("Page") || chunk.title.contains("Termination")));
     }
 
+    /// Regression: advancing `start + 1` after a match can land inside a multi-byte char (e.g. '•').
+    #[test]
+    fn ocr_pages_with_bullet_chars_do_not_panic() {
+        let mut text = String::from(
+            "# OCR/text extract: Policies.pdf\n\nSource: D:\\Fortinet_SOC_Data\\Policies.pdf\nPages processed: 78 / 78\nOCR pages: 78\n\n## Page 1\n\n",
+        );
+        // Place a bullet so a naive byte+1 cursor would sit inside its UTF-8 sequence.
+        text.push_str("Policy item • must remain on a char boundary while section offsets are annotated.\n\n");
+        text.push_str("## Page 2\n\n");
+        text.push_str("More policy body with enough text to pass minimum chunk length requirements for indexing pipelines.\n\n");
+        text.push_str("## Page 3\n\n");
+        text.push_str("Third page content with enough text to pass minimum chunk length requirements for indexing pipelines.");
+        let chunks = chunk_document(&text, "md", Some("Policies-OCR.md"));
+        assert!(!chunks.is_empty());
+        assert!(chunks.iter().all(|c| c.start_char as usize <= text.len()));
+    }
+
     #[test]
     fn xml_splits_rule_blocks() {
         let xml = r#"<RuleGroup><Rule id="1" name="VPN Brute Force"><pattern>failed-login</pattern><description>Detect repeated VPN failures followed by success within 15 minutes for escalation to SOC tier 2.</description></Rule><Rule id="2" name="Data Exfil"><pattern>large upload</pattern><description>Detect unusual outbound transfer volume exceeding baseline thresholds for investigation.</description></Rule></RuleGroup>"#;
         let chunks = chunk_document(xml, "xml", Some("rules.xml"));
         assert!(chunks.len() >= 2);
         assert!(chunks.iter().any(|c| c.title.to_lowercase().contains("vpn")));
+    }
+
+    /// Related fields in one logical XML element must stay co-located (not split
+    /// across adjacent children under the structure-preserving budget).
+    #[test]
+    fn structured_xml_keeps_related_fields_together() {
+        let mut inner = String::from(
+            r#"<Block name="CorrelationExample"><Window seconds="900"/><Threshold count="5"/>"#,
+        );
+        // Pad so a naive 900-char child split would cut before JoinFields.
+        while inner.len() < 980 {
+            inner.push_str("<Note>padding for minimum structured chunk length requirements.</Note>");
+        }
+        inner.push_str(
+            r#"<JoinFields a="src" b="dest" c="user"/><Status>active</Status></Block>"#,
+        );
+        let xml = format!("<Root>{inner}</Root>");
+        let chunks = chunk_document(&xml, "xml", Some("policy.xml"));
+        assert!(!chunks.is_empty());
+        let co_located = chunks.iter().any(|c| {
+            let blob = format!("{} {}", c.text, c.parent_text);
+            blob.contains("seconds=\"900\"")
+                && blob.contains("count=\"5\"")
+                && blob.contains("JoinFields")
+        });
+        assert!(
+            co_located,
+            "expected window/threshold/join fields together in chunk or parent"
+        );
     }
 
     #[test]

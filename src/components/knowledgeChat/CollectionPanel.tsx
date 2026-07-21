@@ -26,6 +26,7 @@ import { useAppStore } from '../../store';
 import { embeddingModelPlaceholder, joinPath, pathPlaceholder } from '../../platformPaths';
 import type { KcCollection, KcCollectionHealth, KcFolderCategory, KcIndexProgress, KcIndexResult, KcPartitionMix } from '../../knowledgeChat/types';
 import { KC_STATUS_LABELS, QA_CORPUS_NAME } from '../../knowledgeChat/types';
+import { setCollectionImageRag } from '../../ocrImageRagConfig';
 
 const FOLDER_CATEGORY_LABELS: Record<KcFolderCategory, string> = {
   mixed: 'Mixed (code + documents)',
@@ -57,13 +58,30 @@ function fmtBytes(value?: number | null): string {
   return `${size.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
 
+function shortenWarning(text: string): string {
+  const trimmed = text.trim();
+  if (!trimmed) return trimmed;
+  const lower = trimmed.toLowerCase();
+  if (
+    lower.includes('outofdevicememory')
+    || lower.includes('cpu_repack')
+    || lower.includes('qwen3-embedding')
+    || lower.includes('embedding server exited')
+  ) {
+    return 'Dense/meaning search skipped: not enough RAM/VRAM for the selected embedding model. Set the document model to BGE-M3, then rebuild. Word search still works.';
+  }
+  // Keep path skips readable; truncate llama-server dumps.
+  if (trimmed.length > 320) return `${trimmed.slice(0, 300).trim()}…`;
+  return trimmed;
+}
+
 function formatIndexSummary(result: KcIndexResult): { notice: string; warnings: string[] } {
   const totalIndexed = result.total_indexed_files ?? 0;
   const totalFiles = result.total_files ?? 0;
-  const warnings = [...(result.warnings || [])];
+  const warnings = [...(result.warnings || [])].map(shortenWarning);
   for (const issue of result.file_issues || []) {
     const detail = issue.message?.trim() || issue.status;
-    warnings.push(`${issue.relative_path} — ${detail}`);
+    warnings.push(shortenWarning(`${issue.relative_path} — ${detail}`));
   }
 
   let notice: string;
@@ -74,9 +92,9 @@ function formatIndexSummary(result: KcIndexResult): { notice: string; warnings: 
   }
 
   if (result.dense_chunk_count > 0) {
-    notice += ' Semantic search is on.';
+    notice += ' Meaning search is on.';
   } else if (totalIndexed > 0 && warnings.length === 0) {
-    warnings.push('Semantic search is off — keyword search still works. Choose embedding models above and click Rebuild.');
+    warnings.push('Meaning search is off — word search still works. Choose search models above and click Rebuild.');
   }
 
   return { notice, warnings };
@@ -88,6 +106,25 @@ function filesStatLabel(collection: KcCollection): string {
   if (total <= 0) return '0';
   if (indexed === total) return `${indexed} indexed`;
   return `${indexed} of ${total} indexed`;
+}
+
+function formatElapsed(ms?: number | null): string {
+  if (!ms || ms < 0) return '';
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function phaseLabel(phase: string): string {
+  if (phase === 'prepare') return 'Preparing';
+  if (phase === 'extract' || phase === 'write') return phase === 'write' ? 'Writing index' : 'Extracting / OCR';
+  if (phase.startsWith('dense_')) return `Embedding (${phase.replace('dense_', '')})`;
+  if (phase === 'complete') return 'Finished';
+  return phase;
 }
 
 export default function CollectionPanel() {
@@ -139,13 +176,16 @@ export default function CollectionPanel() {
       try {
         const health = await kcCollectionHealth(activeCollectionId);
         if (cancelled) return;
+        // #region agent log
+        fetch('http://127.0.0.1:7414/ingest/28bf2132-0f52-40ef-96b9-4e681c1d7653',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d5a77'},body:JSON.stringify({sessionId:'7d5a77',runId:'failmode-scan-1',hypothesisId:'C',location:'CollectionPanel.tsx:health',message:'fe_collection_health',data:{collectionId:activeCollectionId,chunkCount:health.chunk_count,denseChunkCount:health.dense_chunk_count,denseCoveragePct:health.dense_coverage_pct,ftsPopulated:health.fts_populated,hnswReady:health.hnsw_ready,failedFiles:health.failed_files,pdfOcrAvailable:health.pdf_ocr_available,imageRagConfigured:health.image_rag_configured},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         setCollectionHealth(health);
         const warnings: string[] = [];
         if (health.code_entity_rebuild_required) {
-          warnings.push('Rebuild required for code entity index — click Rebuild to parse functions and methods with Tree-sitter.');
+          warnings.push('Rebuild needed so code functions and methods are listed correctly.');
         }
         if (health.dual_model_reindex_recommended) {
-          warnings.push('This collection uses one embedding model for code and documents — rebuild with separate code and knowledge models for best accuracy.');
+          warnings.push('This collection uses one search model for code and documents — rebuild with separate code and document models for better results.');
         }
         if (health.failed_files > 0) {
           warnings.push(`${health.failed_files} file(s) failed indexing.`);
@@ -223,7 +263,7 @@ export default function CollectionPanel() {
             );
             setEmbeddingModelPath(deploymentConfig?.embeddingModelPath || '');
             setEmbeddingSetupHint(
-              `No code embedding model found. Download Qwen3-Embedding-8B-Q4_K_M.gguf from Hugging Face (Qwen/Qwen3-Embedding-8B-GGUF) and place it at ${hintPath}, or click Browse. Lexical indexing still works without it.`,
+              `No code search model found. Place Qwen3-Embedding-8B-Q4_K_M.gguf at ${hintPath}, or click Browse. Word search still works without it.`,
             );
           }
         }
@@ -236,10 +276,48 @@ export default function CollectionPanel() {
 
   useEffect(() => {
     const unlisten = listen<KcIndexProgress>('kc-index-progress', (event) => {
-      setIndexProgress(event.payload);
+      const payload = event.payload;
+      if (activeCollectionId && payload.collection_id && payload.collection_id !== activeCollectionId) {
+        return;
+      }
+      setIndexProgress(payload);
+      // #region agent log
+      fetch('http://127.0.0.1:7414/ingest/28bf2132-0f52-40ef-96b9-4e681c1d7653',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d5a77'},body:JSON.stringify({sessionId:'7d5a77',runId:'index-progress-1',hypothesisId:'P1',location:'CollectionPanel.tsx:progress',message:'kc_index_progress_event',data:{collectionId:payload.collection_id,phase:payload.phase,current:payload.current,total:payload.total,detail:payload.detail||null,fileName:payload.file_name||null,filesDone:payload.files_done??null,filesFailed:payload.files_failed??null,elapsedMs:payload.elapsed_ms??null,state:payload.state||null},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
     });
     return () => { unlisten.then(fn => fn()); };
-  }, [setIndexProgress]);
+  }, [activeCollectionId, setIndexProgress]);
+
+  // While indexing, refresh collection stats so the UI reflects DB progress even if an event is missed.
+  useEffect(() => {
+    const indexing = busy === 'index' || activeCollection?.status === 'indexing';
+    if (!indexing || !activeCollectionId) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const refreshed = await kcListCollections();
+        if (cancelled) return;
+        setCollections(refreshed);
+        const current = refreshed.find(item => item.id === activeCollectionId);
+        if (current && (current.status === 'ready' || current.status === 'failed') && busy === 'index') {
+          // Backend finished (or failed) while the invoke may still be unwinding.
+          setNotice(
+            current.status === 'ready'
+              ? 'Index finished — refreshing…'
+              : `Indexing failed${current.last_error ? `: ${current.last_error}` : '.'}`,
+          );
+        }
+      } catch {
+        // ignore poll errors
+      }
+    };
+    void tick();
+    const id = window.setInterval(() => { void tick(); }, 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [busy, activeCollection?.status, activeCollectionId, setCollections, setNotice]);
 
   const previewPartitions = async (rawPath: string) => {
     const path = rawPath.trim();
@@ -297,7 +375,7 @@ export default function CollectionPanel() {
     setEmbeddingSetupHint(null);
     try {
       const raw = embeddingModelPath.trim();
-      if (!raw) throw new Error('Enter an embedding model .gguf path first.');
+      if (!raw) throw new Error('Enter a search model .gguf path first.');
       const resolved = await kcResolveEmbeddingModel(raw);
       const validation = await kcValidateEmbeddingModel(resolved);
       await kcSetDefaultEmbeddingModel(validation.model_path);
@@ -378,27 +456,60 @@ export default function CollectionPanel() {
     if (!activeCollection) return;
     setBusy('index');
     setError(null);
-    setIndexProgress(null);
+    setIndexProgress({
+      collection_id: activeCollection.id,
+      phase: 'prepare',
+      current: 0,
+      total: activeCollection.file_count || 0,
+      message: rebuild ? 'Starting full rebuild…' : 'Starting index…',
+      detail: 'prepare',
+      state: 'running',
+      elapsed_ms: 0,
+      files_done: 0,
+      files_failed: 0,
+    });
     try {
       const result = await kcIndexCollection(activeCollection.id, {
         rebuild,
         build_dense: true,
         incremental: incrementalIndex && !rebuild,
         embedding_model_path: embeddingModelPath.trim() || undefined,
+        // Documents/runbooks must use a compact model (BGE-M3). Qwen3-8B OOMs here.
+        knowledge_model_path: knowledgeModelPath.trim() || undefined,
       });
       const refreshed = await kcListCollections();
       setCollections(refreshed);
       const { notice: indexNotice, warnings } = formatIndexSummary(result);
       setNotice(indexNotice);
       setCollectionWarnings(warnings);
+      setIndexProgress({
+        collection_id: activeCollection.id,
+        phase: 'complete',
+        current: result.total_files,
+        total: result.total_files,
+        message: indexNotice,
+        detail: 'complete',
+        state: result.status === 'failed' ? 'failed' : 'finished',
+        files_done: result.total_indexed_files,
+        files_failed: result.failed_files,
+      });
       if (warnings.length > 0) {
         setError(null);
       }
     } catch (err) {
-      setError(humanError(err));
+      const message = humanError(err);
+      setError(message);
+      setIndexProgress({
+        collection_id: activeCollection.id,
+        phase: 'complete',
+        current: 0,
+        total: activeCollection.file_count || 0,
+        message,
+        detail: 'failed',
+        state: 'failed',
+      });
     } finally {
       setBusy(null);
-      setIndexProgress(null);
     }
   };
 
@@ -421,10 +532,11 @@ export default function CollectionPanel() {
     <section className="panel-shell p-4 sm:p-6 space-y-5 relative z-20">      <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-surface-500">Folder Collections</p>
-          <h2 className="text-xl font-black text-surface-950 dark:text-white">Index a Folder</h2>
+          <h2 className="text-xl font-black text-surface-950 dark:text-white">Prepare a folder</h2>
           <p className="mt-1 text-xs text-surface-500 dark:text-surface-400">
-            Scan any local folder and build a searchable index for grounded chat.
-          </p>        </div>
+            Scan a local folder so Knowledge Chat can search it and cite answers.
+          </p>
+        </div>
         <Database className="w-5 h-5 text-sky-500 shrink-0" />
       </div>
 
@@ -440,24 +552,26 @@ export default function CollectionPanel() {
               <option key={value} value={value}>{FOLDER_CATEGORY_LABELS[value]}</option>
             ))}
           </select>
-          <p className="text-[11px] text-surface-500">Sets the default search scope and which models are preferred per partition.</p>
+          <p className="text-[11px] text-surface-500">Chooses the default file types to search and which search models to prefer.</p>
         </label>
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">
         <label className="block space-y-1">
-          <span className="text-xs font-bold uppercase tracking-[0.14em] text-surface-500">Code model — Qwen3-Embedding (.gguf)</span>
+          <span className="text-xs font-bold uppercase tracking-[0.14em] text-surface-500">Code search model (.gguf)</span>
           <div className="flex gap-2">
             <input value={embeddingModelPath} onChange={e => setEmbeddingModelPath(e.target.value)} className="input-field font-mono text-xs flex-1" placeholder={embeddingModelPlaceholder(deploymentConfig)} />
             <button type="button" onClick={chooseEmbeddingModel} className="btn-secondary shrink-0">Browse</button>
             <button type="button" onClick={validateEmbeddingModel} disabled={busy === 'validate'} className="btn-secondary shrink-0">
-              {busy === 'validate' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Validate'}
+              {busy === 'validate' ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Check'}
             </button>
           </div>
-          <p className="text-[11px] text-surface-500">Used to embed source code (rs, py, ts, …). Prefer Qwen3-Embedding-8B-Q4_K_M.gguf.</p>
+          <p className="text-[11px] text-surface-500">
+            Optional for code folders only. Heavy on RAM — skip for Fortinet/docs collections. Prefer document model (BGE-M3) below.
+          </p>
           {partitionMix && partitionMix.code_files > 0 && !embeddingModelPath.trim() && (
             <p className="text-[11px] text-amber-700 dark:text-amber-300">
-              {partitionMix.code_files} code file(s) detected but no code model selected — those will be lexical-only.
+              {partitionMix.code_files} code file(s) found but no code model selected — those use word search only.
             </p>
           )}
           {embeddingSetupHint && (
@@ -465,15 +579,17 @@ export default function CollectionPanel() {
           )}
         </label>
         <label className="block space-y-1">
-          <span className="text-xs font-bold uppercase tracking-[0.14em] text-surface-500">Knowledge model — BGE-M3 (.gguf)</span>
+          <span className="text-xs font-bold uppercase tracking-[0.14em] text-surface-500">Document search model (.gguf)</span>
           <div className="flex gap-2">
             <input value={knowledgeModelPath} onChange={e => setKnowledgeModelPath(e.target.value)} className="input-field font-mono text-xs flex-1" placeholder="bge-m3-Q4_K_M.gguf" />
             <button type="button" onClick={chooseKnowledgeModel} className="btn-secondary shrink-0">Browse</button>
           </div>
-          <p className="text-[11px] text-surface-500">Used for documentation, runbooks, logs, spreadsheets, PDFs, and general documents (four non-code partitions).</p>
+          <p className="text-[11px] text-surface-500">
+            Use BGE-M3 for PDFs/docs/runbooks. Do not use Qwen3-Embedding-8B here — it is too large for this PC and will fail with out-of-memory errors.
+          </p>
           {partitionMix && (partitionMix.documentation_files + partitionMix.runbooks_files + partitionMix.logs_data_files + partitionMix.general_files) > 0 && !knowledgeModelPath.trim() && (
             <p className="text-[11px] text-amber-700 dark:text-amber-300">
-              {partitionMix.documentation_files + partitionMix.runbooks_files + partitionMix.logs_data_files + partitionMix.general_files} non-code file(s) detected but no BGE-M3 model selected — dense search will be lexical-only for those.
+              {partitionMix.documentation_files + partitionMix.runbooks_files + partitionMix.logs_data_files + partitionMix.general_files} document file(s) found but no document model selected — pick BGE-M3 or meaning search stays off.
             </p>
           )}
         </label>
@@ -499,12 +615,12 @@ export default function CollectionPanel() {
         </div>
         {previewing && (
           <p className="text-[11px] text-sky-700 dark:text-sky-300 flex items-center gap-1.5">
-            <Loader2 className="w-3 h-3 animate-spin" /> Scanning folder for partition mix…
+            <Loader2 className="w-3 h-3 animate-spin" /> Checking folder contents…
           </p>
         )}
         {partitionMix && !previewing && (
           <p className="text-[11px] text-surface-500">
-            Detected{' '}
+            Found{' '}
             <span className="font-semibold text-surface-700 dark:text-surface-200">{partitionMix.code_files}</span> code,{' '}
             <span className="font-semibold text-surface-700 dark:text-surface-200">{partitionMix.documentation_files}</span> documentation,{' '}
             <span className="font-semibold text-surface-700 dark:text-surface-200">{partitionMix.runbooks_files}</span> runbooks,{' '}
@@ -534,7 +650,7 @@ export default function CollectionPanel() {
             <StatCard label="Status" value={KC_STATUS_LABELS[activeCollection.status]} />
             <StatCard label="Files" value={filesStatLabel(activeCollection)} />
             <StatCard
-              label="Code entities"
+              label="Code symbols"
               value={String(activeCollection.code_entity_count ?? collectionHealth?.code_entity_count ?? 0)}
             />
             <StatCard label="Sections" value={String(activeCollection.chunk_count)} />
@@ -543,7 +659,7 @@ export default function CollectionPanel() {
         )}
         {collectionHealth?.code_parse_summary && (
           <p className="text-[11px] text-surface-500">
-            Parse breakdown: {collectionHealth.code_parse_summary}
+            Code breakdown: {collectionHealth.code_parse_summary}
           </p>
         )}
 
@@ -555,15 +671,46 @@ export default function CollectionPanel() {
               onChange={e => setIncrementalIndex(e.target.checked)}
               className="rounded border-surface-300"
             />
-            Incremental index (skip unchanged files)
+            Only update changed files
           </label>
+          {activeCollection && (
+            <label className="inline-flex items-center gap-2 text-xs text-surface-600 dark:text-surface-300 mr-2 max-w-md">
+              <input
+                type="checkbox"
+                checked={Boolean(activeCollection.image_rag_opt_in && activeCollection.allow_cloud_media)}
+                onChange={async (e) => {
+                  const on = e.target.checked;
+                  if (on) {
+                    const ok = window.confirm(
+                      'Allow page images from this folder to be sent online?\n\n'
+                      + 'Only turn this on for non-sensitive files. Search still works offline when this is off.\n'
+                      + 'You also need the master switch and API details under Settings → Security.',
+                    );
+                    if (!ok) return;
+                  }
+                  try {
+                    await setCollectionImageRag(activeCollection.id, on, on);
+                    const items = await kcListCollections();
+                    setCollections(items);
+                    setNotice(on
+                      ? 'Online page images allowed for this folder (also turn on the master switch in Settings).'
+                      : 'Online page images turned off for this folder.');
+                  } catch (err) {
+                    setError(humanError(err));
+                  }
+                }}
+                className="rounded border-surface-300"
+              />
+              Allow online page images for this folder
+            </label>
+          )}
           <button type="button" onClick={scanCollection} disabled={!activeCollection || busy === 'scan'} className="btn-secondary flex items-center justify-center gap-2">
             {busy === 'scan' ? <Loader2 className="w-4 h-4 animate-spin" /> : <ScanSearch className="w-4 h-4" />}
-            Scan Folder
+            Scan folder
           </button>
           <button type="button" onClick={() => buildIndex(false)} disabled={!activeCollection || busy === 'index'} className="btn-primary flex items-center justify-center gap-2">
             {busy === 'index' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-            Build Index
+            Build index
           </button>
           <button type="button" onClick={() => buildIndex(true)} disabled={!activeCollection || busy === 'index'} className="btn-secondary flex items-center justify-center gap-2">
             <RefreshCw className="w-4 h-4" /> Rebuild
@@ -573,21 +720,73 @@ export default function CollectionPanel() {
           </button>
         </div>
 
-        {indexProgress && (
-          <div className="rounded-xl border border-sky-200/70 dark:border-sky-800 bg-sky-50/85 dark:bg-sky-950/25 px-4 py-3 text-sm text-sky-800 dark:text-sky-200">
-            <p className="font-semibold">{indexProgress.message}</p>
-            <p className="text-xs mt-1">
-              Phase: {indexProgress.phase}
-              {indexProgress.total > 0 ? ` • ${indexProgress.current}/${indexProgress.total}` : ''}
-              {indexProgress.file_name ? ` • ${indexProgress.file_name}` : ''}
-            </p>
+        {(busy === 'index' || activeCollection?.status === 'indexing' || indexProgress) && (
+          <div className="rounded-xl border border-sky-200/70 dark:border-sky-800 bg-sky-50/85 dark:bg-sky-950/25 px-4 py-3 text-sm text-sky-800 dark:text-sky-200 space-y-2">
+            <div className="flex items-start justify-between gap-3">
+              <p className="font-semibold">
+                {indexProgress?.message
+                  || (activeCollection?.status === 'indexing'
+                    ? 'Indexing is running (or was interrupted). Live progress appears after you restart the app with the latest build and start/resume indexing.'
+                    : 'Indexing…')}
+              </p>
+              {(busy === 'index' || indexProgress?.state === 'running') && (
+                <Loader2 className="w-4 h-4 animate-spin shrink-0 mt-0.5" />
+              )}
+            </div>
+            {indexProgress && (
+              <>
+                <div className="h-2 rounded-full bg-sky-100 dark:bg-sky-900/60 overflow-hidden">
+                  <div
+                    className="h-full bg-sky-500 transition-all duration-300"
+                    style={{
+                      width: `${indexProgress.total > 0
+                        ? Math.min(100, Math.round((indexProgress.current / indexProgress.total) * 100))
+                        : indexProgress.state === 'finished' ? 100 : 8}%`,
+                    }}
+                  />
+                </div>
+                <p className="text-xs">
+                  {phaseLabel(indexProgress.phase)}
+                  {indexProgress.total > 0
+                    ? ` • ${indexProgress.current}/${indexProgress.total} files (${Math.min(100, Math.round((indexProgress.current / indexProgress.total) * 100))}%)`
+                    : ''}
+                  {typeof indexProgress.files_failed === 'number' && indexProgress.files_failed > 0
+                    ? ` • ${indexProgress.files_failed} failed`
+                    : ''}
+                  {formatElapsed(indexProgress.elapsed_ms) ? ` • elapsed ${formatElapsed(indexProgress.elapsed_ms)}` : ''}
+                  {indexProgress.state ? ` • ${indexProgress.state}` : ''}
+                </p>
+                {indexProgress.file_name && (
+                  <p className="text-xs break-all opacity-90">
+                    Current file: {indexProgress.file_name}
+                    {indexProgress.detail && indexProgress.detail !== 'heartbeat'
+                      ? ` (${indexProgress.detail})`
+                      : ''}
+                  </p>
+                )}
+                {indexProgress.detail === 'heartbeat' && (
+                  <p className="text-xs opacity-80">
+                    Still alive — large scanned PDFs can sit on one file for several minutes during OCR.
+                  </p>
+                )}
+              </>
+            )}
+            {!indexProgress && activeCollection?.status === 'indexing' && (
+              <p className="text-xs opacity-90">
+                Collection status is still <strong>indexing</strong>
+                {activeCollection.file_count > 0
+                  ? ` (${activeCollection.indexed_file_count}/${activeCollection.file_count} files written so far)`
+                  : ''}
+                . If this has been unchanged for many hours, stop the app and rebuild with the progress fix, then run Rebuild (or Build index) again.
+              </p>
+            )}
           </div>
         )}
 
         {activeCollection?.status === 'ready' && collectionWarnings.length === 0 && (
           <div className="flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-300">
             <CheckCircle2 className="w-4 h-4" />
-            Ready for grounded chat.
+            Ready — you can ask questions about this folder.
           </div>
         )}
 

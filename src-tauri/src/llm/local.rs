@@ -38,7 +38,7 @@ impl LlamaCppBackend {
             model_loaded: Arc::new(Mutex::new(false)),
             loaded_model_path: Arc::new(Mutex::new(None)),
             loaded_runtime_signature: Arc::new(Mutex::new(None)),
-            // Use a free per-process port instead of a fixed port. This prevents NexusAI
+            // Use a free per-process port instead of a fixed port. This prevents PocketMind Hybrid AI
             // from accidentally talking to an old leftover llama-server.exe instance.
             port: Self::find_free_port().unwrap_or(18082),
         }
@@ -174,7 +174,7 @@ impl LlamaCppBackend {
             args.push(scale.to_string());
         }
 
-        // Do not force llama.cpp chat templates here. NexusAI builds prompts itself and
+        // Do not force llama.cpp chat templates here. PocketMind Hybrid AI builds prompts itself and
         // uses the /completion endpoint so the selected model always receives the
         // actual latest user instruction.
 
@@ -561,7 +561,7 @@ impl InferenceBackend for LlamaCppBackend {
         }
 
         Err(AppError::InferenceError(format!(
-            "NexusAI could not start the selected model after automatic GPU/CPU fallback. It tried full GPU offload first when Auto mode was enabled, then reduced GPU layers, then CPU fallback. The model may require more combined RAM/VRAM, a smaller quantization, or a matching llama.cpp runtime (CUDA/Vulkan on Windows/Linux or Metal on macOS). Details:\n{}",
+            "PocketMind Hybrid AI could not start the selected model after automatic GPU/CPU fallback. It tried full GPU offload first when Auto mode was enabled, then reduced GPU layers, then CPU fallback. The model may require more combined RAM/VRAM, a smaller quantization, or a matching llama.cpp runtime (CUDA/Vulkan on Windows/Linux or Metal on macOS). Details:\n{}",
             errors.join("\n")
         )))
     }
@@ -572,7 +572,7 @@ impl InferenceBackend for LlamaCppBackend {
             .build()
             .map_err(|e| AppError::InferenceError(format!("Failed to create generation client: {e}")))?;
 
-        let base_system = "You are NexusAI, a helpful offline desktop assistant. Answer the latest user message directly and stop. Do not invent follow-up questions, fake user messages, future prompts, quizzes, or examples the user did not ask for. Do not ask and answer your own questions. Ignore older chat history when it conflicts with the latest user request. Do not write documentation about Mistral, workflow engines, Kubernetes, or model cards unless the user specifically asks for that topic. Do not repeat words, phrases, paragraphs, or the user prompt. Use plain, clean Markdown for headings, lists, and code when helpful. Put headings, bullet points, numbered points, and fenced code blocks on separate lines. Use inline code for single keywords or short phrases such as `def`, `class`, `return`, `params`, `lambda functions`, file names, and variable names. Use fenced code blocks only for complete runnable multi-line code examples, not for single words, labels, or fragments. Never put `def`, `class`, `return`, `params`, or `lambda functions` in a fenced code block by themselves. Do not output LaTeX, TikZ, PGF, Asymptote, tabular, graph, or diagram source unless the user explicitly asks for that exact format. Never use placeholders like [object Object].";
+        let base_system = "You are PocketMind Hybrid AI, a helpful offline desktop assistant. Answer the latest user message directly and stop. Do not invent follow-up questions, fake user messages, future prompts, quizzes, or examples the user did not ask for. Do not ask and answer your own questions. Ignore older chat history when it conflicts with the latest user request. Do not write documentation about Mistral, workflow engines, Kubernetes, or model cards unless the user specifically asks for that topic. Do not repeat words, phrases, paragraphs, or the user prompt. Use plain, clean Markdown for headings, lists, and code when helpful. Put headings, bullet points, numbered points, and fenced code blocks on separate lines. Use inline code for single keywords or short phrases such as `def`, `class`, `return`, `params`, `lambda functions`, file names, and variable names. Use fenced code blocks only for complete runnable multi-line code examples, not for single words, labels, or fragments. Never put `def`, `class`, `return`, `params`, or `lambda functions` in a fenced code block by themselves. Do not output LaTeX, TikZ, PGF, Asymptote, tabular, graph, or diagram source unless the user explicitly asks for that exact format. Never use placeholders like [object Object].";
         let system = match &request.system_prompt {
             Some(sys) if !sys.trim().is_empty()
                 && (is_soc_system_prompt(sys) || is_knowledge_system_prompt(sys)) =>

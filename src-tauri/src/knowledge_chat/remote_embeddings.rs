@@ -142,6 +142,16 @@ fn normalize_dense_vector(values: Vec<f32>) -> Vec<f32> {
     values.into_iter().map(|v| (v as f64 / mag) as f32).collect()
 }
 
+/// Outcome of partition embedding: vectors plus optional quality guidance.
+#[derive(Debug, Clone)]
+pub struct EmbedPartitionOutcome {
+    pub vectors: Vec<Vec<f32>>,
+    /// True when organization remote embeddings produced the vectors.
+    pub used_organization: bool,
+    /// User-visible note when a local fallback was used (or recommended server model).
+    pub quality_note: Option<String>,
+}
+
 /// Embed a batch for one partition, preferring the organization server when it
 /// is configured for that partition and falls back to the local embed pool on
 /// any remote failure. This is the single routing point used by both indexing
@@ -154,11 +164,28 @@ pub async fn embed_partition_texts(
     context_size: u32,
     batch_size: u32,
     texts: Vec<String>,
-) -> AppResult<Vec<Vec<f32>>> {
+) -> AppResult<EmbedPartitionOutcome> {
+    let local_basename = std::path::Path::new(local_model_path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(local_model_path);
+    let recommended = match partition {
+        KcPartitionId::Code => {
+            "Recommended for server-class code search: Qwen3-Embedding-8B (when GPU/RAM allows)."
+        }
+        _ => "Recommended for server-class document search: BGE-M3 or an organization knowledge embedding endpoint.",
+    };
+
     if let Some(remote) = remote {
         if let Some(model_id) = remote.model_for(partition) {
             match embed_texts_remote(&remote.base_url, &remote.api_key, model_id, &texts).await {
-                Ok(vectors) if !vectors.is_empty() => return Ok(vectors),
+                Ok(vectors) if !vectors.is_empty() => {
+                    return Ok(EmbedPartitionOutcome {
+                        vectors,
+                        used_organization: true,
+                        quality_note: None,
+                    });
+                }
                 Ok(_) => {
                     log::warn!(
                         "Organization embeddings returned no vectors for the {} partition; falling back to local.",
@@ -172,6 +199,22 @@ pub async fn embed_partition_texts(
                     );
                 }
             }
+            let result = pool
+                .embed(KcEmbedTextsRequest {
+                    model_path: local_model_path.to_string(),
+                    texts,
+                    context_size: Some(context_size),
+                    batch_size: Some(batch_size),
+                })
+                .await?;
+            return Ok(EmbedPartitionOutcome {
+                vectors: result.vectors,
+                used_organization: false,
+                quality_note: Some(format!(
+                    "Using local {local_basename} fallback for {} partition (organization embeddings unavailable). {recommended}",
+                    partition.as_str()
+                )),
+            });
         }
     }
 
@@ -183,5 +226,9 @@ pub async fn embed_partition_texts(
             batch_size: Some(batch_size),
         })
         .await?;
-    Ok(result.vectors)
+    Ok(EmbedPartitionOutcome {
+        vectors: result.vectors,
+        used_organization: false,
+        quality_note: None,
+    })
 }

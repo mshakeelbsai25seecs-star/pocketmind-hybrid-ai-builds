@@ -125,5 +125,5 @@ echo "Version / backend probe:"
 "$DEST/llama-server" --help 2>&1 | rg -i "metal|gpu-layers|ngl" | head -20 || true
 
 echo
-echo "Done. Restart NexusAI → Runtime → Scan runtime."
+echo "Done. Restart PocketMind Hybrid AI → Runtime → Scan runtime."
 echo "Use Automatic Optimizer or Calculated Split; CPU Safe remains available."

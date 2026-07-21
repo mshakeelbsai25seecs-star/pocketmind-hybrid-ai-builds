@@ -1,0 +1,73 @@
+# Small-GPU overlay (< ~20 GiB VRAM). Always stack on top of docker-compose.gpu.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.gpu-small.yml up -d
+
+services:
+  llm:
+    command:
+      - -m
+      - ${LLM_MODEL_PATH:-/models/llm/Qwen2.5-7B-Instruct-Q4_K_M.gguf}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - -c
+      - ${CTX_SIZE:-4096}
+      - -ngl
+      - ${GPU_LAYERS:-35}
+      - -t
+      - ${THREADS:-8}
+
+  embed-code:
+    command:
+      - -m
+      - ${CODE_EMBED_MODEL_PATH:-/models/embeddings/Qwen3-Embedding-8B-Q4_K_M.gguf}
+      - --embeddings
+      - --pooling
+      - last
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8001"
+      - -c
+      - ${EMBED_CTX_SIZE:-4096}
+      - -ngl
+      - ${GPU_LAYERS:-35}
+      - -t
+      - ${THREADS:-8}
+
+  embed-knowledge:
+    command:
+      - -m
+      - ${KNOWLEDGE_EMBED_MODEL_PATH:-/models/embeddings/bge-m3-Q4_K_M.gguf}
+      - --embeddings
+      - --pooling
+      - mean
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8002"
+      - -c
+      - ${EMBED_CTX_SIZE:-4096}
+      - -ngl
+      - ${GPU_LAYERS:-35}
+      - -t
+      - ${THREADS:-8}
+
+  rerank:
+    command:
+      - -m
+      - ${RERANK_MODEL_PATH:-/models/rerankers/Qwen3-Reranker-4B-Q4_K_M.gguf}
+      - --reranking
+      - --pooling
+      - rank
+      - --embedding
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8003"
+      - -c
+      - ${EMBED_CTX_SIZE:-4096}
+      - -ngl
+      - ${GPU_LAYERS:-35}
+      - -t
+      - ${THREADS:-8}

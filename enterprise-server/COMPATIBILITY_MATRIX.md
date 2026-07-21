@@ -1,4 +1,4 @@
-# NexusAI Server Compatibility Matrix
+# PocketMind Hybrid AI Server Compatibility Matrix
 
 | Server environment | Recommended profile | Notes |
 |---|---|---|
@@ -15,14 +15,14 @@
 
 ## Compatibility principle
 
-NexusAI does not require a specific server engine. It requires an OpenAI-compatible API contract:
+PocketMind Hybrid AI does not require a specific server engine. It requires an OpenAI-compatible API contract:
 
 ```text
 GET  /v1/models
 POST /v1/chat/completions
 ```
 
-If the server satisfies this contract, NexusAI can use it through Organization Server Mode.
+If the server satisfies this contract, PocketMind Hybrid AI can use it through Organization Server Mode.
 
 ## Optional: Knowledge Chat embeddings contract
 
@@ -43,5 +43,5 @@ model and each embedding model typically run as separate processes/ports. See
 | Chat | `GET /v1/models`, `POST /v1/chat/completions` | Yes for Organization Server chat |
 | Knowledge Chat embeddings (remote) | `POST /v1/embeddings` (Nomic + BGE-M3) | Optional; falls back to local |
 
-If the embeddings contract is not available, NexusAI runs Knowledge Chat
+If the embeddings contract is not available, PocketMind Hybrid AI runs Knowledge Chat
 embeddings locally with no loss of accuracy.

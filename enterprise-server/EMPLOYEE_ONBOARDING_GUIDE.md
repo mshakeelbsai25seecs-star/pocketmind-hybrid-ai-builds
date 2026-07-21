@@ -1,12 +1,12 @@
-# NexusAI Employee Onboarding Guide
+# PocketMind Hybrid AI Employee Onboarding Guide
 
-## What NexusAI does
+## What PocketMind Hybrid AI does
 
-NexusAI lets staff use AI through a private company-approved workflow. In Organization Server Mode, the AI model runs on the company server, not on the employee laptop.
+PocketMind Hybrid AI lets staff use AI through a private company-approved workflow. In Organization Server Mode, the AI model runs on the company server, not on the employee laptop.
 
 ## How to use it
 
-1. Open NexusAI.
+1. Open PocketMind Hybrid AI.
 2. Go to **Organization Server**.
 3. Confirm the server is connected.
 4. Choose the approved company model.

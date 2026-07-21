@@ -51,6 +51,8 @@ export interface KcCollection {
   last_indexed_at?: number | null;
   folder_category: string;
   partition_config: KcPartitionConfig;
+  image_rag_opt_in?: boolean;
+  allow_cloud_media?: boolean;
 }
 
 export interface KcFileRecord {
@@ -131,6 +133,13 @@ export interface KcIndexProgress {
   total: number;
   file_name?: string | null;
   message: string;
+  detail?: string | null;
+  files_done?: number | null;
+  files_failed?: number | null;
+  updated_at_ms?: number | null;
+  elapsed_ms?: number | null;
+  /** running | finished | failed */
+  state?: string | null;
 }
 
 export interface KcFileIssue {
@@ -299,6 +308,7 @@ export interface KcSearchResult {
   symbol_entities?: KcSymbolEntity[];
   /** True when sibling child hits were collapsed into parent bodies. */
   parent_merge_applied?: boolean;
+  adjacent_expand_applied?: boolean;
   /** Filters auto-derived from the query when the client sent none. */
   auto_filters_applied?: KcSearchFilters | null;
   /** Per-component pipeline observability for this search. */
@@ -416,6 +426,8 @@ export interface KcIndexOptions {
   rebuild?: boolean;
   build_dense?: boolean;
   embedding_model_path?: string;
+  /** Compact document embedder (BGE-M3). Do not use Qwen3-8B here. */
+  knowledge_model_path?: string;
   incremental?: boolean;
 }
 
@@ -466,6 +478,7 @@ export interface KcEvalCaseResult {
   /** Fraction of expected_terms supported by retrieved hit text. */
   lexical_faithfulness?: number;
   mrr: number;
+  hybrid_log_rank?: number;
   top_file?: string | null;
   confidence: KcRetrievalConfidence;
   passed: boolean;
@@ -508,6 +521,9 @@ export interface KcCollectionHealth {
   onnx_reranker_configured: boolean;
   onnx_reranker_enabled: boolean;
   pdf_ocr_available: boolean;
+  ocr_engine_hint?: string;
+  image_rag_opt_in?: boolean;
+  image_rag_configured?: boolean;
   folder_category: string;
   partitions: KcPartitionHealth[];
   dual_model_reindex_recommended: boolean;
@@ -550,6 +566,7 @@ export interface KcEvalResult {
   average_context_precision_at_k?: number;
   average_lexical_faithfulness?: number;
   average_mrr: number;
+  average_hybrid_log_rank?: number;
   results: KcEvalCaseResult[];
 }
 
@@ -581,8 +598,8 @@ export interface KnowledgeChatMessageMeta {
 
 export const KC_DEFAULT_EMBEDDING_MODEL = '';
 
-export const QA_CORPUS_NAME = 'NexusAI QA Corpus';
-export const QA_CORPUS_RUNTIME_PATH = 'D:\\NexusAI\\qa-corpus';
+export const QA_CORPUS_NAME = 'PocketMind Hybrid AI QA Corpus';
+export const QA_CORPUS_RUNTIME_PATH = 'D:\\PocketMind\\qa-corpus';
 
 export interface KcQaCorpusBootstrapResult {
   collection_id: string;
@@ -597,24 +614,11 @@ export interface KcQaCorpusBootstrapResult {
   warnings: string[];
 }
 
-export const QA_SAMPLE_QUESTIONS = [
-  'What does handleSend do in ChatView.tsx?',
-  'What environment variable controls the API timeout?',
-  'What Rust function validates JWT tokens?',
-  'What are the three layers in the NexusAI architecture?',
-  'What is the first step for a VPN brute-force alert?',
-  'Who approves an emergency password reset?',
-  'What error appears in app-2026-06-26.log for user alice?',
-  'What does error code E-402 mean?',
-  'How long does new-hire onboarding take?',
-  'What industry does Acme Corp operate in?',
-];
-
 export const KC_RETRIEVAL_MODE_LABELS: Record<KcRetrievalMode, string> = {
-  keyword: 'Keyword',
-  hybrid_lexical: 'Hybrid lexical',
-  dense_vector: 'Dense vector',
-  hybrid_dense: 'Hybrid dense (recommended)',
+  keyword: 'Exact words',
+  hybrid_lexical: 'Words + smart match',
+  dense_vector: 'Meaning search',
+  hybrid_dense: 'Best match (recommended)',
 };
 
 export const KC_STATUS_LABELS: Record<KcCollectionStatus, string> = {

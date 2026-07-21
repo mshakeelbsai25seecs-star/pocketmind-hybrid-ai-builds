@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Offline SOC PDF OCR helper for Nexus AI.
+"""Offline PDF OCR helper for PocketMind Hybrid AI (SOC + Knowledge Chat).
 
 Requirements (minimum):
-  pip install pymupdf pillow winsdk
+  pip install pymupdf pillow
 
-Optional (often faster on some PDFs):
-  pip install pytesseract
+Optional:
+  pip install pytesseract opencv-python-headless docling
   Tesseract OCR on PATH (Windows: winget install UB-Mannheim.TesseractOCR)
+  winsdk (Windows OCR fallback)
 
 Usage:
-  python soc_pdf_ocr.py input.pdf [--output output.md] [--max-pages 78] [--dpi 180]
+  python soc_pdf_ocr.py input.pdf [--output out.md] [--engine auto|legacy|docling]
+                                  [--preprocess|--no-preprocess] [--dpi 300]
   python soc_pdf_ocr.py --repair-only Policies-OCR.md
 """
 
@@ -177,6 +179,13 @@ def repair_ocr_markdown(text: str) -> str:
     return strip_training_watermarks("\n".join(out))
 
 
+def light_sanitize_docling(text: str) -> str:
+    """Sanitize Docling markdown without aggressive word-merge (preserves tables)."""
+    cleaned = strip_training_watermarks(text.replace("\r", "\n"))
+    cleaned = re.sub(r"\n{4,}", "\n\n\n", cleaned)
+    return cleaned.strip()
+
+
 def configure_tesseract() -> bool:
     try:
         import pytesseract
@@ -196,13 +205,49 @@ def configure_tesseract() -> bool:
     return False
 
 
-def ocr_tesseract_from_pixmap(pix) -> str:
+def preprocess_pil_image(img):
+    """Optional OpenCV preprocess: grayscale, binarize, deskew, denoise."""
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        print("WARNING: OpenCV not installed; skipping preprocess", file=sys.stderr)
+        return img
+
+    arr = np.array(img.convert("RGB"))
+    gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
+    gray = cv2.fastNlMeansDenoising(gray, None, 10, 7, 21)
+    binary = cv2.adaptiveThreshold(
+        gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 11
+    )
+    # Deskew via minAreaRect on non-zero points
+    coords = np.column_stack(np.where(binary < 200))
+    if coords.size > 100:
+        rect = cv2.minAreaRect(coords.astype(np.float32))
+        angle = rect[-1]
+        if angle < -45:
+            angle = 90 + angle
+        if abs(angle) > 0.3 and abs(angle) < 15:
+            (h, w) = binary.shape[:2]
+            center = (w // 2, h // 2)
+            m = cv2.getRotationMatrix2D(center, angle, 1.0)
+            binary = cv2.warpAffine(
+                binary, m, (w, h), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE
+            )
+    from PIL import Image
+
+    return Image.fromarray(binary)
+
+
+def ocr_tesseract_from_pixmap(pix, do_preprocess: bool) -> str:
     import pytesseract
     from PIL import Image
 
     if not configure_tesseract():
         return ""
     img = Image.open(io.BytesIO(pix.tobytes("png")))
+    if do_preprocess:
+        img = preprocess_pil_image(img)
     return (pytesseract.image_to_string(img) or "").strip()
 
 
@@ -231,7 +276,7 @@ def ocr_windows_from_pixmap(pix) -> str:
         Path(temp_path).unlink(missing_ok=True)
 
 
-def page_text_or_ocr(page, dpi: int) -> str:
+def page_text_or_ocr(page, dpi: int, do_preprocess: bool) -> str:
     direct = (page.get_text("text") or "").strip()
     if meaningful(direct):
         return direct
@@ -244,20 +289,25 @@ def page_text_or_ocr(page, dpi: int) -> str:
 
     tesseract_text = ""
     try:
-        tesseract_text = ocr_tesseract_from_pixmap(pix)
+        tesseract_text = ocr_tesseract_from_pixmap(pix, do_preprocess)
     except Exception:
         tesseract_text = ""
     if meaningful(tesseract_text):
         return tesseract_text
 
-    windows_text = ocr_windows_from_pixmap(pix)
+    try:
+        windows_text = ocr_windows_from_pixmap(pix)
+    except Exception:
+        windows_text = ""
     if meaningful(windows_text):
         return windows_text
 
     return tesseract_text or windows_text or direct
 
 
-def ocr_pdf(pdf_path: Path, max_pages: int | None, dpi: int) -> tuple[str, int, int]:
+def ocr_pdf_legacy(
+    pdf_path: Path, max_pages: int | None, dpi: int, do_preprocess: bool
+) -> tuple[str, int, int]:
     import fitz
 
     doc = fitz.open(pdf_path)
@@ -272,7 +322,7 @@ def ocr_pdf(pdf_path: Path, max_pages: int | None, dpi: int) -> tuple[str, int, 
         if meaningful(direct):
             body = direct
         else:
-            body = page_text_or_ocr(page, dpi)
+            body = page_text_or_ocr(page, dpi, do_preprocess)
             ocr_pages += 1
         body = repair_page_body(body.strip())
         sections.append(f"## Page {index + 1}\n\n{body}\n")
@@ -283,6 +333,7 @@ def ocr_pdf(pdf_path: Path, max_pages: int | None, dpi: int) -> tuple[str, int, 
         f"# OCR/text extract: {pdf_path.name}",
         "",
         f"Source: {pdf_path}",
+        f"Engine: legacy",
         f"Pages processed: {limit} / {total}",
         f"OCR pages: {ocr_pages}",
         "",
@@ -290,17 +341,82 @@ def ocr_pdf(pdf_path: Path, max_pages: int | None, dpi: int) -> tuple[str, int, 
     return "\n".join(header + sections), limit, ocr_pages
 
 
+def docling_available() -> bool:
+    try:
+        import docling  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def ocr_pdf_docling(pdf_path: Path, max_pages: int | None) -> tuple[str, int, int]:
+    """Layout-aware Markdown via Docling; raises on failure for fallback."""
+    from docling.document_converter import DocumentConverter
+
+    converter = DocumentConverter()
+    result = converter.convert(str(pdf_path))
+    md = result.document.export_to_markdown()
+    if not md or sum(1 for c in md if c.isalpha()) < 80:
+        raise RuntimeError("Docling produced too little text")
+
+    # Best-effort page markers if Docling didn't emit them
+    if "## Page " not in md and "# Page " not in md:
+        pages = md.count("\n\n") + 1
+        wrapped = f"# OCR/text extract: {pdf_path.name}\n\nSource: {pdf_path}\nEngine: docling\n\n{md}\n"
+    else:
+        wrapped = (
+            f"# OCR/text extract: {pdf_path.name}\n\n"
+            f"Source: {pdf_path}\nEngine: docling\n\n{md}\n"
+        )
+    wrapped = light_sanitize_docling(wrapped)
+    # Approximate page count from markers or max_pages
+    page_hits = len(re.findall(r"^## Page \d+", wrapped, flags=re.M))
+    total = page_hits or (max_pages or 1)
+    return wrapped, total, total
+
+
+def resolve_engine(requested: str) -> str:
+    req = (requested or "auto").strip().lower()
+    if req == "legacy":
+        return "legacy"
+    if req == "docling":
+        if docling_available():
+            return "docling"
+        print("WARNING: Docling not importable; falling back to legacy", file=sys.stderr)
+        return "legacy"
+    # auto
+    if docling_available():
+        return "docling"
+    return "legacy"
+
+
 def repair_markdown_file(path: Path) -> str:
     text = path.read_text(encoding="utf-8")
+    if "Engine: docling" in text or "|" in text[:2000]:
+        return light_sanitize_docling(text)
     return repair_ocr_markdown(text)
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Extract/OCR a PDF for Nexus SOC knowledge indexing")
+    parser = argparse.ArgumentParser(
+        description="Extract/OCR a PDF for PocketMind Hybrid AI knowledge indexing"
+    )
     parser.add_argument("pdf", type=Path, nargs="?")
     parser.add_argument("--output", type=Path, default=None)
     parser.add_argument("--max-pages", type=int, default=None)
-    parser.add_argument("--dpi", type=int, default=180)
+    parser.add_argument("--dpi", type=int, default=300)
+    parser.add_argument(
+        "--engine",
+        choices=["auto", "legacy", "docling"],
+        default="auto",
+        help="OCR engine (auto tries Docling then legacy)",
+    )
+    parser.add_argument(
+        "--preprocess",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="OpenCV preprocess before Tesseract (legacy path)",
+    )
     parser.add_argument(
         "--repair-only",
         type=Path,
@@ -326,9 +442,35 @@ def main() -> int:
     if not args.pdf.exists():
         print(f"ERROR: PDF not found: {args.pdf}", file=sys.stderr)
         return 2
+    try:
+        if args.pdf.stat().st_size <= 0:
+            print("ERROR: PDF file is empty", file=sys.stderr)
+            return 2
+    except OSError as exc:
+        print(f"ERROR: Cannot read PDF: {exc}", file=sys.stderr)
+        return 2
+
+    dpi = args.dpi if isinstance(args.dpi, int) and 72 <= args.dpi <= 600 else 300
+    max_pages = args.max_pages
+    if max_pages is not None and (not isinstance(max_pages, int) or max_pages < 1):
+        max_pages = None
+
+    engine = resolve_engine(args.engine)
+    print(f"Using engine: {engine}", file=sys.stderr)
 
     try:
-        text, pages, ocr_pages = ocr_pdf(args.pdf, args.max_pages, args.dpi)
+        if engine == "docling":
+            try:
+                text, pages, ocr_pages = ocr_pdf_docling(args.pdf, max_pages)
+            except Exception as exc:  # noqa: BLE001
+                print(f"WARNING: Docling failed ({exc}); falling back to legacy", file=sys.stderr)
+                text, pages, ocr_pages = ocr_pdf_legacy(
+                    args.pdf, max_pages, dpi, args.preprocess
+                )
+        else:
+            text, pages, ocr_pages = ocr_pdf_legacy(
+                args.pdf, max_pages, dpi, args.preprocess
+            )
     except Exception as exc:  # noqa: BLE001
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
@@ -336,7 +478,10 @@ def main() -> int:
     text = strip_training_watermarks(text)
     alpha = sum(1 for c in text if c.isalpha())
     if alpha < 80:
-        print("ERROR: OCR produced very little text. Check PDF quality and OCR dependencies.", file=sys.stderr)
+        print(
+            "ERROR: OCR produced very little text. Check PDF quality and OCR dependencies.",
+            file=sys.stderr,
+        )
         return 1
 
     out = args.output
@@ -347,7 +492,10 @@ def main() -> int:
     else:
         print(text)
 
-    print(f"STATS:pages={pages};ocr_pages={ocr_pages};chars={len(text)};alpha={alpha}", file=sys.stderr)
+    print(
+        f"STATS:pages={pages};ocr_pages={ocr_pages};chars={len(text)};alpha={alpha};engine={engine}",
+        file=sys.stderr,
+    )
     return 0
 
 

@@ -120,6 +120,12 @@ pub struct KcCollection {
     pub folder_category: String,
     /// Parsed per-partition embedding configuration.
     pub partition_config: KcPartitionConfig,
+    /// When true with allow_cloud_media + global image_rag.enabled, may send page crops online.
+    #[serde(default)]
+    pub image_rag_opt_in: bool,
+    /// Explicit confirmation that media may leave the device for this collection.
+    #[serde(default)]
+    pub allow_cloud_media: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -220,6 +226,20 @@ pub struct KcIndexProgress {
     pub total: usize,
     pub file_name: Option<String>,
     pub message: String,
+    /// Optional detail such as `extracting`, `ocr`, `writing`, `dense`, `heartbeat`.
+    #[serde(default)]
+    pub detail: Option<String>,
+    #[serde(default)]
+    pub files_done: Option<usize>,
+    #[serde(default)]
+    pub files_failed: Option<usize>,
+    #[serde(default)]
+    pub updated_at_ms: Option<i64>,
+    #[serde(default)]
+    pub elapsed_ms: Option<i64>,
+    /// `running` | `finished` | `failed`
+    #[serde(default)]
+    pub state: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -384,6 +404,9 @@ pub struct KcSearchResult {
     /// True when sibling child hits were collapsed into parent bodies.
     #[serde(default)]
     pub parent_merge_applied: bool,
+    /// True when same-file `chunk_index ± 1` neighbors were injected into hits.
+    #[serde(default)]
+    pub adjacent_expand_applied: bool,
     /// Filters auto-derived from the query when the client sent none.
     #[serde(default)]
     pub auto_filters_applied: Option<KcSearchFilters>,
@@ -526,6 +549,10 @@ pub struct KcCreateCollectionRequest {
     /// Embedding model for the knowledge partition (defaults to discovered BGE-M3).
     #[serde(default)]
     pub knowledge_model_path: Option<String>,
+    #[serde(default)]
+    pub image_rag_opt_in: Option<bool>,
+    #[serde(default)]
+    pub allow_cloud_media: Option<bool>,
 }
 
 /// Result of a lightweight pre-create scan that estimates partition mix.
@@ -569,6 +596,9 @@ pub struct KcIndexOptions {
     pub rebuild: Option<bool>,
     pub build_dense: Option<bool>,
     pub embedding_model_path: Option<String>,
+    /// Optional BGE-M3 (or compact) model for documentation/runbooks/logs/general.
+    #[serde(default)]
+    pub knowledge_model_path: Option<String>,
     pub incremental: Option<bool>,
 }
 
@@ -618,6 +648,13 @@ pub struct KcCollectionHealth {
     pub onnx_reranker_configured: bool,
     pub onnx_reranker_enabled: bool,
     pub pdf_ocr_available: bool,
+    /// Hint from OCR settings: auto→docling, legacy, etc.
+    #[serde(default)]
+    pub ocr_engine_hint: String,
+    #[serde(default)]
+    pub image_rag_opt_in: bool,
+    #[serde(default)]
+    pub image_rag_configured: bool,
     pub folder_category: String,
     pub partitions: Vec<KcPartitionHealth>,
     /// True when a collection still relies on a single legacy model for both
@@ -684,6 +721,9 @@ pub struct KcEvalCaseResult {
     #[serde(default)]
     pub lexical_faithfulness: f64,
     pub mrr: f64,
+    /// Datapizza-style hybrid log-rank over relevant file hits (∑ 1/log2(rank+1)).
+    #[serde(default)]
+    pub hybrid_log_rank: f64,
     pub top_file: Option<String>,
     pub confidence: KcRetrievalConfidence,
     pub passed: bool,
@@ -703,5 +743,7 @@ pub struct KcEvalResult {
     #[serde(default)]
     pub average_lexical_faithfulness: f64,
     pub average_mrr: f64,
+    #[serde(default)]
+    pub average_hybrid_log_rank: f64,
     pub results: Vec<KcEvalCaseResult>,
 }

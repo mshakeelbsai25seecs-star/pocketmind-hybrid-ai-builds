@@ -13,4 +13,4 @@ docker compose --env-file .env up -d
 
 ## Note
 
-TGI compatibility with OpenAI-style endpoints can vary by version and gateway configuration. If NexusAI cannot list models directly, put TGI behind an OpenAI-compatible gateway or use vLLM/Ollama for the first pilot.
+TGI compatibility with OpenAI-style endpoints can vary by version and gateway configuration. If PocketMind Hybrid AI cannot list models directly, put TGI behind an OpenAI-compatible gateway or use vLLM/Ollama for the first pilot.

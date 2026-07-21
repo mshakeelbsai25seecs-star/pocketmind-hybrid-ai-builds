@@ -58,6 +58,37 @@ pub fn scope_eval_cases() -> Vec<KcEvalCase> {
 /// Generic folder-quality checks (work on any indexed company pack).
 pub fn generic_eval_cases() -> Vec<KcEvalCase> {
     vec![
+        // PDF/table/figure quality probes (term-focused; file names vary by corpus).
+        case(
+            "pdf-table-row-value",
+            "What is the value in the rate table for the first row?",
+            &[],
+            &["table", "rate", "value"],
+        ),
+        case(
+            "pdf-scanned-policy",
+            "What does the scanned PDF policy say about access control?",
+            &[],
+            &["access", "policy", "control"],
+        ),
+        case(
+            "docx-table-lookup",
+            "Find the value listed in the document table for SLA or severity.",
+            &[],
+            &["sla", "severity", "table"],
+        ),
+        case(
+            "spreadsheet-cell-lookup",
+            "What values appear in the spreadsheet table columns?",
+            &[],
+            &["table", "sheet", "value"],
+        ),
+        case(
+            "figure-caption-search",
+            "Describe the figure or chart related to the architecture diagram.",
+            &[],
+            &["figure", "diagram", "architecture"],
+        ),
         case(
             "generic-overview",
             "Summarize the main topics covered in this folder.",
@@ -93,6 +124,13 @@ pub fn generic_eval_cases() -> Vec<KcEvalCase> {
             "How are FortiGate logs parsed and normalized?",
             &["rules.xml", "analyzer.py"],
             &["fortigate", "parser", "field"],
+        ),
+        // Generic structured-doc retrieval: related fields must surface from XML/rules.
+        case(
+            "testpack-structured-correlation-fields",
+            "What window and threshold fields are defined in the correlation rule XML?",
+            &["rules.xml"],
+            &["window", "threshold", "rule"],
         ),
         case(
             "meta-pollution-guard",

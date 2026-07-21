@@ -1,6 +1,6 @@
 # Build all platform packages
 
-NexusAI uses **per-OS builds**. You cannot produce a signed macOS `.app` from Windows alone. Plan CI or manual builds on each target OS.
+PocketMind Hybrid AI uses **per-OS builds**. You cannot produce a signed macOS `.app` from Windows alone. Plan CI or manual builds on each target OS.
 
 ## Prerequisites (all platforms)
 
@@ -52,10 +52,10 @@ Follow repo root `RELEASE_CHECKLIST.md` on each platform before zipping.
 
 ## Zip naming convention
 
-- `NexusAI-Windows-Desktop-v0.1.0.zip`
-- `NexusAI-Windows-Server-v0.1.0.zip`
-- `NexusAI-macOS-Desktop-v0.1.0.zip`
-- `NexusAI-Linux-Desktop-v0.1.0.zip`
+- `PocketMind Hybrid AI-Windows-Desktop-v0.1.0.zip`
+- `PocketMind Hybrid AI-Windows-Server-v0.1.0.zip`
+- `PocketMind Hybrid AI-macOS-Desktop-v0.1.0.zip`
+- `PocketMind Hybrid AI-Linux-Desktop-v0.1.0.zip`
 - etc.
 
 Include `shared/docs/QUICK_START.md` and `shared/company-data-template/` in enterprise handoffs.

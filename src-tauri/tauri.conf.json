@@ -1,4 +1,8 @@
 {
+  "package": {
+    "productName": "PocketMind Hybrid AI",
+    "version": "0.1.0"
+  },
   "build": {
     "beforeDevCommand": "npm run dev",
     "beforeBuildCommand": "npm run build",
@@ -46,7 +50,7 @@
     "bundle": {
       "active": true,
       "category": "Productivity",
-      "copyright": "NexusAI",
+      "copyright": "PocketMind Hybrid AI",
       "identifier": "com.nexusai.app",
       "icon": [
         "icons/32x32.png",
@@ -81,7 +85,7 @@
         "maximized": true,
         "height": 920,
         "resizable": true,
-        "title": "NexusAI",
+        "title": "PocketMind Hybrid AI",
         "width": 1440,
         "minWidth": 980,
         "minHeight": 680,

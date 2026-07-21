@@ -35,7 +35,7 @@ pub fn qa_corpus_standard_cases() -> Vec<KcEvalCase> {
         ),
         qa_case(
             "qa-architecture-layers",
-            "What are the three layers in the NexusAI architecture?",
+            "What are the three layers in the PocketMind Hybrid AI architecture?",
             &["architecture.md"],
             &["Presentation", "Orchestration", "Inference"],
         ),

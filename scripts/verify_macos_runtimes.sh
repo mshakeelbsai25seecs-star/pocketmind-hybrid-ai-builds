@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# Verify NexusAI macOS llama.cpp runtime layout for universal (arm64 + x64) support.
+# Verify PocketMind Hybrid AI macOS llama.cpp runtime layout for universal (arm64 + x64) support.
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -d "${SCRIPT_DIR}/bin/llama.cpp" || -d "${SCRIPT_DIR}/bin" ]] || compgen -G "${SCRIPT_DIR}/*.app" >/dev/null 2>&1; then
+  PROJECT_DIR="${SCRIPT_DIR}"
+else
+  PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+fi
 BASE_DIR="$PROJECT_DIR/bin/llama.cpp"
 HOST_ARCH="$(uname -m)"
 FAIL=0
@@ -123,5 +128,5 @@ fi
 
 echo
 echo "Verification PASSED for universal runtime layout."
-echo "NexusAI will auto-select the native arch folder and ignore the other arch."
+echo "PocketMind Hybrid AI will auto-select the native arch folder and ignore the other arch."
 exit 0

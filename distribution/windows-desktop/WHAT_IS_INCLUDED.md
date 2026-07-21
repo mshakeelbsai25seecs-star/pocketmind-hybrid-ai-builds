@@ -4,7 +4,7 @@ After running `scripts/stage-release.ps1`, `payload/` should contain:
 
 ```text
 payload/
-├── NexusAI.exe              # Main application (name may match tauri bundle)
+├── PocketMind Hybrid AI.exe              # Main application (name may match tauri bundle)
 ├── WebView2 / MSVC deps     # Bundled by Tauri NSIS/portable target
 ├── bin/
 │   └── llama.cpp/

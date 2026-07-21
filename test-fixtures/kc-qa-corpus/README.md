@@ -1,6 +1,6 @@
-# NexusAI Knowledge Chat QA Corpus
+# PocketMind Hybrid AI Knowledge Chat QA Corpus
 
-This folder is copied to `D:\NexusAI\qa-corpus` on app startup and indexed automatically.
+This folder is copied to `D:\PocketMind\qa-corpus` on app startup and indexed automatically.
 
 See `TEST_QUESTIONS.md` for suggested validation questions.
 

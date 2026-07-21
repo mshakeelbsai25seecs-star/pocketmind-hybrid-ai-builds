@@ -114,7 +114,7 @@ fn process_one(path: &Path, per_file_limit: usize) -> AppResult<AttachmentContex
             ("image".to_string(), image_summary(path)?)
         }
         _ => {
-            warnings.push(format!("Unsupported or unknown extension '.{}'. NexusAI included basic metadata only.", ext));
+            warnings.push(format!("Unsupported or unknown extension '.{}'. PocketMind Hybrid AI included basic metadata only.", ext));
             ("unknown".to_string(), format!("File attached: {}\nSize: {} bytes\nNo text extractor is available for this file type yet.", name, meta.len()))
         }
     };
@@ -152,7 +152,7 @@ fn process_one(path: &Path, per_file_limit: usize) -> AppResult<AttachmentContex
     let indexed_chars = indexed_text.chars().count();
     if chunk_count > 1 {
         warnings.push(format!(
-            "Indexed into {} searchable section(s). For speed, NexusAI sends only the most relevant sections to the model for each question.",
+            "Indexed into {} searchable section(s). For speed, PocketMind Hybrid AI sends only the most relevant sections to the model for each question.",
             chunk_count
         ));
     }
@@ -229,7 +229,7 @@ fn strip_html_tags(text: &str) -> String {
 fn truncate_chars(s: &str, max_chars: usize) -> String {
     if s.chars().count() <= max_chars { return s.to_string(); }
     let mut out: String = s.chars().take(max_chars).collect();
-    out.push_str("\n\n[...truncated by NexusAI attachment index limit...]\n");
+    out.push_str("\n\n[...truncated by PocketMind Hybrid AI attachment index limit...]\n");
     out
 }
 
@@ -448,7 +448,114 @@ fn chunk_title(text: &str, section_number: usize) -> String {
 
 fn extract_docx_text(path: &Path) -> AppResult<String> {
     let xml = read_zip_text(path, "word/document.xml")?;
-    Ok(xml_to_text(&xml))
+    // Cap pathological OOXML blobs so table parsing cannot hang the indexer.
+    if xml.len() > 40_000_000 {
+        return Ok(xml_to_text(&xml.chars().take(2_000_000).collect::<String>()));
+    }
+    let with_tables = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| docx_xml_to_markdown(&xml)))
+        .unwrap_or_else(|_| xml_to_text(&xml));
+    if with_tables.contains('|') {
+        Ok(with_tables)
+    } else {
+        Ok(xml_to_text(&xml))
+    }
+}
+
+/// Prefer Markdown tables from `w:tbl` blocks; fall back to plain text elsewhere.
+fn docx_xml_to_markdown(xml: &str) -> String {
+    let mut out = String::new();
+    let mut rest = xml;
+    while let Some(tbl_start) = rest.find("<w:tbl") {
+        let before = &rest[..tbl_start];
+        let before_text = xml_to_text(before);
+        if !before_text.trim().is_empty() {
+            out.push_str(&before_text);
+            out.push_str("\n\n");
+        }
+        let after_open = &rest[tbl_start..];
+        let Some(end_rel) = after_open.find("</w:tbl>") else {
+            out.push_str(&xml_to_text(after_open));
+            break;
+        };
+        let tbl = &after_open[..end_rel + "</w:tbl>".len()];
+        out.push_str(&docx_table_to_markdown(tbl));
+        out.push_str("\n\n");
+        rest = &after_open[end_rel + "</w:tbl>".len()..];
+    }
+    let tail = xml_to_text(rest);
+    if !tail.trim().is_empty() {
+        out.push_str(&tail);
+    }
+    clean_document_text(&out)
+}
+
+fn docx_table_to_markdown(tbl_xml: &str) -> String {
+    let mut rows: Vec<Vec<String>> = Vec::new();
+    let mut rest = tbl_xml;
+    while let Some(tr_start) = rest.find("<w:tr") {
+        let after = &rest[tr_start..];
+        let Some(tr_end) = after.find("</w:tr>") else { break };
+        let tr = &after[..tr_end];
+        let mut cells = Vec::new();
+        let mut cell_rest = tr;
+        while let Some(tc_start) = cell_rest.find("<w:tc") {
+            let after_tc = &cell_rest[tc_start..];
+            let Some(tc_end) = after_tc.find("</w:tc>") else { break };
+            let cell_xml = &after_tc[..tc_end];
+            let text = xml_to_text(cell_xml).replace('|', "/").trim().to_string();
+            cells.push(if text.is_empty() { " ".to_string() } else { text });
+            cell_rest = &after_tc[tc_end + "</w:tc>".len()..];
+        }
+        if !cells.is_empty() {
+            rows.push(cells);
+        }
+        rest = &after[tr_end + "</w:tr>".len()..];
+    }
+    if rows.is_empty() {
+        return xml_to_text(tbl_xml);
+    }
+    rows_to_markdown_table(&rows)
+}
+
+fn rows_to_markdown_table(rows: &[Vec<String>]) -> String {
+    let cols = rows.iter().map(|r| r.len()).max().unwrap_or(0);
+    if cols == 0 {
+        return String::new();
+    }
+    let mut norm: Vec<Vec<String>> = rows
+        .iter()
+        .map(|r| {
+            let mut c = r.clone();
+            while c.len() < cols {
+                c.push(" ".to_string());
+            }
+            c
+        })
+        .collect();
+    let header = norm.remove(0);
+    let mut out = String::new();
+    out.push('|');
+    for cell in &header {
+        out.push(' ');
+        out.push_str(cell);
+        out.push_str(" |");
+    }
+    out.push('\n');
+    out.push('|');
+    for _ in 0..cols {
+        out.push_str(" --- |");
+    }
+    out.push('\n');
+    for row in norm {
+        out.push('|');
+        for cell in row {
+            out.push(' ');
+            out.push_str(&cell);
+            out.push_str(" |");
+        }
+        out.push('\n');
+    }
+    out
 }
 
 fn extract_pptx_text(path: &Path) -> AppResult<String> {
@@ -475,14 +582,13 @@ fn extract_pptx_text(path: &Path) -> AppResult<String> {
 fn extract_xlsx_text(path: &Path) -> AppResult<String> {
     let file = File::open(path)?;
     let mut archive = zip::ZipArchive::new(file).map_err(|e| AppError::Unknown(e.to_string()))?;
-    let mut out = String::new();
-    if let Ok(mut f) = archive.by_name("xl/sharedStrings.xml") {
+    let shared = if let Ok(mut f) = archive.by_name("xl/sharedStrings.xml") {
         let mut xml = String::new();
         f.read_to_string(&mut xml).map_err(|e| AppError::Unknown(e.to_string()))?;
-        out.push_str("--- Shared strings ---\n");
-        out.push_str(&xml_to_text(&xml));
-        out.push('\n');
-    }
+        parse_xlsx_shared_strings(&xml)
+    } else {
+        Vec::new()
+    };
     let mut sheets = Vec::new();
     for i in 0..archive.len() {
         let name = archive.by_index(i).map_err(|e| AppError::Unknown(e.to_string()))?.name().to_string();
@@ -491,13 +597,174 @@ fn extract_xlsx_text(path: &Path) -> AppResult<String> {
         }
     }
     sheets.sort();
+    let mut out = String::new();
     for sheet in sheets.into_iter().take(20) {
         let mut f = archive.by_name(&sheet).map_err(|e| AppError::Unknown(e.to_string()))?;
         let mut xml = String::new();
         f.read_to_string(&mut xml).map_err(|e| AppError::Unknown(e.to_string()))?;
-        out.push_str(&format!("\n--- {} ---\n{}\n", sheet, xml_to_text(&xml)));
+        out.push_str(&format!("\n## {}\n\n", sheet));
+        let table = xlsx_sheet_to_markdown(&xml, &shared);
+        if table.trim().is_empty() {
+            out.push_str(&xml_to_text(&xml));
+        } else {
+            out.push_str(&table);
+        }
+        out.push('\n');
+    }
+    if out.trim().is_empty() && !shared.is_empty() {
+        out.push_str("--- Shared strings ---\n");
+        out.push_str(&shared.join("\n"));
     }
     Ok(out)
+}
+
+fn parse_xlsx_shared_strings(xml: &str) -> Vec<String> {
+    let mut strings = Vec::new();
+    let mut rest = xml;
+    while let Some(si) = rest.find("<si") {
+        let after = &rest[si..];
+        let Some(end) = after.find("</si>") else { break };
+        let block = &after[..end];
+        // Prefer concatenated <t> nodes inside this shared string item.
+        let mut parts = Vec::new();
+        let mut t_rest = block;
+        while let Some(t_start) = t_rest.find("<t") {
+            let after_t = &t_rest[t_start..];
+            let Some(gt) = after_t.find('>') else { break };
+            let content = &after_t[gt + 1..];
+            let Some(close) = content.find("</t>") else { break };
+            parts.push(xml_decode_entities(&content[..close]));
+            t_rest = &content[close + 4..];
+        }
+        strings.push(parts.join(""));
+        rest = &after[end + 5..];
+    }
+    strings
+}
+
+fn xml_decode_entities(s: &str) -> String {
+    s.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+}
+
+fn xlsx_sheet_to_markdown(sheet_xml: &str, shared: &[String]) -> String {
+    if sheet_xml.len() > 30_000_000 {
+        return xml_to_text(&sheet_xml.chars().take(1_000_000).collect::<String>());
+    }
+    let mut rows: Vec<(u32, Vec<(u32, String)>)> = Vec::new();
+    let mut rest = sheet_xml;
+    while let Some(row_start) = rest.find("<row") {
+        let after = &rest[row_start..];
+        let Some(row_end) = after.find("</row>") else { break };
+        let row_xml = &after[..row_end];
+        let row_idx = attr_u32(row_xml, "r").unwrap_or(rows.len() as u32 + 1);
+        let mut cells: Vec<(u32, String)> = Vec::new();
+        let mut cell_rest = row_xml;
+        while let Some(c_start) = cell_rest.find("<c ") {
+            let after_c = &cell_rest[c_start..];
+            let end = after_c
+                .find("</c>")
+                .map(|i| i + 4)
+                .or_else(|| after_c.find("/>").map(|i| i + 2))
+                .unwrap_or(after_c.len());
+            let cell_xml = &after_c[..end];
+            let col = cell_ref_col(attr_str(cell_xml, "r").as_deref()).unwrap_or(cells.len() as u32);
+            let is_shared = attr_str(cell_xml, "t").as_deref() == Some("s");
+            let value = extract_xlsx_cell_value(cell_xml, shared, is_shared);
+            if !value.trim().is_empty() {
+                cells.push((col, value.replace('|', "/")));
+            }
+            cell_rest = &after_c[end..];
+        }
+        cells.sort_by_key(|(c, _)| *c);
+        if !cells.is_empty() {
+            rows.push((row_idx, cells));
+        }
+        rest = &after[row_end + 6..];
+    }
+    if rows.is_empty() {
+        return String::new();
+    }
+    rows.sort_by_key(|(r, _)| *r);
+    // Densify only occupied columns (cap width) — avoids OOM on sparse col XFD cells.
+    const MAX_COLS: usize = 64;
+    let mut col_ids: Vec<u32> = rows
+        .iter()
+        .flat_map(|(_, cells)| cells.iter().map(|(c, _)| *c))
+        .collect();
+    col_ids.sort_unstable();
+    col_ids.dedup();
+    if col_ids.len() > MAX_COLS {
+        col_ids.truncate(MAX_COLS);
+    }
+    let col_index: std::collections::HashMap<u32, usize> = col_ids
+        .iter()
+        .enumerate()
+        .map(|(i, c)| (*c, i))
+        .collect();
+    let width = col_ids.len().max(1);
+    let mut grid: Vec<Vec<String>> = Vec::new();
+    for (_, cells) in rows.into_iter().take(200) {
+        let mut line = vec![" ".to_string(); width];
+        for (col, val) in cells {
+            if let Some(&idx) = col_index.get(&col) {
+                line[idx] = val;
+            }
+        }
+        grid.push(line);
+    }
+    rows_to_markdown_table(&grid)
+}
+
+fn attr_str(xml: &str, name: &str) -> Option<String> {
+    let key = format!("{name}=\"");
+    let start = xml.find(&key)? + key.len();
+    let end = xml[start..].find('"')? + start;
+    Some(xml[start..end].to_string())
+}
+
+fn attr_u32(xml: &str, name: &str) -> Option<u32> {
+    attr_str(xml, name)?.parse().ok()
+}
+
+fn cell_ref_col(cell_ref: Option<&str>) -> Option<u32> {
+    let r = cell_ref?;
+    let mut col = 0u32;
+    for c in r.chars() {
+        if c.is_ascii_alphabetic() {
+            col = col * 26 + (c.to_ascii_uppercase() as u32 - 'A' as u32 + 1);
+        } else {
+            break;
+        }
+    }
+    if col == 0 {
+        None
+    } else {
+        Some(col - 1)
+    }
+}
+
+fn extract_xlsx_cell_value(cell_xml: &str, shared: &[String], is_shared: bool) -> String {
+    if let Some(v_start) = cell_xml.find("<v>") {
+        let after = &cell_xml[v_start + 3..];
+        if let Some(v_end) = after.find("</v>") {
+            let raw = &after[..v_end];
+            if is_shared {
+                if let Ok(idx) = raw.parse::<usize>() {
+                    return shared.get(idx).cloned().unwrap_or_default();
+                }
+            }
+            return xml_decode_entities(raw);
+        }
+    }
+    // inlineStr
+    if cell_xml.contains("<is>") {
+        return xml_to_text(cell_xml);
+    }
+    String::new()
 }
 
 fn read_zip_text(path: &Path, inner: &str) -> AppResult<String> {

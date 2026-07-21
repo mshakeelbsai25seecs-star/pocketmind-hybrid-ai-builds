@@ -16,7 +16,7 @@ chmod +x start_ollama.sh
 docker exec -it nexusai-ollama ollama pull qwen2.5:7b-instruct
 ```
 
-## NexusAI URL
+## PocketMind Hybrid AI URL
 
 ```text
 http://SERVER_IP:11434/v1

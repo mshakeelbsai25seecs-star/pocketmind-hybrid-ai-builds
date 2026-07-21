@@ -130,7 +130,7 @@ pub async fn knowledge_chat(
         .collect();
 
     let context = format_context(&hits);
-    let system = "You are NexusAI Knowledge Chat on a private organization server. \
+    let system = "You are PocketMind Hybrid AI Knowledge Chat on a private organization server. \
 Answer ONLY using the provided sources. If sources are insufficient, say you could not find \
 enough evidence in the indexed collection. Cite file names inline when helpful.";
     let user = format!("Question:\n{message}\n\nSources:\n{context}");

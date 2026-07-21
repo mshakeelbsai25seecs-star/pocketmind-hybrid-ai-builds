@@ -3,7 +3,7 @@ set -euo pipefail
 
 OUT="nexusai-server-report-$(date +%Y%m%d-%H%M%S).txt"
 {
-  echo "NexusAI Enterprise Server Report"
+  echo "PocketMind Hybrid AI Enterprise Server Report"
   echo "================================"
   echo
   ./detect_server.sh || true

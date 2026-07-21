@@ -54,14 +54,21 @@ const KnowledgeMarkdown = memo(function KnowledgeMarkdown({
             const isBlock = Boolean(className) || text.includes('\n');
             if (isBlock) {
               return (
-                <code className={`nexus-kc-code-block ${className || ''}`} {...props}>
+                <code
+                  className={`nexus-kc-code-block ${className || ''}`.trim()}
+                  {...props}
+                >
                   {children}
                 </code>
               );
             }
             return <code className="nexus-kc-code" {...props}>{children}</code>;
           },
-          pre: ({ children }) => <pre className="nexus-kc-pre">{children}</pre>,
+          pre: ({ children }) => (
+            <pre className="nexus-kc-pre">
+              {children}
+            </pre>
+          ),
           a: ({ children }) => (
             <span className="nexus-kc-p">{children}</span>
           ),

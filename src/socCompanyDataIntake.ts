@@ -191,7 +191,7 @@ export function buildCompanyDatasetSummaryMarkdown(args: {
     '# Company dataset intake summary',
     '',
     `Generated: ${new Date().toLocaleString()}`,
-    'Product: Nexus AI — Fortinet SOC Copilot',
+    'Product: PocketMind Hybrid AI — Fortinet SOC Copilot',
     `Intake folder: ${args.intakeFolderPath || SOC_COMPANY_INTAKE_ROOT}`,
     '',
     '## Local-Only Safety',

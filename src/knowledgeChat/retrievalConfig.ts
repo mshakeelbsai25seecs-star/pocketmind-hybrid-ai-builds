@@ -16,6 +16,8 @@ export interface RetrievalConfigView {
   densePrefetchLimitExact: number;
   densePairRerankTopN: number;
   onnxRerankTopN: number;
+  /** Qwen/llama RANK top-N (Rust RetrievalConfig.llama_rerank_top_n). */
+  llamaRerankTopN: number;
   densePairBlendSelf: number;
   densePairBlendNew: number;
   onnxBlendSelf: number;
@@ -30,11 +32,12 @@ export interface RetrievalConfigView {
 const DEMO_RETRIEVAL_CONFIG: RetrievalConfigView = {
   profile: 'demo',
   rrfK: 60,
-  rerankPoolLimit: 48,
-  densePrefetchLimit: 48,
-  densePrefetchLimitExact: 100,
-  densePairRerankTopN: 24,
-  onnxRerankTopN: 48,
+  rerankPoolLimit: 128,
+  densePrefetchLimit: 128,
+  densePrefetchLimitExact: 256,
+  densePairRerankTopN: 64,
+  onnxRerankTopN: 96,
+  llamaRerankTopN: 16,
   densePairBlendSelf: 0.52,
   densePairBlendNew: 0.48,
   onnxBlendSelf: 0.4,
@@ -47,11 +50,12 @@ const DEMO_RETRIEVAL_CONFIG: RetrievalConfigView = {
 const SERVER_RETRIEVAL_CONFIG: RetrievalConfigView = {
   ...DEMO_RETRIEVAL_CONFIG,
   profile: 'server',
-  rerankPoolLimit: 96,
-  densePrefetchLimit: 100,
-  densePrefetchLimitExact: 200,
-  densePairRerankTopN: 48,
+  rerankPoolLimit: 160,
+  densePrefetchLimit: 160,
+  densePrefetchLimitExact: 320,
+  densePairRerankTopN: 96,
   onnxRerankTopN: 96,
+  llamaRerankTopN: 48,
 };
 
 export function retrievalConfigForProfile(profile: string | null | undefined): RetrievalConfigView {
@@ -65,7 +69,7 @@ export function describeRetrievalConfig(config: RetrievalConfigView): string {
     `pool≤${config.rerankPoolLimit}`,
     config.enableDensePairRerank ? `dense-pair top-${config.densePairRerankTopN}` : 'dense-pair off',
     config.enableLlamaRerank
-      ? `qwen-rank(primary) top-${config.onnxRerankTopN}`
+      ? `qwen-rank(primary) top-${config.llamaRerankTopN}`
       : 'qwen-rank off',
     config.enableOnnxRerank ? `onnx/phrase(fallback) top-${config.onnxRerankTopN}` : 'onnx fallback off',
   ];
@@ -74,9 +78,9 @@ export function describeRetrievalConfig(config: RetrievalConfigView): string {
 
 /** Expected on-disk model paths after the user downloads the Qwen3 GGUFs. */
 export const MODEL_DROP_PATHS = {
-  codeEmbedding: String.raw`D:\NexusAI\models\embeddings\Qwen3-Embedding-8B-Q4_K_M.gguf`,
-  docEmbedding: String.raw`D:\NexusAI\models\embeddings\bge-m3-Q4_K_M.gguf`,
-  reranker: String.raw`D:\NexusAI\models\rerankers\Qwen3-Reranker-4B-Q4_K_M.gguf`,
+  codeEmbedding: String.raw`D:\PocketMind\models\embeddings\Qwen3-Embedding-8B-Q4_K_M.gguf`,
+  docEmbedding: String.raw`D:\PocketMind\models\embeddings\bge-m3-Q4_K_M.gguf`,
+  reranker: String.raw`D:\PocketMind\models\rerankers\Qwen3-Reranker-4B-Q4_K_M.gguf`,
 } as const;
 
 /** Hugging Face download pages for the expected GGUFs. */

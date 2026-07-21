@@ -1,4 +1,4 @@
-# NexusAI Troubleshooting
+# PocketMind Hybrid AI Troubleshooting
 
 See `../windows-server/docs/TROUBLESHOOTING.md`.
 

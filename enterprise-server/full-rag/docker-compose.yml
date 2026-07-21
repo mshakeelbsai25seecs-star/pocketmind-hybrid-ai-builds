@@ -1,11 +1,13 @@
-# NexusAI Full Server RAG — NVIDIA GPU primary stack
+# PocketMind Hybrid AI Full Server RAG — CPU-safe base (no NVIDIA device claims)
 # Usage:
-#   cp .env.example .env && ./scripts/setup.sh
-# CPU fallback: docker compose -f docker-compose.yml -f docker-compose.cpu.yml up -d
+#   CPU:       docker compose -f docker-compose.yml up -d --build
+#   GPU:       docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+#   GPU-small: docker compose -f docker-compose.yml -f docker-compose.gpu.yml -f docker-compose.gpu-small.yml up -d --build
+# Prefer: ./scripts/install.sh
 
 services:
   llm:
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    image: ghcr.io/ggml-org/llama.cpp:server
     container_name: nexusai-rag-llm
     restart: unless-stopped
     ports:
@@ -22,25 +24,18 @@ services:
       - -c
       - ${CTX_SIZE:-8192}
       - -ngl
-      - ${GPU_LAYERS:--1}
+      - ${GPU_LAYERS:-0}
       - -t
       - ${THREADS:-8}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8000/health || exit 1"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8000' || exit 1"]
       interval: 15s
       timeout: 5s
-      retries: 30
-      start_period: 60s
+      retries: 40
+      start_period: 180s
 
   embed-code:
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    image: ghcr.io/ggml-org/llama.cpp:server
     container_name: nexusai-rag-embed-code
     restart: unless-stopped
     ports:
@@ -60,23 +55,18 @@ services:
       - -c
       - ${EMBED_CTX_SIZE:-8192}
       - -ngl
-      - ${GPU_LAYERS:--1}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+      - ${GPU_LAYERS:-0}
+      - -t
+      - ${THREADS:-8}
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8001/health || exit 1"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8001' || exit 1"]
       interval: 15s
       timeout: 5s
-      retries: 30
-      start_period: 90s
+      retries: 40
+      start_period: 240s
 
   embed-knowledge:
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    image: ghcr.io/ggml-org/llama.cpp:server
     container_name: nexusai-rag-embed-knowledge
     restart: unless-stopped
     ports:
@@ -96,23 +86,18 @@ services:
       - -c
       - ${EMBED_CTX_SIZE:-8192}
       - -ngl
-      - ${GPU_LAYERS:--1}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+      - ${GPU_LAYERS:-0}
+      - -t
+      - ${THREADS:-8}
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8002/health || exit 1"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8002' || exit 1"]
       interval: 15s
       timeout: 5s
-      retries: 30
-      start_period: 90s
+      retries: 40
+      start_period: 240s
 
   rerank:
-    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    image: ghcr.io/ggml-org/llama.cpp:server
     container_name: nexusai-rag-rerank
     restart: unless-stopped
     ports:
@@ -133,20 +118,15 @@ services:
       - -c
       - ${EMBED_CTX_SIZE:-8192}
       - -ngl
-      - ${GPU_LAYERS:--1}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+      - ${GPU_LAYERS:-0}
+      - -t
+      - ${THREADS:-8}
     healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8003/health || exit 1"]
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8003' || exit 1"]
       interval: 15s
       timeout: 5s
-      retries: 30
-      start_period: 90s
+      retries: 40
+      start_period: 240s
 
   gateway:
     build:
@@ -169,13 +149,17 @@ services:
       - ${NEXUS_DATA_HOST:-/opt/nexusai/data}:/opt/nexusai/data
       - ${NEXUS_MODELS_HOST:-/opt/nexusai/models}:/opt/nexusai/models:ro
     depends_on:
-      - llm
-      - embed-code
-      - embed-knowledge
-      - rerank
+      llm:
+        condition: service_healthy
+      embed-code:
+        condition: service_healthy
+      embed-knowledge:
+        condition: service_healthy
+      rerank:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8080/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 20
-      start_period: 20s
+      start_period: 30s

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-echo "NexusAI Server Detection Report"
+echo "PocketMind Hybrid AI Server Detection Report"
 echo "Generated: $(date -Is)"
 echo
 

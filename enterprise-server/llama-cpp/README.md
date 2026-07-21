@@ -19,7 +19,7 @@ chmod +x start_llama_cpp.sh
 ./start_llama_cpp.sh cuda
 ```
 
-## NexusAI URL
+## PocketMind Hybrid AI URL
 
 ```text
 http://SERVER_IP:8000/v1
@@ -27,7 +27,7 @@ http://SERVER_IP:8000/v1
 
 ## Knowledge Chat embeddings (optional)
 
-NexusAI can offload Knowledge Chat dense embeddings to this server. Because
+PocketMind Hybrid AI can offload Knowledge Chat dense embeddings to this server. Because
 `llama-server` serves a single model per process, embeddings run as **separate
 services** from chat — one per partition (code uses Nomic v1.5, knowledge uses
 BGE-M3). Local embeddings remain the default and the automatic fallback, so
@@ -57,7 +57,7 @@ http://SERVER_IP:8002/v1/embeddings   # knowledge partition (BGE-M3)
 
 ### Configure clients
 
-In NexusAI open **Organization Server** and:
+In PocketMind Hybrid AI open **Organization Server** and:
 
 1. Enable "Use organization server for Knowledge Chat embeddings".
 2. Enter the served model ids (for example `nomic-embed-text-v1.5` and `bge-m3`).

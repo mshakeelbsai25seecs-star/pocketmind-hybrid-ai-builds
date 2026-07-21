@@ -1,15 +1,23 @@
 # Windows Server Notes
 
-For serious NVIDIA multi-GPU LLM hosting, Ubuntu Linux is usually the cleaner deployment target. If the company only has Windows Server, choose one of these:
+For **Full Server RAG** (embeddings + rerank + Knowledge Chat gateway), use Linux or **WSL2 Ubuntu**:
 
-## Option A: WSL2 Ubuntu + vLLM
+→ [../full-rag/docs/WSL2_WINDOWS_SERVER.md](../full-rag/docs/WSL2_WINDOWS_SERVER.md)
 
-Use this when IT allows WSL2 and NVIDIA GPU passthrough is working.
+Native Windows is not a supported host for the `full-rag` Docker package.
 
-## Option B: Native Ollama
+## Chat-only alternatives (not full-rag)
 
-Use this for simpler pilots and medium models.
+If you only need an OpenAI-compatible chat endpoint (no server-side Knowledge Chat indexing):
 
-## Option C: Windows acts only as a client host
+### Option A: WSL2 Ubuntu + vLLM
 
-Keep the model server on a Linux GPU machine and use Windows laptops as NexusAI clients.
+Use when IT allows WSL2 and NVIDIA GPU passthrough is working.
+
+### Option B: Native Ollama
+
+Use for simpler pilots and medium models.
+
+### Option C: Windows acts only as a client host
+
+Keep the model / RAG server on a Linux GPU machine and use Windows laptops as PocketMind Hybrid AI clients.

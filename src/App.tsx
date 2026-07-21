@@ -75,12 +75,35 @@ function App() {
   useEffect(() => {
     const root = window.document.documentElement;
     root.dataset.perf = performanceMode;
-    if (theme === 'system') {
-      const systemTheme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-      root.classList.toggle('dark', systemTheme === 'dark');
-    } else {
-      root.classList.toggle('dark', theme === 'dark');
+    const dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    root.classList.toggle('dark', dark);
+    root.style.colorScheme = dark ? 'dark' : 'light';
+    root.style.backgroundColor = dark ? '#020617' : '#f8fafc';
+    document.body.style.backgroundColor = dark ? '#020617' : '#f8fafc';
+    // #region agent log
+    {
+      const bodyCs = getComputedStyle(document.body);
+      fetch('http://127.0.0.1:7414/ingest/28bf2132-0f52-40ef-96b9-4e681c1d7653', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7d5a77' },
+        body: JSON.stringify({
+          sessionId: '7d5a77',
+          runId: 'white-ui-2',
+          hypothesisId: 'H2',
+          location: 'App.tsx:themeEffect',
+          message: 'theme_applied_after_effect',
+          data: {
+            theme,
+            performanceMode,
+            htmlHasDark: root.classList.contains('dark'),
+            bodyBg: bodyCs.backgroundColor,
+            prefersDark: window.matchMedia('(prefers-color-scheme: dark)').matches,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => undefined);
     }
+    // #endregion
   }, [theme, performanceMode]);
 
   useEffect(() => {

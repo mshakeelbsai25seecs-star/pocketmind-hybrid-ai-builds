@@ -90,16 +90,21 @@ pub async fn kc_create_collection(
         .map(|value| normalize_path(&value))
         .filter(|value| !value.is_empty())
         .or_else(|| legacy.clone());
+    // Never copy the code/Qwen3 model onto document partitions — that OOMs on
+    // typical laptops. Leave unset so discovery picks BGE-M3 (or lexical-only).
     let knowledge_override = request
         .knowledge_model_path
         .map(|value| normalize_path(&value))
-        .filter(|value| !value.is_empty())
-        .or_else(|| legacy.clone());
+        .filter(|value| !value.is_empty());
 
-    let partition_config = embeddings::resolve_partition_config(
-        folder_category,
+    let partition_config = embeddings::heal_partition_config_models(
+        embeddings::resolve_partition_config(
+            folder_category,
+            &deploy.models_dir,
+            code_override.as_deref(),
+            knowledge_override.as_deref(),
+        ),
         &deploy.models_dir,
-        code_override.as_deref(),
         knowledge_override.as_deref(),
     );
     let code_model_path =
@@ -128,6 +133,17 @@ pub async fn kc_create_collection(
 
 #[tauri::command]
 pub async fn kc_delete_collection(state: State<'_, AppState>, collection_id: String) -> AppResult<()> {
+    // #region agent log
+    crate::knowledge_chat::debug_session::agent_log(
+        "G",
+        "commands.rs:kc_delete_collection",
+        "delete_collection_invoked",
+        serde_json::json!({
+            "collection_id": collection_id,
+            "note": "db delete only; HNSW invalidate not called on this path",
+        }),
+    );
+    // #endregion
     let db = state.db.lock().await;
     db::delete_collection(&db, &collection_id)
 }
@@ -205,6 +221,7 @@ pub async fn kc_index_collection(
             rebuild: Some(false),
             build_dense: Some(true),
             embedding_model_path: None,
+            knowledge_model_path: None,
             incremental: Some(true),
         });
 
@@ -215,27 +232,31 @@ pub async fn kc_index_collection(
             .embedding_model_path
             .map(|value| normalize_path(&value))
             .filter(|value| !value.is_empty());
+        let knowledge_override = opts
+            .knowledge_model_path
+            .map(|value| normalize_path(&value))
+            .filter(|value| !value.is_empty());
 
         // Use the collection's persisted partition config; build defaults for
         // legacy collections that predate the partition schema.
         let mut partition_config = if collection.partition_config.is_empty() {
-            let legacy = override_model
+            let code_legacy = override_model
                 .clone()
                 .or_else(|| Some(collection.embedding_model_path.clone()))
                 .filter(|value| !value.is_empty());
             embeddings::resolve_partition_config(
                 folder_category,
                 &deploy.models_dir,
-                legacy.as_deref(),
-                legacy.as_deref(),
+                code_legacy.as_deref(),
+                knowledge_override.as_deref(),
             )
         } else {
             embeddings::merge_partition_config(
                 collection.partition_config.clone(),
                 folder_category,
                 &deploy.models_dir,
-                None,
-                None,
+                override_model.as_deref(),
+                knowledge_override.as_deref(),
             )
         };
 
@@ -253,6 +274,13 @@ pub async fn kc_index_collection(
                         .to_string();
             }
         }
+
+        // Heal documentation/runbooks/etc. that were incorrectly saved as Qwen3-8B.
+        partition_config = embeddings::heal_partition_config_models(
+            partition_config,
+            &deploy.models_dir,
+            knowledge_override.as_deref(),
+        );
 
         (
             partition_config,
@@ -306,7 +334,10 @@ pub async fn kc_index_collection(
             }
             Err(err) => {
                 dense_status = "failed";
-                warnings.push(format!("Dense embedding build failed: {err}"));
+                warnings.push(format!(
+                    "Dense embedding build failed: {}",
+                    embeddings::summarize_dense_embed_error(&err.to_string())
+                ));
             }
         }
     }
@@ -385,6 +416,103 @@ pub async fn kc_collection_health(
 }
 
 #[tauri::command]
+pub async fn kc_ocr_capabilities(
+    state: State<'_, AppState>,
+) -> AppResult<crate::ocr_settings::OcrCapabilities> {
+    let db = state.db.lock().await;
+    let key_ok = db
+        .get_api_key(crate::ocr_settings::IMAGE_RAG_PROVIDER)
+        .ok()
+        .flatten()
+        .map(|k| !k.is_empty())
+        .unwrap_or(false);
+    let cfg = crate::ocr_settings::load_ocr_image_rag_config(&db, key_ok);
+    Ok(crate::ocr_settings::probe_ocr_capabilities(&cfg))
+}
+
+#[tauri::command]
+pub async fn kc_set_collection_image_rag(
+    state: State<'_, AppState>,
+    collection_id: String,
+    image_rag_opt_in: bool,
+    allow_cloud_media: bool,
+) -> AppResult<crate::knowledge_chat::types::KcCollection> {
+    let db = state.db.lock().await;
+    // Require both flags for privacy: opt-in alone is not enough.
+    let allow = image_rag_opt_in && allow_cloud_media;
+    db::update_collection_image_rag_flags(&db, &collection_id, allow, allow)?;
+    log_kc_audit(
+        &db,
+        "image_rag.collection_opt_in",
+        &format!(
+            "Collection {collection_id} image_rag_opt_in={}",
+            allow
+        ),
+        None,
+        Some(&collection_id),
+        true,
+    );
+    db::get_collection(&db, &collection_id)
+}
+
+#[derive(serde::Serialize)]
+pub struct KcImageRagEnrichResult {
+    pub evidence: Vec<crate::knowledge_chat::image_rag::ImageRagEvidence>,
+    pub warning: Option<String>,
+}
+
+#[tauri::command]
+pub async fn kc_image_rag_enrich(
+    state: State<'_, AppState>,
+    collection_id: String,
+    question: String,
+    hits: Vec<crate::knowledge_chat::types::KcSearchHit>,
+) -> AppResult<KcImageRagEnrichResult> {
+    match crate::knowledge_chat::image_rag::maybe_enrich_with_vision(
+        &state,
+        &collection_id,
+        &question,
+        &hits,
+    )
+    .await
+    {
+        Ok(Some(evidence)) => {
+            let db = state.db.lock().await;
+            let pages: Vec<String> = evidence.iter().map(|e| e.page_label.clone()).collect();
+            let bytes: u64 = evidence
+                .iter()
+                .filter_map(|e| std::fs::metadata(&e.media_path).ok().map(|m| m.len()))
+                .sum();
+            let detail = format!(
+                "collection={collection_id}; pages={}; bytes={bytes}; count={}",
+                pages.join(","),
+                evidence.len()
+            );
+            log_kc_audit(
+                &db,
+                "image_rag.query",
+                "Online Image RAG vision query",
+                Some(&detail),
+                Some(&collection_id),
+                true,
+            );
+            Ok(KcImageRagEnrichResult {
+                evidence,
+                warning: None,
+            })
+        }
+        Ok(None) => Ok(KcImageRagEnrichResult {
+            evidence: Vec::new(),
+            warning: None,
+        }),
+        Err(err) => Ok(KcImageRagEnrichResult {
+            evidence: Vec::new(),
+            warning: Some(format!("Online Image RAG unavailable: {err}")),
+        }),
+    }
+}
+
+#[tauri::command]
 pub async fn kc_prepare_search_query(query: String) -> AppResult<KcQueryRewriteResult> {
     Ok(query_rewrite::rewrite_for_retrieval(&query))
 }
@@ -451,6 +579,7 @@ pub async fn kc_hybrid_search(
     request.query_dense_vector = None;
     request.search_scope = Some(scope);
     let mut partition_models_used = Vec::new();
+    let mut embed_quality_notes: Vec<String> = Vec::new();
     let embed_timer = StageTimer::start();
     let embed_in = format!("embed_source={embed_source:?}; mode={:?}", request.mode);
     if needs_server_dense_embedding(&request.mode) {
@@ -467,6 +596,7 @@ pub async fn kc_hybrid_search(
         let embed_ms = embed_timer.elapsed_ms();
         request.partition_query_vectors = embeds.vectors;
         partition_models_used = embeds.models_used;
+        embed_quality_notes = embeds.quality_notes;
         if request.partition_query_vectors.is_empty() {
             trace.push(stage_io(
                 "embed",
@@ -532,6 +662,23 @@ pub async fn kc_hybrid_search(
         pending.dense_available && !pending.request.partition_query_vectors.is_empty();
     let hit_count_begin = pending.hits.len();
     let hits_summary = summarize_hits(&pending.hits, 5);
+    // #region agent log
+    crate::knowledge_chat::debug_session::agent_log(
+        "D",
+        "commands.rs:kc_hybrid_search",
+        "hybrid_search_begin",
+        serde_json::json!({
+            "collection_id": pending.request.collection_id,
+            "mode": format!("{:?}", pending.request.mode),
+            "hit_count_begin": hit_count_begin,
+            "dense_available": pending.dense_available,
+            "fts_available": pending.fts_available,
+            "partition_vectors": pending.request.partition_query_vectors.len(),
+            "dense_ready": dense_ready,
+            "auto_filters": pending.auto_filters_applied.is_some(),
+        }),
+    );
+    // #endregion
     if !pending.fts_available {
         trace.push(stage_io(
             "fts",
@@ -696,6 +843,7 @@ pub async fn kc_hybrid_search(
     }
 
     let mut llama_rerank_used = false;
+    let mut llama_rerank_notes: Vec<String> = Vec::new();
     let llama_timer = StageTimer::start();
     let llama_in = format!(
         "query={:?}; {}",
@@ -706,6 +854,16 @@ pub async fn kc_hybrid_search(
         let db = state.db.lock().await;
         let llama_path = llama_rerank::resolve_llama_rerank_path(&db);
         drop(db);
+        crate::knowledge_chat::debug_session::agent_log(
+            "R",
+            "commands.rs:kc_hybrid_search",
+            "llama_rerank_resolve",
+            serde_json::json!({
+                "resolved": llama_path.as_deref(),
+                "enable_llama_rerank": true,
+                "hit_count": pending.hits.len(),
+            }),
+        );
         match llama_path {
             Some(path) => {
                 match llama_rerank::apply_llama_rerank(
@@ -713,7 +871,7 @@ pub async fn kc_hybrid_search(
                     &path,
                     &pending.rewrite.retrieval_query,
                     &mut pending.hits,
-                    retrieval_config.onnx_rerank_top_n,
+                    retrieval_config.llama_rerank_top_n,
                     retrieval_config.onnx_blend_self,
                     retrieval_config.onnx_blend_new,
                 )
@@ -743,6 +901,16 @@ pub async fn kc_hybrid_search(
                         ));
                     }
                     Err(err) => {
+                        let short = err.chars().take(400).collect::<String>();
+                        crate::knowledge_chat::debug_session::agent_log(
+                            "R",
+                            "commands.rs:kc_hybrid_search",
+                            "llama_rerank_failed",
+                            serde_json::json!({
+                                "path": path,
+                                "error": short,
+                            }),
+                        );
                         trace.push(stage_io(
                             "llama_rank",
                             KcStageStatus::Failed,
@@ -751,6 +919,9 @@ pub async fn kc_hybrid_search(
                             "Install RANK-capable Qwen3-Reranker GGUF; check llama-server runtime and VRAM. Falling back to ONNX / phrase.",
                             &llama_in,
                             format!("error={err}"),
+                        ));
+                        llama_rerank_notes.push(format!(
+                            "Qwen/llama RANK rerank failed (using dense-pair/phrase fallback): {short}"
                         ));
                     }
                 }
@@ -765,6 +936,9 @@ pub async fn kc_hybrid_search(
                     &llama_in,
                     "no_model_path",
                 ));
+                llama_rerank_notes.push(
+                    "No GGUF found under models/rerankers; Qwen RANK skipped.".to_string(),
+                );
             }
         }
     } else {
@@ -825,6 +999,27 @@ pub async fn kc_hybrid_search(
             &post_complete_hits,
         ));
     }
+    if result.adjacent_expand_applied {
+        trace.push(stage_io(
+            "adjacent_expand",
+            KcStageStatus::Ok,
+            0,
+            "Injected same-file neighboring chunks into context",
+            "",
+            &pre_complete_hits,
+            &post_complete_hits,
+        ));
+    } else {
+        trace.push(stage_io(
+            "adjacent_expand",
+            KcStageStatus::Skipped,
+            0,
+            "No adjacent chunk expansion",
+            "",
+            &pre_complete_hits,
+            "unchanged",
+        ));
+    }
     if result.parent_merge_applied {
         trace.push(stage_io(
             "parent_merge",
@@ -852,6 +1047,28 @@ pub async fn kc_hybrid_search(
     if let Some(notice) = scope_widen_notice {
         result.degradation_reasons.insert(0, notice);
     }
+    for note in llama_rerank_notes {
+        if !result.degradation_reasons.iter().any(|r| r == &note) {
+            result.degradation_reasons.insert(0, note);
+        }
+    }
+    for note in embed_quality_notes {
+        if !result.degradation_reasons.iter().any(|r| r == &note) {
+            result.degradation_reasons.push(note);
+        }
+    }
+    if !result.llama_rerank_used && !result.onnx_reranker_used {
+        let already_explained = result
+            .degradation_reasons
+            .iter()
+            .any(|r| r.contains("RANK rerank failed") || r.contains("No GGUF found under models/rerankers"));
+        if !already_explained {
+            let msg = "Result ranking used dense-pair/phrase fallback. Recommended for best ranking quality on server: Qwen3-Reranker-4B GGUF under models/rerankers.".to_string();
+            if !result.degradation_reasons.iter().any(|r| r.contains("Qwen3-Reranker")) {
+                result.degradation_reasons.push(msg);
+            }
+        }
+    }
     if dense_ready && !dense_pair_rerank_used {
         if dense_pair_failure_notes.is_empty() && !retrieval_config.enable_dense_pair_rerank {
             result.degradation_reasons.push(
@@ -875,6 +1092,28 @@ pub async fn kc_hybrid_search(
         result.intent_match.is_some(),
         trace.summary_for_audit()
     );
+    // #region agent log
+    crate::knowledge_chat::debug_session::agent_log(
+        "D",
+        "commands.rs:kc_hybrid_search",
+        "hybrid_search_complete",
+        serde_json::json!({
+            "hit_count": result.hits.len(),
+            "mode": format!("{:?}", result.mode),
+            "confidence": format!("{:?}", result.confidence),
+            "degradation_count": result.degradation_reasons.len(),
+            "degradation_sample": result.degradation_reasons.iter().take(3).cloned().collect::<Vec<_>>(),
+            "auto_filters_applied": result.auto_filters_applied.is_some(),
+            "llama_rerank_used": result.llama_rerank_used,
+            "onnx_reranker_used": result.onnx_reranker_used,
+            "dense_pair_rerank_used": result.dense_pair_rerank_used,
+            "embed_ms": stage_ms_for_log(&trace, "embed"),
+            "llama_rank_ms": stage_ms_for_log(&trace, "llama_rank"),
+            "dense_pair_ms": stage_ms_for_log(&trace, "dense_pair_rerank"),
+        }),
+    );
+    // #endregion
+
     result.pipeline_trace = Some(trace);
 
     log_kc_audit(
@@ -886,6 +1125,16 @@ pub async fn kc_hybrid_search(
         true,
     );
     Ok(result)
+}
+
+fn stage_ms_for_log(trace: &crate::knowledge_chat::pipeline_trace::KcPipelineTrace, name: &str) -> u64 {
+    trace
+        .stages
+        .iter()
+        .rev()
+        .find(|s| s.id == name)
+        .map(|s| s.duration_ms)
+        .unwrap_or(0)
 }
 
 #[tauri::command]

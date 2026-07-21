@@ -29,7 +29,7 @@ export default function StorageManager() {
   };
 
   const removeModelRecord = async (model: LocalModelRecord) => {
-    const confirmText = `Remove ${model.name} from the NexusAI library?\n\nThis removes the library record only. It does not delete the GGUF file from disk.`;
+    const confirmText = `Remove ${model.name} from the PocketMind Hybrid AI library?\n\nThis removes the library record only. It does not delete the GGUF file from disk.`;
     if (!window.confirm(confirmText)) return;
     setBusyId(model.id);
     try {
@@ -130,7 +130,7 @@ export default function StorageManager() {
       <section className="rounded-3xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/20 p-5 flex gap-3 text-sm text-amber-800 dark:text-amber-200">
         <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
         <div>
-          <strong>Safe behavior:</strong> this screen does not delete GGUF files from disk. It only removes NexusAI library records. File deletion should be added later with stronger confirmations and recycle-bin behavior.
+          <strong>Safe behavior:</strong> this screen does not delete GGUF files from disk. It only removes PocketMind Hybrid AI library records. File deletion should be added later with stronger confirmations and recycle-bin behavior.
         </div>
       </section>
     </div>

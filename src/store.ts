@@ -93,7 +93,7 @@ interface AppState {
 }
 
 export const SAFE_DEFAULT_PARAMS: GenerationParams = {
-  // Production default: automatic hardware optimizer. NexusAI tries full GPU offload first
+  // Production default: automatic hardware optimizer. PocketMind Hybrid AI tries full GPU offload first
   // when a compatible runtime/GPU exists, then partial CPU+GPU split, then CPU fallback.
   temperature: 0.45,
   top_k: 40,

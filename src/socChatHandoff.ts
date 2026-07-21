@@ -4,7 +4,7 @@ export const SOC_HUMAN_APPROVAL_NOTICE =
   'AI recommendations require human approval before production response actions.';
 
 export const SOC_SYSTEM_PROMPT = [
-  'You are Nexus AI Fortinet SOC Copilot.',
+  'You are PocketMind Hybrid AI Fortinet SOC Copilot.',
   'You help security analysts with FortiSIEM and FortiSOAR work: triage, investigation, rules, parsers, playbooks, and connectors.',
   'Use only evidence the user provides or that appears in retrieved company documents.',
   'Do not claim live FortiSIEM or FortiSOAR integration unless the user supplied exported data.',
@@ -36,7 +36,8 @@ export function isSocPrompt(content: string): boolean {
   const text = content.trim();
   if (!text) return false;
   return (
-    text.includes('Fortinet SOC Copilot') || text.includes('Nexus AI')
+    text.includes('Fortinet SOC Copilot') || text.includes('PocketMind Hybrid AI')
+    || text.includes('Nexus AI') || text.includes('NexusAI')
     || text.includes('Fortinet SOC L3')
     || /\bOUTPUT FORMAT:\s*\n\s*1\./i.test(text)
     || /\bTASK:\s*(Perform Fortinet SOC|Draft a FortiSIEM|Draft FortiSOAR|Generate a Fortinet SOC)/i.test(text)

@@ -2,7 +2,7 @@
 name = "nexus-rag-gateway"
 version = "0.1.0"
 edition = "2021"
-description = "NexusAI Full Server RAG gateway (Knowledge Chat + admin index)"
+description = "PocketMind Hybrid AI Full Server RAG gateway (Knowledge Chat + admin index)"
 publish = false
 
 [lib]

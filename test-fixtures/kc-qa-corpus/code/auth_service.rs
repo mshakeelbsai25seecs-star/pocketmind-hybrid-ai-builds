@@ -1,4 +1,4 @@
-//! Authentication helpers for the NexusAI API gateway.
+//! Authentication helpers for the PocketMind Hybrid AI API gateway.
 
 /// Validates a JWT access token and returns the subject claim when valid.
 pub fn validate_jwt_token(token: &str, secret: &str) -> Result<String, AuthError> {

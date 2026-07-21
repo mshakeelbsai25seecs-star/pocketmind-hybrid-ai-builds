@@ -1,4 +1,4 @@
-# NexusAI Stabilization Notes
+# PocketMind Hybrid AI Stabilization Notes
 
 This repaired version focuses on making the core desktop app stable before adding more advanced features.
 
@@ -8,7 +8,7 @@ This repaired version focuses on making the core desktop app stable before addin
 - Changed chat generation to a stable request/response contract through `generate_response`.
 - The Chat UI now replaces a single pending assistant message instead of appending streamed chunks.
 - Added `update_message` so finished assistant messages persist in SQLite.
-- Changed `llama-server` to use a free per-process local port instead of fixed `8082`, preventing NexusAI from accidentally talking to an old leftover model server.
+- Changed `llama-server` to use a free per-process local port instead of fixed `8082`, preventing PocketMind Hybrid AI from accidentally talking to an old leftover model server.
 - Fixed missing Tailwind/PostCSS config so the production UI CSS builds correctly.
 - Fixed the database migration duplicate `description` column definition.
 - Kept attachment processing in place for TXT/MD/code/CSV/JSON/XML/DOCX/PPTX/XLSX/PDF basic text extraction and image metadata.

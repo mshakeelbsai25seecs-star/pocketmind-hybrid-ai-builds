@@ -10,12 +10,19 @@
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:dev:macos": "bash scripts/tauri-dev-macos.sh",
+    "tauri:dev:linux": "bash scripts/tauri-dev-linux.sh",
     "tauri:dev:low-mem": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/tauri-dev-low-mem.ps1",
     "setup:macos-runtimes": "bash scripts/setup_macos_runtimes.sh",
     "verify:macos-runtimes": "bash scripts/verify_macos_runtimes.sh",
+    "setup:windows-runtimes": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/install_llama_cpp_runtimes.ps1",
+    "verify:windows-runtimes": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/verify_windows_runtimes.ps1",
+    "setup:linux-runtimes": "bash scripts/setup_linux_runtimes.sh",
+    "verify:linux-runtimes": "bash scripts/verify_linux_runtimes.sh",
     "build:macos-x64-metal": "bash scripts/build_macos_x64_metal_runtime.sh",
     "build:macos-release": "bash scripts/build_macos_release.sh",
-    "dist:stage:windows": "powershell -ExecutionPolicy Bypass -File distribution/windows-desktop/scripts/stage-release.ps1"
+    "dist:stage:windows": "powershell -ExecutionPolicy Bypass -File distribution/windows-desktop/scripts/stage-release.ps1",
+    "dist:stage:macos": "bash distribution/macos-desktop/scripts/stage-release.sh",
+    "dist:stage:linux": "bash distribution/linux-desktop/scripts/stage-release.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^1.5.0",

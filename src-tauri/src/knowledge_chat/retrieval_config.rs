@@ -30,6 +30,9 @@ pub struct RetrievalConfig {
     pub dense_pair_rerank_top_n: usize,
     /// How many top hits the final neural reranker (Qwen RANK or ONNX) rescoring covers.
     pub onnx_rerank_top_n: usize,
+    /// How many top hits Qwen/llama RANK rescoring covers.
+    /// Kept tighter than ONNX because local GGUF scoring is sequential and CPU-heavy.
+    pub llama_rerank_top_n: usize,
     /// Dense pair rerank blend: weight kept from the prior score.
     pub dense_pair_blend_self: f64,
     /// Dense pair rerank blend: weight given to the new dense score.
@@ -58,6 +61,8 @@ impl RetrievalConfig {
             dense_prefetch_limit_exact: 256,
             dense_pair_rerank_top_n: 64,
             onnx_rerank_top_n: 96,
+            // ~4s/doc on CPU for Qwen3-Reranker-4B; 16 docs ≈ 60s — under the HTTP budget.
+            llama_rerank_top_n: 16,
             dense_pair_blend_self: 0.52,
             dense_pair_blend_new: 0.48,
             onnx_blend_self: 0.4,
@@ -68,11 +73,17 @@ impl RetrievalConfig {
         }
     }
 
-    /// Wider pools for a server deployment with more headroom. Blend weights are
-    /// unchanged; breadth matches the accuracy-first demo defaults.
+    /// Wider pools + deeper Qwen RANK coverage when the host has GPU/RAM headroom.
+    /// Laptop/demo keeps `llama_rerank_top_n` low so CPU scoring does not time out.
     pub fn server() -> Self {
         Self {
             profile: KC_DEPLOYMENT_SERVER.to_string(),
+            rerank_pool_limit: 160,
+            dense_prefetch_limit: 160,
+            dense_prefetch_limit_exact: 320,
+            dense_pair_rerank_top_n: 96,
+            onnx_rerank_top_n: 96,
+            llama_rerank_top_n: 48,
             ..Self::demo()
         }
     }
@@ -106,7 +117,14 @@ mod tests {
         assert!(cfg.enable_onnx_rerank, "ONNX remains an enabled fallback");
         assert!(cfg.dense_pair_rerank_top_n >= 64);
         assert!(cfg.rerank_pool_limit >= 128);
-        assert_eq!(RetrievalConfig::server().dense_pair_rerank_top_n, cfg.dense_pair_rerank_top_n);
-        assert!(RetrievalConfig::server().enable_llama_rerank);
+        assert!(
+            cfg.llama_rerank_top_n > 0 && cfg.llama_rerank_top_n <= cfg.onnx_rerank_top_n,
+            "llama RANK top_n must be positive and no wider than ONNX pool"
+        );
+        let server = RetrievalConfig::server();
+        assert_eq!(server.dense_pair_rerank_top_n, 96);
+        assert!(server.llama_rerank_top_n >= 48);
+        assert!(server.rerank_pool_limit >= cfg.rerank_pool_limit);
+        assert!(server.enable_llama_rerank);
     }
 }

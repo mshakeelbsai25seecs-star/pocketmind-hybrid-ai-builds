@@ -4,7 +4,27 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>NexusAI</title>
+    <title>PocketMind Hybrid AI</title>
+    <style>
+      html, body, #root { width: 100%; height: 100%; margin: 0; background: #f8fafc; }
+      html.dark, html.dark body, html.dark #root { background: #020617; }
+    </style>
+    <script>
+      (function () {
+        try {
+          var theme = 'system';
+          var raw = localStorage.getItem('nexus-ai-storage');
+          if (raw) {
+            var parsed = JSON.parse(raw);
+            if (parsed && parsed.state && parsed.state.theme) theme = parsed.state.theme;
+          }
+          var dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          if (dark) document.documentElement.classList.add('dark');
+          document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
+          document.documentElement.style.backgroundColor = dark ? '#020617' : '#f8fafc';
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -12,7 +12,16 @@
 #     ./scripts/build_macos_x64_metal_runtime.sh
 set -euo pipefail
 
-PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Repo layout: scripts/setup_*.sh → project root is parent.
+# Packaged layout: script sits next to bin/ or .app → project root is script dir.
+if [[ -d "${SCRIPT_DIR}/bin/llama.cpp" || -d "${SCRIPT_DIR}/bin" ]] || compgen -G "${SCRIPT_DIR}/*.app" >/dev/null 2>&1; then
+  PROJECT_DIR="${SCRIPT_DIR}"
+elif [[ -d "${SCRIPT_DIR}/../bin/llama.cpp" || -f "${SCRIPT_DIR}/../package.json" ]]; then
+  PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+else
+  PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+fi
 DOWNLOADS_DIR="${1:-$HOME/Downloads}"
 CACHE_DIR="${NEXUS_LLAMA_CACHE:-$HOME/Downloads/nexusai-llama-releases}"
 TMP_DIR="$HOME/Downloads/nexusai-llama-macos-runtime-temp"
@@ -156,6 +165,8 @@ find "$BASE_DIR" -maxdepth 2 -name llama-server -print
 echo
 if [[ -x "$PROJECT_DIR/scripts/verify_macos_runtimes.sh" ]]; then
   "$PROJECT_DIR/scripts/verify_macos_runtimes.sh" || true
+elif [[ -x "$SCRIPT_DIR/verify_macos_runtimes.sh" ]]; then
+  "$SCRIPT_DIR/verify_macos_runtimes.sh" || true
 fi
 
 if ! ls "$BASE_DIR/macos-x64-metal"/libggml-metal* >/dev/null 2>&1; then
@@ -166,4 +177,4 @@ if ! ls "$BASE_DIR/macos-x64-metal"/libggml-metal* >/dev/null 2>&1; then
 fi
 
 echo
-echo "Done. Restart NexusAI → Runtime → Scan runtime → Use Automatic Optimizer (or CPU Safe)."
+echo "Done. Restart PocketMind Hybrid AI → Runtime → Scan runtime → Use Automatic Optimizer (or CPU Safe)."

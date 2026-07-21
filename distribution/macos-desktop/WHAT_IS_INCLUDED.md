@@ -2,7 +2,7 @@
 
 ```text
 payload/
-├── NexusAI.app/
+├── PocketMind Hybrid AI.app/
 │   └── Contents/
 │       ├── MacOS/nexus-ai
 │       └── Resources/

@@ -56,7 +56,7 @@ export default function HomeDashboard() {
         <section className="premium-card p-6 sm:p-7">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
             <div className="space-y-3">
-              <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-surface-950 dark:text-white">NexusAI Desktop</h1>
+              <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-surface-950 dark:text-white">PocketMind Hybrid AI Desktop</h1>
               <p className="max-w-xl text-surface-600 dark:text-surface-300">
                 Local AI for security analysts: Fortinet Copilot, Knowledge Chat, and on-device models.
               </p>

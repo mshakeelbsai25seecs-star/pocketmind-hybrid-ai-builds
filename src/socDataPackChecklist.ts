@@ -271,7 +271,7 @@ export function buildSocKnowledgePackSummaryMarkdown(resources: SocKnowledgeReso
     '# Knowledge pack summary',
     '',
     `Generated: ${new Date().toLocaleString()}`,
-    'Product: Nexus AI — Fortinet SOC Copilot',
+    'Product: PocketMind Hybrid AI — Fortinet SOC Copilot',
     '',
     '## Knowledge Pack Health',
     `- Registered resources: ${resources.length}`,

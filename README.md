@@ -1,4 +1,4 @@
-# NexusAI (macOS)
+# PocketMind Hybrid AI (macOS)
 
 Offline-first desktop AI workspace for **Apple Silicon and Intel Macs**.
 
@@ -15,7 +15,7 @@ cd nexus-ai-mac
 
 ## Why this Mac build exists
 
-NexusAI must work on **every Mac architecture**:
+PocketMind Hybrid AI must work on **every Mac architecture**:
 
 | Mac family | CPU arch | Runtime folders used |
 |------------|----------|----------------------|
@@ -77,7 +77,7 @@ GPU acceleration is advertised only when a real backend library is present (for 
 **Data on disk** (default macOS):
 
 ```text
-~/Library/Application Support/NexusAI/
+~/Library/Application Support/PocketMind/
   models/           # chat, embeddings, rerankers (.gguf)
   app-data/         # SQLite
   knowledge-chat/   # indexes / vectors
@@ -174,9 +174,9 @@ npm run dev                # frontend only (no Rust / no local models)
 3. Place embedding models (optional for dense search):
 
 ```text
-~/Library/Application Support/NexusAI/models/embeddings/bge-m3-Q4_K_M.gguf
-~/Library/Application Support/NexusAI/models/embeddings/Qwen3-Embedding-8B-Q4_K_M.gguf   # real GGUF, not an HTML page
-~/Library/Application Support/NexusAI/models/rerankers/Qwen3-Reranker-4B-Q4_K_M.gguf
+~/Library/Application Support/PocketMind/models/embeddings/bge-m3-Q4_K_M.gguf
+~/Library/Application Support/PocketMind/models/embeddings/Qwen3-Embedding-8B-Q4_K_M.gguf   # real GGUF, not an HTML page
+~/Library/Application Support/PocketMind/models/rerankers/Qwen3-Reranker-4B-Q4_K_M.gguf
 ```
 
 Download via Hugging Face **Files → resolve/main/…gguf** links (not the repo homepage HTML).
@@ -250,7 +250,7 @@ Deeper module docs: [`KNOWLEDGE_CHAT.md`](./KNOWLEDGE_CHAT.md).
 
 | Variable | Purpose |
 |----------|---------|
-| `NEXUS_DATA_ROOT` | Override data root (default macOS: `~/Library/Application Support/NexusAI`) |
+| `NEXUS_DATA_ROOT` | Override data root (default macOS: `~/Library/Application Support/PocketMind`) |
 | `NEXUS_MODELS_DIR` | Override models directory |
 | `NEXUS_EMBEDDING_MODEL` | Default embedding GGUF path |
 | `NEXUS_CONTEXT_SIZE` | Chat context size |
@@ -277,15 +277,15 @@ Do not commit API keys or `.env` files.
 │       ├── hardware.rs       # System / GPU probes
 │       └── deployment.rs     # Paths and policy
 ├── scripts/
-│   ├── setup_macos_runtimes.sh       # Download arm64 + x64 runtimes
-│   ├── verify_macos_runtimes.sh      # Arch / Metal / --help checks
-│   ├── build_macos_x64_metal_runtime.sh
-│   ├── build_macos_release.sh
-│   └── tauri-dev-macos.sh
-├── bin/llama.cpp/            # Local only (gitignored) — created by setup script
+│   ├── setup_macos_runtimes.sh / verify_macos_runtimes.sh / tauri-dev-macos.sh
+│   ├── install_llama_cpp_runtimes.ps1 / verify_windows_runtimes.ps1 / tauri-dev-low-mem.ps1
+│   ├── setup_linux_runtimes.sh / verify_linux_runtimes.sh / tauri-dev-linux.sh
+│   └── build_macos_x64_metal_runtime.sh / build_macos_release.sh
+├── bin/llama.cpp/            # Local only (gitignored) — created by setup scripts
 ├── distribution/             # Packaging docs
 ├── KNOWLEDGE_CHAT.md
 ├── MAC_BUILD_GUIDE.md
+├── LINUX_BUILD_GUIDE.md
 └── ENTERPRISE_SERVER_MODE.md
 ```
 
@@ -320,9 +320,72 @@ Before giving this repo to another Mac user:
 
 ---
 
+## Quick start (Windows)
+
+```powershell
+git clone https://github.com/noumanshakeel555-lang/nexus-ai-deep-fixed.git
+cd nexus-ai-deep-fixed
+npm install
+npm run setup:windows-runtimes
+npm run verify:windows-runtimes
+# Models under D:\PocketMind\models\ (or %LOCALAPPDATA%\PocketMind\models\)
+npm run tauri:dev:low-mem
+```
+
+Layout:
+
+```text
+bin\llama.cpp\cpu\llama-server.exe
+bin\llama.cpp\cuda\llama-server.exe      # NVIDIA
+bin\llama.cpp\vulkan\llama-server.exe    # AMD/Intel/NVIDIA
+```
+
+Default data root: `D:\PocketMind` when drive D: exists, else `%LOCALAPPDATA%\PocketMind`.
+
+ONNX reranker is **off by default** (Qwen3-Reranker GGUF is primary). To enable ONNX fallback on Windows only:
+
+```powershell
+# optional: rebuild with onnx-reranker feature
+cd src-tauri
+cargo build --features custom-protocol,code-entities,onnx-reranker
+```
+
+---
+
+## Quick start (Linux)
+
+Prerequisites: Node 18+, Rust 1.70+, build tools for Tauri (`webkit2gtk`, etc. — see Tauri Linux docs), `curl`, `python3`.
+
+```bash
+git clone https://github.com/noumanshakeel555-lang/nexus-ai-deep-fixed.git
+cd nexus-ai-deep-fixed
+npm install
+chmod +x scripts/*.sh
+npm run setup:linux-runtimes
+npm run verify:linux-runtimes
+mkdir -p ~/.local/share/PocketMind/models/{llm,embeddings,rerankers}
+# Copy GGUFs into that models tree
+npm run tauri:dev:linux
+```
+
+Layout:
+
+```text
+bin/llama.cpp/cpu/llama-server
+bin/llama.cpp/cuda/llama-server      # optional
+bin/llama.cpp/vulkan/llama-server    # optional
+```
+
+Default data root: `~/.local/share/PocketMind` (override with `NEXUS_DATA_ROOT`).
+
+See [`LINUX_BUILD_GUIDE.md`](./LINUX_BUILD_GUIDE.md).
+
+---
+
 ## Related docs
 
 - [`MAC_BUILD_GUIDE.md`](./MAC_BUILD_GUIDE.md) — packaging, universal targets, signing notes  
+- [`LINUX_BUILD_GUIDE.md`](./LINUX_BUILD_GUIDE.md) — Linux runtimes + Tauri deps  
 - [`KNOWLEDGE_CHAT.md`](./KNOWLEDGE_CHAT.md) — RAG deep dive  
 - [`ENTERPRISE_SERVER_MODE.md`](./ENTERPRISE_SERVER_MODE.md) — org server mode  
 - [`RELEASE_CHECKLIST.md`](./RELEASE_CHECKLIST.md) — release steps  
@@ -332,4 +395,4 @@ Before giving this repo to another Mac user:
 ## License / status
 
 Private project (`"private": true` in `package.json`). Version `0.1.0`.  
-Repository: [noumanshakeel555-lang/nexus-ai-mac](https://github.com/noumanshakeel555-lang/nexus-ai-mac).
+Repository: [noumanshakeel555-lang/nexus-ai-deep-fixed](https://github.com/noumanshakeel555-lang/nexus-ai-deep-fixed).

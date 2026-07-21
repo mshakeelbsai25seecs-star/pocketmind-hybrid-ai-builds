@@ -1,13 +1,13 @@
-# NexusAI Enterprise Server Deployment Kit
+# PocketMind Hybrid AI Enterprise Server Deployment Kit
 
-This folder prepares NexusAI for company-wide server deployment. The NexusAI desktop/mobile apps are clients. The server runs the heavy AI model and exposes one private OpenAI-compatible API endpoint for employees.
+This folder prepares PocketMind Hybrid AI for company-wide server deployment. The PocketMind Hybrid AI desktop/mobile apps are clients. The server runs the heavy AI model and exposes one private OpenAI-compatible API endpoint for employees.
 
 ## Core idea
 
 ```text
-Employees use NexusAI on Windows, macOS, or Android
+Employees use PocketMind Hybrid AI on Windows, macOS, or Android
         ↓
-NexusAI connects to an internal company AI endpoint
+PocketMind Hybrid AI connects to an internal company AI endpoint
         ↓
 The company server runs the model on CPU/GPU hardware
         ↓
@@ -24,8 +24,9 @@ The client app does not need to know whether the server has 1 GPU, 4 GPUs, or a 
 4. Test `/v1/models` from the server.
 5. Test `/v1/chat/completions` from the server.
 6. Add Nginx/reverse proxy and access token protection if required.
-7. Connect NexusAI through **Organization Server**.
-8. Run a 3-5 user pilot before wider rollout.
+7. Connect PocketMind Hybrid AI through **Organization Server**.
+8. Apply Knowledge Chat **optimal server settings** (models, top-k, RANK, context, temperature): see [`SERVER_OPTIMAL_SETTINGS.md`](./SERVER_OPTIMAL_SETTINGS.md).
+9. Run a 3-5 user pilot before wider rollout.
 
 ## Supported profiles
 
@@ -40,7 +41,7 @@ The client app does not need to know whether the server has 1 GPU, 4 GPUs, or a 
 
 ## The app-side endpoint format
 
-In NexusAI, use:
+In PocketMind Hybrid AI, use:
 
 ```text
 Organization Server URL: http://SERVER_IP:8000/v1
@@ -56,4 +57,4 @@ POST /v1/chat/completions
 
 ## Important production rule
 
-Do not promise that one server setup works everywhere. Instead, choose the correct deployment profile for the hardware and security policy. This kit gives multiple safe paths so NexusAI can be deployed in almost every realistic company environment.
+Do not promise that one server setup works everywhere. Instead, choose the correct deployment profile for the hardware and security policy. This kit gives multiple safe paths so PocketMind Hybrid AI can be deployed in almost every realistic company environment.

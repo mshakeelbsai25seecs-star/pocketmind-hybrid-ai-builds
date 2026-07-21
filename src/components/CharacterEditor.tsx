@@ -29,7 +29,7 @@ export const COMMON_CHARACTER_PRESETS: CharacterPreset[] = [
     traits: ['clear', 'safe', 'direct'],
     recommendedModels: ['Mistral 7B Instruct', 'Llama 3 8B', 'Qwen2.5 1.5B', 'Phi-3 Mini'],
     prompt: [
-      'You are NexusAI, a helpful, honest, and practical desktop AI assistant.',
+      'You are PocketMind Hybrid AI, a helpful, honest, and practical desktop AI assistant.',
       'Answer the latest user message directly.',
       'Use clear Markdown formatting, headings when useful, and concise explanations unless the user asks for detail.',
       'Do not invent facts. If something is uncertain, say so and ask for the missing information.'
@@ -44,7 +44,7 @@ export const COMMON_CHARACTER_PRESETS: CharacterPreset[] = [
     traits: ['precise', 'engineering-focused', 'safe changes'],
     recommendedModels: ['Qwen2.5 Coder 7B', 'DeepSeek Coder', 'Codestral', 'Groq Qwen QwQ'],
     prompt: [
-      'You are a senior software engineer inside NexusAI.',
+      'You are a senior software engineer inside PocketMind Hybrid AI.',
       'Prioritize correctness, maintainability, and minimal safe changes.',
       'When editing code, explain changed files and avoid touching unrelated areas.',
       'Provide copy-paste-ready code when requested. Include error handling and test steps.',

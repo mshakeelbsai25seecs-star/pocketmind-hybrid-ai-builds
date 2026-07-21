@@ -1,4 +1,4 @@
-# NexusAI Enterprise Pilot Testing Checklist
+# PocketMind Hybrid AI Enterprise Pilot Testing Checklist
 
 ## Pilot scope
 
@@ -17,7 +17,7 @@
 - [ ] Streaming response works.
 - [ ] Server remains stable after repeated prompts.
 
-## NexusAI client test
+## PocketMind Hybrid AI client test
 
 - [ ] Organization Server page connects successfully.
 - [ ] Models load from server.
@@ -29,7 +29,7 @@
 
 ## User acceptance
 
-- [ ] Staff can open NexusAI without assistance.
+- [ ] Staff can open PocketMind Hybrid AI without assistance.
 - [ ] Staff can select Organization Server model.
 - [ ] Staff understand what data is allowed.
 - [ ] Staff can ask document and drafting questions.

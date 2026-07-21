@@ -6,7 +6,7 @@ PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_DIR"
 
 export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-2}"
-export NEXUS_DATA_ROOT="${NEXUS_DATA_ROOT:-$HOME/Library/Application Support/NexusAI}"
+export NEXUS_DATA_ROOT="${NEXUS_DATA_ROOT:-$HOME/Library/Application Support/PocketMind}"
 
 if [[ ! -d node_modules ]]; then
   echo "Installing npm dependencies..."

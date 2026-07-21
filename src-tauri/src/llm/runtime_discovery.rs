@@ -336,15 +336,24 @@ pub fn resolve_llama_server_binary(gpu_layers: i32) -> AppResult<PathBuf> {
 fn missing_runtime_message() -> String {
     let binary = binary_name();
     format!(
-        "{binary} was not found. NexusAI supports a universal runtime layout:\n\n\
+        "{binary} was not found. PocketMind Hybrid AI supports a universal runtime layout:\n\n\
 Windows:\n\
 bin\\llama.cpp\\cpu\\{binary}       CPU fallback runtime\n\
 bin\\llama.cpp\\cuda\\{binary}      NVIDIA CUDA runtime\n\
 bin\\llama.cpp\\vulkan\\{binary}    AMD/Intel/NVIDIA Vulkan runtime\n\n\
 macOS:\n\
 bin/llama.cpp/macos-arm64-metal/{binary}  Apple Silicon Metal runtime\n\
-bin/llama.cpp/macos-arm64-cpu/{binary}    Apple Silicon CPU fallback\n\n\
-You can also place a single {binary} in bin/llama.cpp for auto mode, or set NEXUS_LLAMA_SERVER."
+bin/llama.cpp/macos-arm64-cpu/{binary}    Apple Silicon CPU fallback\n\
+bin/llama.cpp/macos-x64-metal/{binary}    Intel Mac Metal runtime\n\
+bin/llama.cpp/macos-x64-cpu/{binary}      Intel Mac CPU fallback\n\n\
+Linux:\n\
+bin/llama.cpp/cpu/{binary}       CPU fallback runtime\n\
+bin/llama.cpp/cuda/{binary}      NVIDIA CUDA runtime\n\
+bin/llama.cpp/vulkan/{binary}    AMD/Intel/NVIDIA Vulkan runtime\n\n\
+You can also place a single {binary} in bin/llama.cpp for auto mode, or set NEXUS_LLAMA_SERVER.\n\
+Windows: npm run setup:windows-runtimes && npm run verify:windows-runtimes\n\
+macOS:   npm run setup:macos-runtimes && npm run verify:macos-runtimes\n\
+Linux:   npm run setup:linux-runtimes && npm run verify:linux-runtimes"
     )
 }
 
@@ -434,6 +443,11 @@ pub fn unique_descending_layers(values: Vec<i32>) -> Vec<i32> {
 
 /// Ordered list of `--gpu-layers` values to attempt for a model, from most GPU
 /// to CPU-only. `force_cpu` or `requested_gpu_layers == 0` yields `[0]`.
+///
+/// When free VRAM cannot hold the full model, attempts are capped at the
+/// estimated `partial` layer count. Trying 999 / 120 / … first only burns
+/// multi-minute failed spawn timeouts and does not change the successful
+/// configuration (same weights, same eventual layer count).
 pub fn gpu_layer_attempts(model_path: &str, requested_gpu_layers: i32, force_cpu: bool) -> Vec<i32> {
     if force_cpu || requested_gpu_layers == 0 {
         return vec![0];
@@ -441,22 +455,46 @@ pub fn gpu_layer_attempts(model_path: &str, requested_gpu_layers: i32, force_cpu
 
     let model_size = model_size_bytes(model_path);
     let (_, _, free_vram, _) = hardware_memory_snapshot();
-    let partial = estimate_partial_gpu_layers(model_size, free_vram);
+    let mut partial = estimate_partial_gpu_layers(model_size, free_vram);
+
+    // While chat owns the GPU, stay at or below the remaining-VRAM estimate.
+    if chat_holds_gpu() && partial > 0 && partial < 999 {
+        // leave partial as-is (already from current free VRAM)
+    } else if chat_holds_gpu() && partial >= 999 {
+        // Free-VRAM probe can lag right after chat load; prefer a safe mid ladder.
+        partial = estimate_partial_gpu_layers(model_size, free_vram.saturating_div(2)).max(16);
+    }
 
     if requested_gpu_layers > 0 {
+        let capped = if partial > 0 && partial < 999 {
+            requested_gpu_layers.min(partial)
+        } else {
+            requested_gpu_layers
+        };
         return unique_descending_layers(vec![
-            requested_gpu_layers,
+            capped,
             partial,
             ((partial as f32) * 0.75) as i32,
-            96, 80, 64, 48, 40, 32, 24, 16, 8, 0,
+            16.min(partial.max(0)),
+            8.min(partial.max(0)),
+            0,
         ]);
     }
 
+    if partial >= 999 {
+        // Whole model fits — try full offload, then a short safety ladder.
+        return unique_descending_layers(vec![999, 120, 96, 80, 64, 48, 0]);
+    }
+
+    // Does not fully fit: never attempt above `partial` (avoids ~120s timeouts
+    // per doomed oversized spawn). Final successful layers unchanged.
     unique_descending_layers(vec![
-        999,
         partial,
         ((partial as f32) * 0.85) as i32,
         ((partial as f32) * 0.65) as i32,
-        120, 96, 80, 64, 48, 40, 32, 24, 16, 8, 0,
+        ((partial as f32) * 0.45) as i32,
+        16.min(partial.max(0)),
+        8.min(partial.max(0)),
+        0,
     ])
 }

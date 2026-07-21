@@ -1,6 +1,6 @@
 # Data Knowledge Chat Module
 
-Independent, production-grade folder-grounded RAG for NexusAI. This module is **fully separate** from Fortinet Copilot Mode (`soc` view). Removing or breaking SOC mode does not affect this module, and vice versa.
+Independent, production-grade folder-grounded RAG for PocketMind Hybrid AI. This module is **fully separate** from Fortinet Copilot Mode (`soc` view). Removing or breaking SOC mode does not affect this module, and vice versa.
 
 ## Purpose
 
@@ -99,7 +99,7 @@ flowchart TB
 
 ## Database Schema
 
-Tables added to `%AppData%/NexusAI/app.db`:
+Tables added to `%AppData%/PocketMind Hybrid AI/app.db`:
 
 - **`kc_collections`** — collection metadata, stats, embedding model path, status
 - **`kc_files`** — scanned files per collection (includes `text_fingerprint`, `priority_tier`)
@@ -230,14 +230,16 @@ Knowledge Chat embeddings are **local-first**. When the organization server
 exposes OpenAI-compatible `POST /v1/embeddings` for both partition models, you
 can offload indexing and query embedding to it from **Organization Server**
 settings (toggle + per-partition model ids + optional embeddings base URL). If
-the remote endpoint is unconfigured or unreachable, NexusAI automatically falls
+the remote endpoint is unconfigured or unreachable, PocketMind Hybrid AI automatically falls
 back to local embeddings, so dense retrieval is never silently dropped.
 
-| Mode | Code (Nomic) | Documentation / Runbooks / Logs / General (BGE-M3) | Chat generation |
-|------|----------------|------------------------------------------------------|-----------------|
-| Full local | Local llama-server ×5 indexes | Local llama-server | Local model |
+| Mode | Code partition | Docs / runbooks / logs / general partitions | Chat generation |
+|------|----------------|---------------------------------------------|-----------------|
+| Full local | Local llama-server (partition GGUF) | Local llama-server (partition GGUFs) | Local model |
 | Org chat only | Local llama-server | Local llama-server | Organization server |
-| Org chat + embeddings | Org `/v1/embeddings` (code + BGE-M3) | Org `/v1/embeddings` | Organization server |
+| Org chat + embeddings | Org `/v1/embeddings` (per partition model id) | Org `/v1/embeddings` | Organization server |
+
+Knowledge Chat uses **five local partitions** (code + documentation + runbooks + logs + general) with hybrid RRF retrieval and optional Qwen rerank — not a dual-only Nomic/BGE split.
 
 Server deployment kit: [`enterprise-server/llama-cpp/docker-compose.embeddings.yml`](enterprise-server/llama-cpp/docker-compose.embeddings.yml)
 (GPU) and `docker-compose.embeddings.cpu.yml` (CPU) run one `llama-server
@@ -287,9 +289,41 @@ Remote embeddings are routed through `src-tauri/src/knowledge_chat/remote_embedd
 - Separate sidebar view (`knowledge-chat`)
 - Shared only with generic app infrastructure (file extraction, LLM runtime, SQLite connection)
 
+## Offline PDF OCR + optional Online Image RAG
+
+**Offline is the default.** Scanned PDFs are OCR’d locally via `scripts/soc_pdf_ocr.py` when indexing.
+
+| Setting | Default | Notes |
+|---------|---------|--------|
+| `ocr.engine` | `auto` | `docling` when Python package installed, else legacy Tesseract/Windows OCR |
+| `ocr.preprocess` | on | OpenCV deskew/binarize when `opencv-python-headless` is installed |
+| `ocr.caption_figures` | off | Wraps tables/figures for search at index time (offline) |
+| `ocr.llm_repair` | off | Stronger OCR text repair; raw sidecar kept; optional `NEXUS_OCR_LLM_REPAIR_CMD` |
+| `kc.verify_llm_answer` | on | Pass-2 citation verifier before showing LLM drafts |
+| `image_rag.*` | **off** | OpenAI-compatible vision; requires global switch **and** per-collection opt-in |
+
+Optional Python extras (not bundled in tester zips):
+
+```bash
+pip install pymupdf pillow pytesseract opencv-python-headless docling
+```
+
+**Online Image RAG privacy:** page/region images leave the device only when (1) global Image RAG is enabled in Security settings, (2) the collection checkbox is confirmed, and (3) URL/model/API key are configured. Audit event: `image_rag.query` (no raw images in logs).
+
+Configure under **Security / Advanced → PDF OCR & optional Online Image RAG**, and per collection under **Allow Online Image RAG**.
+
+### Regression checklist (OCR / Image RAG)
+
+- [ ] Text-layer PDF indexes without OCR; scanned PDF produces non-empty chunks
+- [ ] Without Docling/OpenCV installed, legacy OCR path still works
+- [ ] Code partition / AST path unchanged; Server RAG thin client unchanged
+- [ ] Mac Metal / Windows llama.cpp runtime discovery unchanged
+- [ ] Existing OCR cache sidecars remain readable; engine/preprocess changes bump cache namespace
+- [ ] Image RAG global off → zero outbound vision calls
+- [ ] Opt-in + bad API key → offline answer still returned
+
 ## Future Extensions
 
-- OCR pipeline hook for scanned PDFs
 - Collection export/import
 - Multi-folder collections
 - Server-side vector index (sqlite-vec / hnswlib) for very large corpora

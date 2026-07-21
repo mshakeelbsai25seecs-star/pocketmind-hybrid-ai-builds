@@ -1,8 +1,8 @@
-# NexusAI Admin Deployment Guide
+# PocketMind Hybrid AI Admin Deployment Guide
 
 ## Overview
 
-Deploy NexusAI as an offline SOC copilot on Windows Server, Linux, or macOS server hosts. Analysts connect via RDP/remote desktop or distributed desktop installs pointing at shared data paths.
+Deploy PocketMind Hybrid AI as an offline SOC copilot on Windows Server, Linux, or macOS server hosts. Analysts connect via RDP/remote desktop or distributed desktop installs pointing at shared data paths.
 
 ## Hardware guidelines
 
@@ -23,17 +23,17 @@ See `distribution/scripts/BUILD_ALL.md` in the repo. Deliver the release bundle 
 
 **Windows Server:**
 ```powershell
-.\distribution\windows-server\scripts\prepare-server.ps1 -DataRoot "C:\ProgramData\NexusAI"
+.\distribution\windows-server\scripts\prepare-server.ps1 -DataRoot "C:\ProgramData\PocketMind"
 ```
 
 **Linux:**
 ```bash
-sudo bash distribution/linux-server/scripts/prepare-server.sh /var/lib/nexusai
+sudo bash distribution/linux-server/scripts/prepare-server.sh /var/lib/pocketmind
 ```
 
 **macOS server:**
 ```bash
-sudo bash distribution/macos-server/scripts/prepare-server.sh "/Library/Application Support/NexusAI"
+sudo bash distribution/macos-server/scripts/prepare-server.sh "/Library/Application Support/PocketMind"
 ```
 
 ### 3. Install models
@@ -53,7 +53,7 @@ Copy `config/deployment.env.example` and set on the server or service account.
 
 ### 6. First launch checklist
 
-1. Start NexusAI.
+1. Start PocketMind Hybrid AI.
 2. **Settings → Deployment** → verify paths → **Save**.
 3. **Models** → scan folder → import GGUF.
 4. **Fortinet Copilot → Grounded SOC Knowledge** → Link → Scan & Index.

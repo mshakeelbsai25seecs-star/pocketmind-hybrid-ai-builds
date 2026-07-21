@@ -2,11 +2,12 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/api/dialog';
-import { Download, FolderSearch, HardDrive, Link as LinkIcon, RefreshCcw, Search, Trash2, CheckCircle, AlertTriangle, FlaskConical, Globe2, KeyRound, Crown, Zap, Tags } from 'lucide-react';
+import { Download, FolderSearch, HardDrive, Link as LinkIcon, RefreshCcw, Search, Trash2, CheckCircle, AlertTriangle, FlaskConical, Globe2, KeyRound, Crown, Zap, Tags, Power } from 'lucide-react';
 import { useAppStore } from '../store';
 import { LocalModelRecord, OnlineChatModel, ModelCategoryId, Conversation } from '../types';
 import { MODEL_CATEGORIES, OFFLINE_CHAT_CATALOG, ONLINE_CHAT_MODELS } from '../modelCatalog';
 import { pathPlaceholder } from '../platformPaths';
+import { answerModelLabel, remoteModelPath } from '../answerModel';
 
 interface DownloadProgress {
   id: string;
@@ -75,6 +76,7 @@ export default function ModelManager() {
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [healthBusy, setHealthBusy] = useState(false);
   const [healthResult, setHealthResult] = useState<string>('');
+  const [unloadBusy, setUnloadBusy] = useState(false);
   const [activeTab, setActiveTab] = useState<ModelTab>('offline');
   const [categoryFilter, setCategoryFilter] = useState<ModelCategoryId | 'all'>('all');
   const [configuredProviders, setConfiguredProviders] = useState<string[]>([]);
@@ -182,14 +184,18 @@ export default function ModelManager() {
     state.removeConversationLocal(activeId);
   };
 
-  const startFreshChatForModel = async (modelPath: string, modelName: string) => {
+  /** Set the shared answer model for Chat and Knowledge Chat without leaving Models. */
+  const activateAnswerModel = (modelPath: string, modelName: string) => {
     const previousModel = useAppStore.getState().currentModel;
-
+    setCurrentModel(modelPath);
     if (previousModel === modelPath) {
-      announce(`${modelName} is already the active chat model.`);
+      announce(`${modelName} is already the active model for Chat and Knowledge Chat.`);
       return;
     }
+    announce(`${modelName} is now the active model for Chat and Knowledge Chat.`);
+  };
 
+  const startFreshChatForModel = async (modelPath: string, modelName: string) => {
     try {
       // If the previous model switch created an empty draft chat and the user never typed,
       // remove that draft before creating the next one. This prevents sidebar clutter.
@@ -213,12 +219,12 @@ export default function ModelManager() {
     } catch (err) {
       // Keep the model selection if chat creation fails so the user can still create a chat manually.
       setCurrentModel(modelPath);
-      announce(`Model selected, but NexusAI could not create a fresh chat automatically: ${String(err)}`, true);
+      announce(`Model selected, but PocketMind Hybrid AI could not create a fresh chat automatically: ${String(err)}`, true);
     }
   };
 
-  const selectModelForChat = async (model: LocalModelRecord) => {
-    await startFreshChatForModel(model.path, model.name);
+  const selectLocalAnswerModel = (model: LocalModelRecord) => {
+    activateAnswerModel(model.path, model.name);
   };
 
   const chooseFolder = async () => {
@@ -288,6 +294,33 @@ export default function ModelManager() {
     }
   };
 
+  const unloadCurrentModel = async () => {
+    const isRemote = !!currentModel && (currentModel.startsWith('remote:') || currentModel.startsWith('enterprise:'));
+    if (isRemote) {
+      setCurrentModel(null);
+      announce('Online/server model deselected. Nothing was loaded in local memory.');
+      return;
+    }
+    setUnloadBusy(true);
+    setError('');
+    try {
+      // Keep Knowledge Chat embed/rerank warm — releasing them forces a multi-minute
+      // cold start on the next question with no quality benefit.
+      const result = await invoke<{ chat_unloaded: boolean; knowledge_engines_released: boolean; message: string }>(
+        'unload_chat_model',
+        { releaseKnowledgeEngines: false },
+      );
+      // #region agent log
+      fetch('http://127.0.0.1:7414/ingest/28bf2132-0f52-40ef-96b9-4e681c1d7653',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d5a77'},body:JSON.stringify({sessionId:'7d5a77',runId:'unload-feature',hypothesisId:'B',location:'ModelManager.tsx:unload',message:'fe_unload_chat_model',data:{chatUnloaded:result.chat_unloaded,knowledgeReleased:result.knowledge_engines_released},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      announce(result.message || 'Model unloaded from memory.');
+    } catch (err) {
+      announce(String(err), true);
+    } finally {
+      setUnloadBusy(false);
+    }
+  };
+
   const testCurrentModel = async () => {
     if (!currentModel) {
       announce('Select a model first, then run the health test.', true);
@@ -302,7 +335,7 @@ export default function ModelManager() {
         request: {
           prompt: 'Say hello in one sentence.',
           messages: [{ role: 'user', content: 'Say hello in one sentence.' }],
-          system_prompt: 'You are NexusAI. Reply with exactly one short friendly sentence.',
+          system_prompt: 'You are PocketMind Hybrid AI. Reply with exactly one short friendly sentence.',
           params: { ...defaultParams, max_tokens: 96, temperature: 0.35, top_p: 0.8, repetition_penalty: 1.2 },
           model_path: currentModel,
           backend: currentModel.startsWith('remote:') ? 'remote' : 'llama.cpp'
@@ -339,13 +372,23 @@ export default function ModelManager() {
     }
   };
 
-  const useOnlineChatModel = async (model: OnlineChatModel) => {
+  const ensureOnlineKey = (model: OnlineChatModel): boolean => {
     if (model.requiresApiKey && !configuredProviders.includes(model.provider)) {
       announce(`Add your ${model.providerName} API key before using ${model.name}.`, true);
       setActiveTab(model.tier === 'free' ? 'online-free' : 'online-premium');
-      return;
+      return false;
     }
-    await startFreshChatForModel(`remote:${model.provider}/${model.modelId}`, `${model.name} through ${model.providerName}`);
+    return true;
+  };
+
+  const useOnlineAnswerModel = (model: OnlineChatModel) => {
+    if (!ensureOnlineKey(model)) return;
+    activateAnswerModel(remoteModelPath(model), `${model.name} through ${model.providerName}`);
+  };
+
+  const openChatWithOnlineModel = async (model: OnlineChatModel) => {
+    if (!ensureOnlineKey(model)) return;
+    await startFreshChatForModel(remoteModelPath(model), `${model.name} through ${model.providerName}`);
   };
 
   const handleDelete = async (id: string) => {
@@ -369,7 +412,7 @@ export default function ModelManager() {
         <div className="flex items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold mb-1">Model Manager</h1>
-            <p className="text-surface-500">Manage local GGUF models, online chat providers, API keys, model categories, and health checks from one place.</p>
+            <p className="text-surface-500">Manage local GGUF models and online providers. The active answer model is shared by Chat and Knowledge Chat so you can compare offline vs large online models on the same pipeline.</p>
           </div>
           <button onClick={refreshModels} className="btn-secondary flex items-center gap-2">
             <RefreshCcw className="w-4 h-4" /> Refresh
@@ -400,11 +443,18 @@ export default function ModelManager() {
         <div ref={statusRef} className="glass-panel rounded-xl p-5 border border-surface-200 dark:border-surface-800">
           <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
             <div>
-              <p className="text-sm uppercase tracking-wider text-surface-500 font-semibold">Active chat model</p>
-              <p className="font-semibold text-lg break-all">{currentModel ? currentModel.split(/[\\/]/).pop() : 'No model selected yet'}</p>
-              <p className="text-sm text-surface-500 mt-1">{currentModel ? currentModel : 'Import or scan a GGUF file, then click Use. Selecting a model does not create duplicate imports.'}</p>
+              <p className="text-sm uppercase tracking-wider text-surface-500 font-semibold">Active answer model</p>
+              <p className="font-semibold text-lg break-all">{answerModelLabel(currentModel, localModels)}</p>
+              <p className="text-sm text-surface-500 mt-1">{currentModel ? currentModel : 'Choose a local GGUF or an online model below. The same selection drives Chat and Knowledge Chat.'}</p>
             </div>
-            <div className="flex flex-wrap gap-2"><button onClick={testCurrentModel} disabled={!currentModel || healthBusy} className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"><FlaskConical className="w-4 h-4" /> {healthBusy ? 'Checking...' : 'Run Health Check'}</button><button onClick={() => useAppStore.getState().setActiveView('chat')} disabled={!currentModel} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">Open Chat</button></div>
+            <div className="flex flex-wrap gap-2">
+              <button onClick={unloadCurrentModel} disabled={unloadBusy} className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2" title="Free RAM/VRAM by unloading the local chat model and Knowledge Chat search engines">
+                <Power className="w-4 h-4" /> {unloadBusy ? 'Unloading...' : 'Unload from memory'}
+              </button>
+              <button onClick={testCurrentModel} disabled={!currentModel || healthBusy} className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"><FlaskConical className="w-4 h-4" /> {healthBusy ? 'Checking...' : 'Run Health Check'}</button>
+              <button onClick={() => useAppStore.getState().setActiveView('knowledge-chat')} disabled={!currentModel} className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed">Open Knowledge Chat</button>
+              <button onClick={() => useAppStore.getState().setActiveView('chat')} disabled={!currentModel} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">Open Chat</button>
+            </div>
           </div>
         </div>
 
@@ -453,14 +503,14 @@ export default function ModelManager() {
 
         <div className="glass-panel rounded-xl p-5 border border-primary-300/30 bg-primary-50/70 dark:bg-primary-950/20 space-y-3">
           <h2 className="font-semibold flex items-center gap-2"><Zap className="w-5 h-5 text-primary-500" /> Automatic optimization and quantization</h2>
-          <p className="text-sm text-surface-600 dark:text-surface-300">NexusAI keeps both small and enterprise-scale models in the catalog. For local GGUF models, the Runtime optimizer decides the launch plan automatically: full GPU offload first, calculated CPU + GPU split second, and CPU fallback last.</p>
+          <p className="text-sm text-surface-600 dark:text-surface-300">PocketMind Hybrid AI keeps both small and enterprise-scale models in the catalog. For local GGUF models, the Runtime optimizer decides the launch plan automatically: full GPU offload first, calculated CPU + GPU split second, and CPU fallback last.</p>
           <div className="grid md:grid-cols-4 gap-3 text-xs">
             <InfoTile label="Q4_K_M" value="Best size/quality balance" />
             <InfoTile label="Q5_K_M / Q6_K" value="Higher quality, heavier" />
             <InfoTile label="Q8 / FP16" value="Very large hardware only" />
             <InfoTile label="GPU layers -1" value="Automatic optimizer" />
           </div>
-          <p className="text-xs text-surface-500">Large 70B-class entries stay available for organizations with qualified RAM/VRAM. If a device cannot load them, NexusAI should explain the fit issue instead of removing the option or crashing.</p>
+          <p className="text-xs text-surface-500">Large 70B-class entries stay available for organizations with qualified RAM/VRAM. If a device cannot load them, PocketMind Hybrid AI should explain the fit issue instead of removing the option or crashing.</p>
         </div>
 
         <div className="glass-panel rounded-xl p-5 space-y-4">
@@ -491,7 +541,7 @@ export default function ModelManager() {
           <div className="glass-panel rounded-xl overflow-hidden">
             <div className="p-4 border-b border-surface-200 dark:border-surface-800">
               <h2 className="font-semibold flex items-center gap-2"><Globe2 className="w-5 h-5 text-primary-500" /> {activeTab === 'online-free' ? 'Online Free / Free Tier Chat Models' : 'Online Premium Chat Models'}</h2>
-              <p className="text-sm text-surface-500">Bring your own API key. Keys are stored locally using the app vault. Select an online model with Use, then chat normally.</p>
+              <p className="text-sm text-surface-500">Bring your own API key. Keys stay on this device. Use selects the model for Chat and Knowledge Chat so you can test the RAG pipeline with a large online model.</p>
             </div>
             <div className="p-4 grid lg:grid-cols-[320px_1fr] gap-4">
               <div className="rounded-xl border border-surface-200 dark:border-surface-800 p-4 bg-surface-50 dark:bg-surface-950/40 space-y-4">
@@ -534,7 +584,17 @@ export default function ModelManager() {
                       <InfoTile label="Speed" value={model.speed} />
                       <InfoTile label="Quality" value={model.quality} />
                     </div>
-                    <button onClick={() => useOnlineChatModel(model)} className="btn-primary w-full mt-4">Use in Chat</button>
+                    <div className="grid grid-cols-2 gap-2 mt-4">
+                      <button
+                        onClick={() => useOnlineAnswerModel(model)}
+                        className={`w-full px-3 py-2 rounded-lg text-sm font-medium ${currentModel === remoteModelPath(model) ? 'bg-green-600 text-white' : 'bg-primary-600 hover:bg-primary-500 text-white'}`}
+                      >
+                        {currentModel === remoteModelPath(model) ? 'Selected' : 'Use'}
+                      </button>
+                      <button onClick={() => void openChatWithOnlineModel(model)} className="btn-secondary w-full text-sm">
+                        Open Chat
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -583,7 +643,8 @@ export default function ModelManager() {
                     <td className="px-4 py-4 text-sm">{formatBytes(model.size_bytes)}</td>
                     <td className="px-4 py-4 text-xs text-surface-500 max-w-sm truncate" title={model.path}>{model.path}</td>
                     <td className="px-4 py-4 text-right space-x-2">
-                      <button onClick={() => selectModelForChat(model)} className={`px-3 py-1.5 rounded-lg text-sm ${currentModel === model.path ? 'bg-green-600 text-white' : 'bg-primary-600 hover:bg-primary-500 text-white'}`}>{currentModel === model.path ? 'Selected' : 'Use'}</button>
+                      <button onClick={() => selectLocalAnswerModel(model)} className={`px-3 py-1.5 rounded-lg text-sm ${currentModel === model.path ? 'bg-green-600 text-white' : 'bg-primary-600 hover:bg-primary-500 text-white'}`}>{currentModel === model.path ? 'Selected' : 'Use'}</button>
+                      <button onClick={() => void startFreshChatForModel(model.path, model.name)} className="px-3 py-1.5 rounded-lg text-sm btn-secondary">Open Chat</button>
                       <button onClick={() => handleDelete(model.id)} className="p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 transition-colors"><Trash2 className="w-4 h-4" /></button>
                     </td>
                   </tr>
