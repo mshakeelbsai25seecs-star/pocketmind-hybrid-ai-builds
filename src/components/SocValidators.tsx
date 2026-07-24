@@ -33,7 +33,7 @@ function statusClasses(status: SocValidatorStatus): string {
       return 'border-red-200 dark:border-red-900/70 bg-red-50/85 dark:bg-red-950/25 text-red-800 dark:text-red-300';
     case 'info':
     default:
-      return 'border-sky-200 dark:border-sky-900/70 bg-sky-50/85 dark:bg-sky-950/25 text-sky-800 dark:text-sky-300';
+      return 'border-primary-200 dark:border-primary-900/70 bg-primary-50/85 dark:bg-primary-950/25 text-primary-800 dark:text-primary-300';
   }
 }
 
@@ -135,8 +135,8 @@ export default function SocValidators() {
           <p className="text-xs font-bold uppercase tracking-[0.16em] text-red-700 dark:text-red-300">Fail</p>
           <p className="mt-1 text-2xl font-black text-surface-950 dark:text-white">{failCount}</p>
         </div>
-        <div className="rounded-2xl border border-sky-200/70 dark:border-sky-900/60 bg-sky-50/75 dark:bg-sky-950/20 p-4">
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-sky-700 dark:text-sky-300">Info</p>
+        <div className="rounded-2xl border border-primary-200/70 dark:border-primary-900/60 bg-primary-50/75 dark:bg-primary-950/20 p-4">
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-primary-700 dark:text-primary-300">Info</p>
           <p className="mt-1 text-2xl font-black text-surface-950 dark:text-white">{infoCount}</p>
         </div>
       </div>
@@ -198,7 +198,7 @@ export default function SocValidators() {
           </label>
 
           {notice && (
-            <div className="rounded-2xl border border-sky-200/80 dark:border-sky-900/70 bg-sky-50/90 dark:bg-sky-950/25 px-4 py-3 text-sm text-sky-700 dark:text-sky-300">
+            <div className="rounded-2xl border border-primary-200/80 dark:border-primary-900/70 bg-primary-50/90 dark:bg-primary-950/25 px-4 py-3 text-sm text-primary-700 dark:text-primary-300">
               {notice}
             </div>
           )}

@@ -537,7 +537,7 @@ export default function CollectionPanel() {
             Scan a local folder so Knowledge Chat can search it and cite answers.
           </p>
         </div>
-        <Database className="w-5 h-5 text-sky-500 shrink-0" />
+        <Database className="w-5 h-5 text-primary-500 shrink-0" />
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">
@@ -614,7 +614,7 @@ export default function CollectionPanel() {
           </button>
         </div>
         {previewing && (
-          <p className="text-[11px] text-sky-700 dark:text-sky-300 flex items-center gap-1.5">
+          <p className="text-[11px] text-primary-700 dark:text-primary-300 flex items-center gap-1.5">
             <Loader2 className="w-3 h-3 animate-spin" /> Checking folder contents…
           </p>
         )}
@@ -721,7 +721,7 @@ export default function CollectionPanel() {
         </div>
 
         {(busy === 'index' || activeCollection?.status === 'indexing' || indexProgress) && (
-          <div className="rounded-xl border border-sky-200/70 dark:border-sky-800 bg-sky-50/85 dark:bg-sky-950/25 px-4 py-3 text-sm text-sky-800 dark:text-sky-200 space-y-2">
+          <div className="rounded-xl border border-primary-200/70 dark:border-primary-800 bg-primary-50/85 dark:bg-primary-950/25 px-4 py-3 text-sm text-primary-800 dark:text-primary-200 space-y-2">
             <div className="flex items-start justify-between gap-3">
               <p className="font-semibold">
                 {indexProgress?.message
@@ -735,9 +735,9 @@ export default function CollectionPanel() {
             </div>
             {indexProgress && (
               <>
-                <div className="h-2 rounded-full bg-sky-100 dark:bg-sky-900/60 overflow-hidden">
+                <div className="h-2 rounded-full bg-primary-100 dark:bg-primary-900/60 overflow-hidden">
                   <div
-                    className="h-full bg-sky-500 transition-all duration-300"
+                    className="h-full bg-primary-500 transition-all duration-300"
                     style={{
                       width: `${indexProgress.total > 0
                         ? Math.min(100, Math.round((indexProgress.current / indexProgress.total) * 100))
@@ -879,7 +879,7 @@ function CollectionPicker({
                     setOpen(false);
                   }}
                   className={`w-full px-3 py-2 text-left text-sm hover:bg-surface-100 dark:hover:bg-surface-800 ${
-                    item.id === value ? 'bg-sky-50 dark:bg-sky-950/40 text-sky-800 dark:text-sky-200' : ''
+                    item.id === value ? 'bg-primary-50 dark:bg-primary-950/40 text-primary-800 dark:text-primary-200' : ''
                   }`}
                 >
                   <span className="block font-semibold truncate">{item.name}</span>

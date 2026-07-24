@@ -1,7 +1,7 @@
-# Remove PocketMind Hybrid AI data left on C drive after a successful move to D:\PocketMind.
+# Remove PocketMind Hybrid AI data left on C drive after a successful move to runtime-data.
 # Default is dry-run (lists only). Pass -ConfirmCleanup to actually delete.
 param(
-  [string]$TargetRoot = 'D:\PocketMind',
+  [string]$TargetRoot = 'D:\nexus-ai-deep-fixed\runtime-data',
   [string]$LegacyProgramData = "$env:ProgramData\NexusAI",
   [string]$LegacyAppData = "$env:APPDATA\NexusAI",
   [switch]$ConfirmCleanup

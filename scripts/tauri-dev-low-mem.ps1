@@ -16,13 +16,16 @@ if (-not $env:CARGO_TARGET_DIR) {
 New-Item -ItemType Directory -Force -Path $env:CARGO_TARGET_DIR | Out-Null
 
 if (-not $env:NEXUS_DATA_ROOT) {
-  if (Test-Path "D:\PocketMind") {
-    $env:NEXUS_DATA_ROOT = "D:\PocketMind"
+  $repoRuntime = Join-Path $RepoRoot "runtime-data"
+  if (Test-Path $repoRuntime) {
+    $env:NEXUS_DATA_ROOT = $repoRuntime
+  } elseif (Test-Path "D:\nexus-ai-deep-fixed\runtime-data") {
+    $env:NEXUS_DATA_ROOT = "D:\nexus-ai-deep-fixed\runtime-data"
   } elseif (Test-Path "D:\NexusAI") {
-    # Legacy brand root — keep using until D:\PocketMind exists
+    # Legacy brand root — keep using until runtime-data exists
     $env:NEXUS_DATA_ROOT = "D:\NexusAI"
   } elseif (Test-Path "D:\") {
-    $env:NEXUS_DATA_ROOT = "D:\PocketMind"
+    $env:NEXUS_DATA_ROOT = $repoRuntime
     New-Item -ItemType Directory -Force -Path $env:NEXUS_DATA_ROOT | Out-Null
   } else {
     $env:NEXUS_DATA_ROOT = Join-Path $env:LOCALAPPDATA "PocketMind"

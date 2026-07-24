@@ -55,6 +55,16 @@ const sections = [
       'If the local engine becomes stuck, use Diagnostics → Stop Local Engine, then open Runtime → Scan engine.',
     ],
   },
+  {
+    icon: FileText,
+    title: 'Knowledge Chat vs Code Workspace',
+    items: [
+      'Knowledge Chat indexes folders for grounded Q&A and read-only Codebase Explorer on any model size.',
+      'Code Workspace is the write/run agent (list/glob/grep/read/edit/sandbox). It requires a ≥70B local model or a large online/org model.',
+      'Sandbox runs only the app-bundled Python and Node interpreters under your workspace — never a freeform system shell.',
+      'Encrypted backups use a passphrase (.pmbak). Store the passphrase safely; there is no recovery backdoor.',
+    ],
+  },
 ];
 
 export default function HelpCenter() {

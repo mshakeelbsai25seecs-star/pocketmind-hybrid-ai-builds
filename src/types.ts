@@ -121,7 +121,7 @@ export interface GenerationChunk {
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 export type PerformanceMode = 'low-ram' | 'battery-saver' | 'balanced' | 'maximum-speed' | 'maximum-quality';
-export type AppView = 'chat' | 'home' | 'soc' | 'knowledge-chat' | 'hardware' | 'runtime' | 'models' | 'enterprise-server' | 'image-studio' | 'diagnostics' | 'characters' | 'settings' | 'setup' | 'prompts' | 'storage' | 'backup' | 'help';
+export type AppView = 'chat' | 'home' | 'soc' | 'knowledge-chat' | 'code-workspace' | 'hardware' | 'runtime' | 'models' | 'enterprise-server' | 'image-studio' | 'diagnostics' | 'characters' | 'settings' | 'setup' | 'prompts' | 'storage' | 'backup' | 'help';
 
 export type SocKnowledgeCategory =
   | 'FortiSIEM Guide'

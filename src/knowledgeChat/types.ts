@@ -599,7 +599,7 @@ export interface KnowledgeChatMessageMeta {
 export const KC_DEFAULT_EMBEDDING_MODEL = '';
 
 export const QA_CORPUS_NAME = 'PocketMind Hybrid AI QA Corpus';
-export const QA_CORPUS_RUNTIME_PATH = 'D:\\PocketMind\\qa-corpus';
+export const QA_CORPUS_RUNTIME_PATH = 'D:\\nexus-ai-deep-fixed\\runtime-data\\qa-corpus';
 
 export interface KcQaCorpusBootstrapResult {
   collection_id: string;

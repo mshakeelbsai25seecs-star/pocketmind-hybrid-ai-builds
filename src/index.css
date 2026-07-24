@@ -4,10 +4,10 @@
 
 @layer base {
   :root {
-    --color-primary: 14 165 233;
-    --nexus-blue: 14 165 233;
-    --nexus-orange: 249 115 22;
-    --nexus-amber: 245 158 11;
+    /* Conductor green #22C55E */
+    --color-primary: 34 197 94;
+    --conductor-green: 34 197 94;
+    --conductor-green-dim: 22 163 74;
   }
 
   html {
@@ -55,7 +55,7 @@
   }
 
   pre {
-    @apply bg-surface-950 text-surface-50 p-4 rounded-xl overflow-x-auto my-3 max-w-full border border-surface-800;
+    @apply bg-surface-950 text-surface-50 p-4 rounded-xl overflow-x-auto my-3 max-w-full border border-surface-700;
   }
 
   code {
@@ -85,21 +85,21 @@
   }
 
   .panel-shell {
-    @apply rounded-2xl border border-surface-200/90 dark:border-surface-800 bg-white dark:bg-surface-950 shadow-sm;
+    @apply rounded-2xl border border-surface-200/90 dark:border-surface-700 bg-white dark:bg-surface-950 shadow-sm;
   }
 
   .glass-panel {
     @apply min-w-0 border shadow-sm;
-    @apply bg-white/95 dark:bg-surface-950/95 border-surface-200 dark:border-surface-800;
+    @apply bg-white/95 dark:bg-surface-950/95 border-surface-200 dark:border-surface-700;
   }
 
   .premium-card {
     @apply rounded-2xl border shadow-sm transition-colors duration-200;
-    @apply bg-white dark:bg-surface-900 border-surface-200 dark:border-surface-800;
+    @apply bg-white dark:bg-surface-900 border-surface-200 dark:border-surface-700;
   }
 
   .premium-card:hover {
-    @apply border-sky-300 dark:border-sky-700;
+    @apply border-primary-300 dark:border-primary-700;
   }
 
   html[data-perf="low-ram"] .glass-panel,
@@ -111,39 +111,46 @@
 
   html[data-perf="maximum-quality"] .app-gradient-bg {
     background:
-      radial-gradient(circle at 7% 8%, rgba(14, 165, 233, 0.16), transparent 30%),
-      linear-gradient(135deg, rgba(255, 247, 237, 0.96), rgba(239, 246, 255, 0.96));
+      radial-gradient(circle at 7% 8%, rgba(34, 197, 94, 0.10), transparent 30%),
+      linear-gradient(135deg, rgba(250, 250, 250, 0.98), rgba(245, 245, 245, 0.96));
   }
 
   html[data-perf="maximum-quality"].dark .app-gradient-bg {
     background:
-      radial-gradient(circle at 8% 12%, rgba(14, 165, 233, 0.18), transparent 28%),
-      linear-gradient(135deg, rgba(2, 6, 23, 0.98), rgba(15, 23, 42, 0.98));
+      radial-gradient(circle at 8% 12%, rgba(34, 197, 94, 0.12), transparent 28%),
+      linear-gradient(135deg, rgba(0, 0, 0, 0.98), rgba(10, 10, 10, 0.98));
   }
 
   .gradient-text {
     @apply bg-clip-text text-transparent;
-    background-image: linear-gradient(90deg, #0284c7, #f97316, #2563eb);
+    background-image: linear-gradient(90deg, #16a34a, #22c55e, #4ade80);
   }
 
   .nexus-pill {
     @apply inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-bold tracking-wide;
-    background: linear-gradient(90deg, rgba(14,165,233,0.12), rgba(249,115,22,0.12));
-    color: rgb(3, 105, 161);
-    border: 1px solid rgba(14,165,233,0.20);
+    background: rgba(34, 197, 94, 0.12);
+    color: rgb(22, 163, 74);
+    border: 1px solid rgba(34, 197, 94, 0.28);
   }
 
   .dark .nexus-pill {
-    color: rgb(186, 230, 253);
-    border-color: rgba(125,211,252,0.24);
+    color: rgb(187, 247, 208);
+    border-color: rgba(74, 222, 128, 0.28);
+    background: rgba(34, 197, 94, 0.14);
   }
 
+  /* Android onPrimary = black on green in dark; light uses white on green-dim */
   .btn-primary {
-    @apply px-4 py-2 text-white rounded-xl transition-colors duration-200 font-bold shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed bg-sky-600 hover:bg-sky-700;
+    @apply px-4 py-2 rounded-xl transition-colors duration-200 font-bold shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply bg-primary-500 text-surface-950 hover:bg-primary-600;
   }
 
   .btn-primary:hover {
-    @apply bg-sky-700;
+    @apply bg-primary-600;
+  }
+
+  :root:not(.dark) .btn-primary {
+    @apply bg-primary-600 text-white hover:bg-primary-700;
   }
 
   .btn-secondary {
@@ -160,18 +167,18 @@
 
   .input-field {
     @apply w-full px-3 py-2 rounded-xl focus:outline-none transition-all duration-200 placeholder:text-surface-400 border;
-    background: rgba(255,255,255,0.78);
-    border-color: rgba(203, 213, 225, 0.85);
+    background: rgba(255, 255, 255, 0.92);
+    border-color: rgba(229, 229, 229, 0.95);
   }
 
   .input-field:focus {
-    border-color: rgba(14, 165, 233, 0.70);
-    box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.12), 0 0 0 7px rgba(249, 115, 22, 0.06);
+    border-color: rgba(34, 197, 94, 0.70);
+    box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.14);
   }
 
   .dark .input-field {
-    background: rgba(15, 23, 42, 0.78);
-    border-color: rgba(71, 85, 105, 0.82);
+    background: rgba(17, 17, 17, 0.92);
+    border-color: rgba(42, 42, 42, 0.95);
   }
 
   .sidebar-nav-scroll,
@@ -196,15 +203,15 @@
 
   .composer-shell {
     @apply rounded-3xl border shadow-2xl transition-all;
-    background: linear-gradient(135deg, rgba(255,255,255,0.88), rgba(240,249,255,0.78));
-    border-color: rgba(255,255,255,0.76);
-    box-shadow: 0 22px 50px rgba(2, 132, 199, 0.12), 0 10px 26px rgba(249, 115, 22, 0.08);
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(245, 245, 245, 0.90));
+    border-color: rgba(229, 229, 229, 0.90);
+    box-shadow: 0 22px 50px rgba(0, 0, 0, 0.06), 0 10px 26px rgba(34, 197, 94, 0.06);
   }
 
   .dark .composer-shell {
-    background: linear-gradient(135deg, rgba(15,23,42,0.90), rgba(2,6,23,0.82));
-    border-color: rgba(148,163,184,0.16);
-    box-shadow: 0 22px 50px rgba(0,0,0,0.30);
+    background: linear-gradient(135deg, rgba(17, 17, 17, 0.96), rgba(0, 0, 0, 0.90));
+    border-color: rgba(42, 42, 42, 0.95);
+    box-shadow: 0 22px 50px rgba(0, 0, 0, 0.45);
   }
 }
 
@@ -231,25 +238,25 @@
 
   .nexus-md-h1 {
     @apply mt-2 mb-4 text-2xl sm:text-3xl font-black tracking-tight;
-    background: linear-gradient(90deg, #0284c7, #2563eb, #f97316);
+    background: linear-gradient(90deg, #16a34a, #22c55e, #4ade80);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
   }
 
   .nexus-md-h2 {
-    @apply mt-6 mb-3 text-xl sm:text-2xl font-extrabold tracking-tight text-sky-700 dark:text-sky-300;
+    @apply mt-6 mb-3 text-xl sm:text-2xl font-extrabold tracking-tight text-primary-700 dark:text-primary-300;
   }
 
   .nexus-md-h2::before {
     content: '';
     @apply inline-block w-2.5 h-2.5 mr-2 rounded-full align-middle;
-    background: linear-gradient(135deg, #0ea5e9, #f97316);
-    box-shadow: 0 0 20px rgba(14,165,233,0.35);
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+    box-shadow: 0 0 20px rgba(34, 197, 94, 0.35);
   }
 
   .nexus-md-h3 {
-    @apply mt-5 mb-2 text-lg font-bold text-orange-600 dark:text-orange-300;
+    @apply mt-5 mb-2 text-lg font-bold text-primary-600 dark:text-primary-300;
   }
 
   .nexus-md-h4 {
@@ -264,7 +271,7 @@
   .nexus-markdown-user .nexus-md-li,
   .nexus-markdown-user .nexus-md-strong,
   .nexus-markdown-user .nexus-md-em {
-    color: rgba(255,255,255,0.96);
+    color: rgba(255, 255, 255, 0.96);
   }
 
   .nexus-md-strong {
@@ -299,8 +306,8 @@
   .nexus-md-ul > .nexus-md-li::before {
     content: '';
     @apply absolute left-1 top-[0.65rem] w-2 h-2 rounded-full;
-    background: linear-gradient(135deg, #0ea5e9, #f97316);
-    box-shadow: 0 0 14px rgba(249,115,22,0.30);
+    background: linear-gradient(135deg, #22c55e, #16a34a);
+    box-shadow: 0 0 14px rgba(34, 197, 94, 0.30);
   }
 
   .nexus-md-ol > .nexus-md-li {
@@ -329,7 +336,7 @@
 
   .nexus-kc-section {
     @apply mt-5 mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-surface-500 dark:text-surface-400;
-    border-bottom: 1px solid rgba(148, 163, 184, 0.35);
+    border-bottom: 1px solid rgba(163, 163, 163, 0.35);
     padding-bottom: 0.25rem;
   }
 
@@ -379,14 +386,13 @@
   }
 
   .nexus-kc-code {
-    @apply rounded px-1 py-0.5 font-mono text-[0.85em] font-normal text-sky-800 dark:text-sky-200 bg-surface-100 dark:bg-surface-800;
+    @apply rounded px-1 py-0.5 font-mono text-[0.85em] font-normal text-primary-800 dark:text-primary-200 bg-surface-100 dark:bg-surface-800;
     border: none;
     background-image: none;
   }
 
   .nexus-kc-pre {
     @apply my-3 rounded-lg border border-surface-200 dark:border-surface-700 bg-surface-100 dark:bg-surface-900 p-3 overflow-x-auto;
-    /* Preserve exact code indentation / empty () / operators; wrap long lines only. */
     white-space: pre;
     tab-size: 2;
   }
@@ -402,7 +408,6 @@
     min-width: 100%;
   }
 
-  /* Legacy overrides kept for any mixed markup paths */
   .nexus-markdown-knowledge .nexus-md-p {
     @apply my-2 font-normal text-[0.9375rem] leading-[1.65] text-surface-700 dark:text-surface-300;
   }
@@ -413,52 +418,52 @@
 
   .nexus-md-quote {
     @apply my-4 rounded-2xl border-l-4 px-4 py-3 italic text-surface-700 dark:text-surface-200;
-    border-left-color: rgb(14 165 233);
-    background: linear-gradient(135deg, rgba(14,165,233,0.10), rgba(249,115,22,0.08));
+    border-left-color: rgb(34 197 94);
+    background: linear-gradient(135deg, rgba(34, 197, 94, 0.10), rgba(34, 197, 94, 0.04));
   }
 
   .nexus-md-link {
-    @apply font-semibold text-sky-600 dark:text-sky-300 underline decoration-sky-300/70 underline-offset-4 hover:text-orange-500;
+    @apply font-semibold text-primary-600 dark:text-primary-300 underline decoration-primary-300/70 underline-offset-4 hover:text-primary-500;
   }
 
   .nexus-inline-code {
     @apply rounded-lg px-1.5 py-0.5 text-[0.88em] font-semibold;
-    color: rgb(3 105 161);
-    background: linear-gradient(135deg, rgba(14,165,233,0.12), rgba(249,115,22,0.10));
-    border: 1px solid rgba(14,165,233,0.18);
+    color: rgb(22 163 74);
+    background: rgba(34, 197, 94, 0.12);
+    border: 1px solid rgba(34, 197, 94, 0.22);
   }
 
   .dark .nexus-inline-code {
-    color: rgb(186 230 253);
-    background: linear-gradient(135deg, rgba(14,165,233,0.16), rgba(249,115,22,0.12));
-    border-color: rgba(125,211,252,0.18);
+    color: rgb(187 247 208);
+    background: rgba(34, 197, 94, 0.16);
+    border-color: rgba(74, 222, 128, 0.22);
   }
 
   .nexus-code-shell {
     @apply my-4 overflow-hidden rounded-2xl border shadow-xl max-w-full;
-    border-color: rgba(14,165,233,0.22);
-    background: rgba(2, 6, 23, 0.98);
-    box-shadow: 0 20px 50px rgba(2, 6, 23, 0.24), 0 10px 22px rgba(14,165,233,0.10);
+    border-color: rgba(34, 197, 94, 0.22);
+    background: rgba(0, 0, 0, 0.98);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35), 0 10px 22px rgba(34, 197, 94, 0.08);
   }
 
   .nexus-code-toolbar {
     @apply flex items-center justify-between gap-3 px-4 py-2 border-b;
-    border-color: rgba(148,163,184,0.18);
-    background: linear-gradient(90deg, rgba(14,165,233,0.22), rgba(249,115,22,0.14));
+    border-color: rgba(163, 163, 163, 0.18);
+    background: linear-gradient(90deg, rgba(34, 197, 94, 0.22), rgba(22, 163, 74, 0.12));
   }
 
   .nexus-code-language {
-    @apply text-[11px] font-black uppercase tracking-[0.18em] text-sky-100;
+    @apply text-[11px] font-black uppercase tracking-[0.18em] text-primary-100;
   }
 
   .nexus-code-copy {
     @apply inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs font-bold text-white transition-all;
-    background: rgba(255,255,255,0.12);
-    border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(255, 255, 255, 0.14);
   }
 
   .nexus-code-copy:hover {
-    background: rgba(255,255,255,0.20);
+    background: rgba(255, 255, 255, 0.20);
     transform: translateY(-1px);
   }
 
@@ -478,7 +483,7 @@
 
   .nexus-md-table-wrap {
     @apply my-4 max-w-full overflow-x-auto rounded-2xl border;
-    border-color: rgba(14,165,233,0.20);
+    border-color: rgba(34, 197, 94, 0.20);
   }
 
   .nexus-md-table {
@@ -486,17 +491,17 @@
   }
 
   .nexus-md-th {
-    @apply px-3 py-2 text-left font-bold text-sky-700 dark:text-sky-200;
-    background: linear-gradient(90deg, rgba(14,165,233,0.12), rgba(249,115,22,0.10));
+    @apply px-3 py-2 text-left font-bold text-primary-700 dark:text-primary-200;
+    background: rgba(34, 197, 94, 0.10);
   }
 
   .nexus-md-td {
-    @apply border-t border-surface-200/70 dark:border-surface-800 px-3 py-2 text-surface-700 dark:text-surface-200;
+    @apply border-t border-surface-200/70 dark:border-surface-700 px-3 py-2 text-surface-700 dark:text-surface-200;
   }
 
   .nexus-md-hr {
     @apply my-5 border-0 h-px;
-    background: linear-gradient(90deg, transparent, rgba(14,165,233,0.6), rgba(249,115,22,0.45), transparent);
+    background: linear-gradient(90deg, transparent, rgba(34, 197, 94, 0.55), transparent);
   }
 }
 

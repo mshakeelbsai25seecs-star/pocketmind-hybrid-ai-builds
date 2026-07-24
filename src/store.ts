@@ -42,6 +42,7 @@ interface AppState {
   socAutoRetrieveKnowledge: boolean;
   deploymentConfig: DeploymentConfig | null;
   productConfig: ProductConfig | null;
+  workspaceEpoch: number;
 
   defaultParams: GenerationParams;
 
@@ -88,6 +89,7 @@ interface AppState {
   setSocAutoRetrieveKnowledge: (enabled: boolean) => void;
   setDeploymentConfig: (config: DeploymentConfig | null) => void;
   setProductConfig: (config: ProductConfig | null) => void;
+  bumpWorkspaceEpoch: () => void;
   setDefaultParams: (params: Partial<GenerationParams>) => void;
   resetDefaultParams: () => void;
 }
@@ -140,6 +142,8 @@ export const useAppStore = create<AppState>()(
       socAutoRetrieveKnowledge: true,
       deploymentConfig: null,
       productConfig: null,
+      workspaceEpoch: 0,
+
       defaultParams: SAFE_DEFAULT_PARAMS,
 
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
@@ -254,6 +258,7 @@ export const useAppStore = create<AppState>()(
       setSocAutoRetrieveKnowledge: (enabled) => set({ socAutoRetrieveKnowledge: enabled }),
       setDeploymentConfig: (config) => set({ deploymentConfig: config }),
       setProductConfig: (config) => set({ productConfig: config }),
+      bumpWorkspaceEpoch: () => set((state) => ({ workspaceEpoch: state.workspaceEpoch + 1 })),
       setDefaultParams: (params) => set((state) => ({
         defaultParams: { ...state.defaultParams, ...params }
       })),

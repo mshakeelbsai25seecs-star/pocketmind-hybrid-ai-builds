@@ -1001,7 +1001,7 @@ export function confidenceBadgeClass(confidence: KcRetrievalConfidence): string 
     case 'high':
       return 'text-emerald-700 dark:text-emerald-300';
     case 'medium':
-      return 'text-sky-700 dark:text-sky-300';
+      return 'text-primary-700 dark:text-primary-300';
     case 'low':
       return 'text-amber-700 dark:text-amber-300';
     default:

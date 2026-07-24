@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
-import { AlertTriangle, CheckCircle, ClipboardCopy, Cpu, HardDrive, RefreshCcw, ShieldAlert, ShieldCheck, Terminal, Wrench, XCircle } from 'lucide-react';
+import { AlertTriangle, CheckCircle, ClipboardCopy, Cpu, HardDrive, RefreshCcw, ShieldAlert, ShieldCheck, Terminal, Wrench, XCircle, Hammer } from 'lucide-react';
 import { useAppStore } from '../store';
 import { RuntimeDiagnostics } from '../types';
+import { getToolingStatus, repairTooling } from '../api/powerFeatures';
+import type { ToolingStatus } from '../codeWorkspace/types';
 
 function fmtBytes(bytes?: number | null) {
   if (!bytes || bytes <= 0) return 'Unknown';
@@ -14,6 +16,7 @@ function fmtBytes(bytes?: number | null) {
 export default function DiagnosticsPanel() {
   const store = useAppStore();
   const [diag, setDiag] = useState<RuntimeDiagnostics | null>(null);
+  const [tooling, setTooling] = useState<ToolingStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -27,7 +30,29 @@ export default function DiagnosticsPanel() {
     } finally { setBusy(false); }
   };
 
-  useEffect(() => { run(); }, []);
+  useEffect(() => { run(); void loadTooling(); }, []);
+
+  const loadTooling = async () => {
+    try {
+      setTooling(await getToolingStatus());
+    } catch {
+      setTooling(null);
+    }
+  };
+
+  const repairBundledTooling = async () => {
+    setBusy(true);
+    setMessage('Repairing bundled tooling…');
+    try {
+      const status = await repairTooling();
+      setTooling(status);
+      setMessage(status.message);
+    } catch (e) {
+      setMessage(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const report = useMemo(() => {
     if (!diag) return '';
@@ -66,6 +91,47 @@ export default function DiagnosticsPanel() {
     finally { setBusy(false); }
   };
 
+  const runTokPerSec = async () => {
+    if (!store.currentModel) {
+      setMessage('Select a model in Models first, then run the tok/s test.');
+      return;
+    }
+    setBusy(true);
+    setMessage('Running tok/s benchmark…');
+    const started = performance.now();
+    try {
+      const isRemote = store.currentModel.startsWith('remote:') || store.currentModel.startsWith('enterprise:');
+      const chunk = await invoke<{ text: string; tokens_generated: number; tokens_per_sec: number }>('generate_response', {
+        request: {
+          prompt: 'Count from 1 to 20 in words, then stop.',
+          system_prompt: null,
+          params: {
+            ...store.defaultParams,
+            max_tokens: 64,
+            temperature: 0.2,
+          },
+          model_path: store.currentModel,
+          backend: isRemote ? (store.currentModel.startsWith('enterprise:') ? 'enterprise' : 'remote') : 'local',
+          messages: [{ role: 'user', content: 'Count from 1 to 20 in words, then stop.' }],
+        },
+      });
+      const elapsed = (performance.now() - started) / 1000;
+      const reported = chunk.tokens_per_sec || 0;
+      const approx = chunk.tokens_generated > 0 && elapsed > 0
+        ? chunk.tokens_generated / elapsed
+        : (chunk.text?.length || 0) / 4 / Math.max(elapsed, 0.001);
+      setMessage(
+        reported > 0
+          ? `≈ ${reported.toFixed(1)} tok/s (engine) · ${approx.toFixed(1)} tok/s wall · ${chunk.tokens_generated || 0} tokens in ${elapsed.toFixed(1)}s`
+          : `≈ ${approx.toFixed(1)} tok/s wall · ${chunk.tokens_generated || Math.round((chunk.text?.length || 0) / 4)} tokens in ${elapsed.toFixed(1)}s`
+      );
+    } catch (e) {
+      setMessage(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="flex-1 overflow-y-auto p-6">
       <div className="max-w-6xl mx-auto space-y-6">
@@ -76,6 +142,7 @@ export default function DiagnosticsPanel() {
           </div>
           <div className="flex flex-wrap gap-2">
             <button onClick={run} className="btn-primary flex items-center gap-2" disabled={busy}><RefreshCcw className={`w-4 h-4 ${busy ? 'animate-spin' : ''}`} /> Run checks</button>
+            <button onClick={runTokPerSec} className="btn-secondary flex items-center gap-2" disabled={busy}><Cpu className="w-4 h-4" /> Run tok/s test</button>
             <button onClick={killEngine} className="btn-secondary flex items-center gap-2"><Terminal className="w-4 h-4" /> Stop Local Engine</button>
             <button onClick={copyReport} className="btn-secondary flex items-center gap-2"><ClipboardCopy className="w-4 h-4" /> Copy report</button>
           </div>
@@ -88,6 +155,26 @@ export default function DiagnosticsPanel() {
           <Metric icon={ShieldCheck} label="Runtime health" value={diag?.llama_server_help_ok ? 'OK' : 'Check required'} ok={!!diag?.llama_server_help_ok} />
           <Metric icon={Cpu} label="Memory available" value={fmtBytes(diag?.memory_available_bytes)} ok={(diag?.memory_available_bytes || 0) > 4_000_000_000} />
           <Metric icon={HardDrive} label="Selected model" value={diag?.selected_model_exists ? 'Valid' : 'Not ready'} ok={!!diag?.selected_model_exists} />
+        </div>
+
+        <div className="glass-panel rounded-2xl p-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="font-bold text-xl flex items-center gap-2"><Hammer className="w-5 h-5 text-primary-500" /> Code Workspace tooling</h2>
+            <div className="flex gap-2">
+              <button onClick={() => void loadTooling()} className="btn-secondary text-sm" disabled={busy}>Refresh</button>
+              <button onClick={() => void repairBundledTooling()} className="btn-primary text-sm" disabled={busy}>Repair tooling</button>
+            </div>
+          </div>
+          {tooling ? (
+            <div className="grid md:grid-cols-3 gap-3 text-sm">
+              <Info label="Ripgrep" value={tooling.rg_ok ? tooling.rg_path : 'Missing'} />
+              <Info label="Python" value={tooling.python_ok ? tooling.python_path : 'Missing'} />
+              <Info label="Node" value={tooling.node_ok ? tooling.node_path : 'Missing'} />
+            </div>
+          ) : (
+            <p className="text-sm text-surface-500">Tooling status unavailable. Run Repair tooling after `scripts/fetch-tooling`.</p>
+          )}
+          {tooling?.message && <p className="text-xs text-surface-500">{tooling.message}</p>}
         </div>
 
         <div className="glass-panel rounded-2xl overflow-hidden">

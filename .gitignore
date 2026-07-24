@@ -45,13 +45,34 @@ bin/
 dist-zips/
 distribution/**/payload/
 
+# Vendored Code Workspace tooling (keep MANIFEST.json only)
+src-tauri/resources/tooling/**/*
+!src-tauri/resources/tooling/MANIFEST.json
+
 # Models & customer data (never commit GGUF weights or SOC corpora)
-models/
+runtime-data/
+/models/
 *.gguf
 **/models/**/*.gguf
+!android/app/src/main/java/**/feature/models/
 company-data/
+
+# Local scratch / build logs
+tmp_rerank*
+android/compile-log*.txt
+android/release-log*.txt
+_research/
 
 # OS / temp
 *.tmp
 *.temp
 .cache/
+
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/keystore.properties
+*.jks
+*.keystore

@@ -209,11 +209,11 @@ export default function EnterpriseServer() {
   return (
     <div className="flex-1 overflow-y-auto p-6 space-y-6">
       <div className="relative overflow-hidden rounded-[2rem] border border-white/70 dark:border-surface-800 bg-white/80 dark:bg-surface-950/75 shadow-2xl backdrop-blur-2xl p-6">
-        <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full bg-sky-300/30 blur-3xl" />
-        <div className="absolute -left-16 bottom-0 h-52 w-52 rounded-full bg-orange-300/25 blur-3xl" />
+        <div className="absolute -right-20 -top-20 h-56 w-56 rounded-full bg-primary-300/30 blur-3xl" />
+        <div className="absolute -left-16 bottom-0 h-52 w-52 rounded-full bg-primary-300/20 blur-3xl" />
         <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
           <div className="space-y-3 max-w-3xl">
-            <div className="inline-flex items-center gap-2 rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-bold text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/40 dark:text-sky-200">
+            <div className="inline-flex items-center gap-2 rounded-full border border-primary-200 bg-primary-50 px-3 py-1 text-xs font-bold text-primary-700 dark:border-primary-900/60 dark:bg-primary-950/40 dark:text-primary-200">
               <Building2 className="w-4 h-4" /> Organization Server Mode
             </div>
             <h1 className="text-3xl lg:text-4xl font-black tracking-tight gradient-text">Private AI for the whole company</h1>
@@ -223,12 +223,12 @@ export default function EnterpriseServer() {
           </div>
           <div className="grid grid-cols-2 gap-3 text-sm min-w-[18rem]">
             <div className="premium-card p-4">
-              <Zap className="w-5 h-5 text-orange-500 mb-2" />
+              <Zap className="w-5 h-5 text-primary-500 mb-2" />
               <div className="font-bold">Large models</div>
               <div className="text-xs text-surface-500">32B / 70B / enterprise models on server hardware</div>
             </div>
             <div className="premium-card p-4">
-              <ShieldCheck className="w-5 h-5 text-sky-500 mb-2" />
+              <ShieldCheck className="w-5 h-5 text-primary-500 mb-2" />
               <div className="font-bold">Private network</div>
               <div className="text-xs text-surface-500">Data can stay inside the company environment</div>
             </div>
@@ -239,7 +239,7 @@ export default function EnterpriseServer() {
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 premium-card p-6 space-y-5">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-sky-500 to-orange-500 flex items-center justify-center text-white shadow-lg">
+            <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-primary-600 to-primary-400 flex items-center justify-center text-surface-950 shadow-lg">
               <ServerCog className="w-6 h-6" />
             </div>
             <div>
@@ -401,7 +401,7 @@ export default function EnterpriseServer() {
         </div>
 
         <div className="premium-card p-6 space-y-4">
-          <h2 className="text-xl font-black flex items-center gap-2"><Sparkles className="w-5 h-5 text-orange-500" /> Deployment design</h2>
+          <h2 className="text-xl font-black flex items-center gap-2"><Sparkles className="w-5 h-5 text-primary-500" /> Deployment design</h2>
           <div className="space-y-3 text-sm text-surface-600 dark:text-surface-300">
             <p><strong>Client apps:</strong> Windows, macOS, and Android connect to one private endpoint.</p>
             <p><strong>Server:</strong> IT loads the model once on GPU hardware and controls access centrally.</p>
@@ -419,7 +419,7 @@ export default function EnterpriseServer() {
             <h2 className="text-xl font-black">Available server models</h2>
             <p className="text-sm text-surface-500">Models returned by the private server. Selecting one creates a new Organization Server chat.</p>
           </div>
-          {serverReady && <div className="text-xs font-bold px-3 py-1 rounded-full bg-sky-100 text-sky-700 dark:bg-sky-950/50 dark:text-sky-200">Ready: {selectedModel}</div>}
+          {serverReady && <div className="text-xs font-bold px-3 py-1 rounded-full bg-primary-100 text-primary-700 dark:bg-primary-950/50 dark:text-primary-200">Ready: {selectedModel}</div>}
         </div>
 
         {models.length === 0 ? (
@@ -431,14 +431,14 @@ export default function EnterpriseServer() {
             {models.map(model => {
               const active = selectedModel === model.id || store.currentModel === `enterprise:${model.id}`;
               return (
-                <div key={model.id} className={`rounded-3xl border p-4 transition-all ${active ? 'border-sky-400 bg-sky-50/80 dark:bg-sky-950/30 shadow-lg' : 'border-white/70 dark:border-surface-800 bg-white/70 dark:bg-surface-950/50'}`}>
+                <div key={model.id} className={`rounded-3xl border p-4 transition-all ${active ? 'border-primary-400 bg-primary-50/80 dark:bg-primary-950/30 shadow-lg' : 'border-white/70 dark:border-surface-800 bg-white/70 dark:bg-surface-950/50'}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <h3 className="font-black truncate" title={model.id}>{normalizeModelName(model.id)}</h3>
                       <p className="text-xs text-surface-500 truncate" title={model.id}>{model.id}</p>
                       {model.owned_by && <p className="text-xs text-surface-400 mt-1">Owner: {model.owned_by}</p>}
                     </div>
-                    {active && <CheckCircle2 className="w-5 h-5 text-sky-500 shrink-0" />}
+                    {active && <CheckCircle2 className="w-5 h-5 text-primary-500 shrink-0" />}
                   </div>
                   <button onClick={() => useModel(model.id)} disabled={busy} className="btn-primary w-full mt-4">
                     Use in Chat

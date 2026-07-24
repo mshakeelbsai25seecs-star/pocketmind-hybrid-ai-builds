@@ -1,13 +1,21 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import {
   MessageSquare, Cpu, Download, Users, Settings,
   Plus, Home, Wrench, BookOpen,
   HardDrive, DatabaseBackup, HelpCircle, ImageIcon, MoreVertical,
-  Edit3, Trash2, Copy, PanelLeftClose, PanelLeftOpen, Monitor, ServerCog, ShieldCheck, LibraryBig
+  Edit3, Trash2, Copy, PanelLeftClose, PanelLeftOpen, Monitor, ServerCog, ShieldCheck, LibraryBig,
+  Menu, ChevronDown, ChevronRight, Code2, Layers
 } from 'lucide-react';
 import { useAppStore } from '../store';
 import { invoke } from '@tauri-apps/api/tauri';
 import { Conversation, Message } from '../types';
+import { FEATURE_FLAGS } from '../featureFlags';
+import {
+  createWorkspaceProfile,
+  listWorkspaceProfiles,
+  switchWorkspaceProfile,
+} from '../api/powerFeatures';
+import type { WorkspaceProfile } from '../codeWorkspace/types';
 
 function safeTitle(title: string | null | undefined): string {
   const value = (title || '').trim();
@@ -36,10 +44,15 @@ export default function Sidebar() {
   const setMessages = useAppStore(s => s.setMessages);
   const setupCompleted = useAppStore(s => s.setupCompleted);
   const currentModel = useAppStore(s => s.currentModel);
+  const bumpWorkspaceEpoch = useAppStore(s => s.bumpWorkspaceEpoch);
 
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [busyChatId, setBusyChatId] = useState<string | null>(null);
   const [search, setSearch] = useState('');
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [profiles, setProfiles] = useState<WorkspaceProfile[]>([]);
+  const [activeProfileId, setActiveProfileId] = useState('default');
+  const [profileBusy, setProfileBusy] = useState(false);
 
   const filteredConversations = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -50,6 +63,57 @@ export default function Sidebar() {
   const refreshConversations = async () => {
     const convs = await invoke<Conversation[]>('get_conversations');
     useAppStore.getState().setConversations(convs);
+  };
+
+  const loadProfiles = async () => {
+    if (!FEATURE_FLAGS.workspaceProfiles) return;
+    try {
+      const rows = await listWorkspaceProfiles();
+      setProfiles(rows);
+      const { getActiveWorkspaceProfile } = await import('../api/powerFeatures');
+      const activeId = await getActiveWorkspaceProfile();
+      if (activeId && rows.some(p => p.id === activeId)) setActiveProfileId(activeId);
+      else {
+        const active = rows.find(p => p.is_default) || rows[0];
+        if (active) setActiveProfileId(active.id);
+      }
+    } catch (err) {
+      console.error('Failed to load workspace profiles:', err);
+    }
+  };
+
+  useEffect(() => { void loadProfiles(); }, []);
+
+  const handleProfileSwitch = async (profileId: string) => {
+    if (profileId === activeProfileId || profileBusy) return;
+    setProfileBusy(true);
+    try {
+      await switchWorkspaceProfile(profileId);
+      setActiveProfileId(profileId);
+      useAppStore.getState().setActiveConversation(null);
+      await refreshConversations();
+      bumpWorkspaceEpoch();
+    } catch (err) {
+      console.error('Profile switch failed:', err);
+      alert(String(err));
+    } finally {
+      setProfileBusy(false);
+    }
+  };
+
+  const handleCreateProfile = async () => {
+    const name = window.prompt('New workspace profile name');
+    if (!name?.trim()) return;
+    setProfileBusy(true);
+    try {
+      const created = await createWorkspaceProfile(name.trim());
+      await loadProfiles();
+      await handleProfileSwitch(created.id);
+    } catch (err) {
+      alert(String(err));
+    } finally {
+      setProfileBusy(false);
+    }
   };
 
   const handleNewChat = async () => {
@@ -128,24 +192,30 @@ export default function Sidebar() {
     }
   };
 
-  const navItems = [
+  const primaryNavItems = [
     { id: 'home' as const, icon: Home, label: 'Home' },
     { id: 'chat' as const, icon: MessageSquare, label: 'Chats' },
     { id: 'soc' as const, icon: ShieldCheck, label: 'Fortinet Copilot' },
     { id: 'knowledge-chat' as const, icon: LibraryBig, label: 'Knowledge Chat' },
-    { id: 'hardware' as const, icon: Cpu, label: 'System' },
-    { id: 'runtime' as const, icon: Monitor, label: 'Runtime' },
+    ...(FEATURE_FLAGS.codeWorkspace ? [{ id: 'code-workspace' as const, icon: Code2, label: 'Code Workspace' }] : []),
     { id: 'models' as const, icon: Download, label: 'Models' },
     { id: 'enterprise-server' as const, icon: ServerCog, label: 'Org Server' },
     { id: 'image-studio' as const, icon: ImageIcon, label: 'Image Studio' },
+  ];
+
+  const toolsNavItems = [
+    { id: 'hardware' as const, icon: Cpu, label: 'System' },
+    { id: 'runtime' as const, icon: Monitor, label: 'Runtime' },
     { id: 'diagnostics' as const, icon: Wrench, label: 'Diagnostics' },
     { id: 'prompts' as const, icon: BookOpen, label: 'Prompts' },
+    { id: 'characters' as const, icon: Users, label: 'Characters' },
     { id: 'storage' as const, icon: HardDrive, label: 'Storage' },
     { id: 'backup' as const, icon: DatabaseBackup, label: 'Backup' },
-    { id: 'characters' as const, icon: Users, label: 'Characters' },
     { id: 'help' as const, icon: HelpCircle, label: 'Help' },
     { id: 'settings' as const, icon: Settings, label: 'Settings' },
   ];
+
+  const toolsActive = toolsNavItems.some(item => item.id === activeView);
 
   if (!sidebarOpen) {
     return (
@@ -167,11 +237,11 @@ export default function Sidebar() {
         aria-label="Close navigation overlay"
       />
 
-      <aside className="fixed left-0 top-0 h-full w-[min(20rem,calc(100vw-1rem))] md:w-72 bg-white dark:bg-surface-950 border-r border-surface-200 dark:border-surface-800 flex flex-col z-40 shadow-sm">
-        <div className="p-4 flex items-center justify-between border-b border-surface-200 dark:border-surface-800 flex-shrink-0">
+      <aside className="fixed left-0 top-0 h-full w-[min(20rem,calc(100vw-1rem))] md:w-72 bg-white dark:bg-surface-950 border-r border-surface-200 dark:border-surface-700 flex flex-col z-40 shadow-sm">
+        <div className="p-4 flex items-center justify-between border-b border-surface-200 dark:border-surface-700 flex-shrink-0">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-sky-600 flex items-center justify-center shrink-0">
-              <MessageSquare className="w-5 h-5 text-white" />
+            <div className="w-10 h-10 rounded-xl bg-primary-500 flex items-center justify-center shrink-0">
+              <MessageSquare className="w-5 h-5 text-surface-950" />
             </div>
             <div className="min-w-0">
               <span className="font-black text-lg tracking-tight block truncate text-surface-950 dark:text-white">PocketMind Hybrid AI</span>
@@ -190,8 +260,36 @@ export default function Sidebar() {
         <div className="flex-shrink-0 border-b border-surface-200 dark:border-surface-800">
           <div className="px-3 py-3">
             <p className="px-1 pb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-surface-500">Workspace</p>
+            {FEATURE_FLAGS.workspaceProfiles && profiles.length > 0 && (
+              <div className="mb-2 px-1 space-y-1">
+                <label className="text-[10px] font-semibold uppercase tracking-wider text-surface-400 flex items-center gap-1">
+                  <Layers className="w-3 h-3" /> Profile
+                </label>
+                <div className="flex gap-1">
+                  <select
+                    value={activeProfileId}
+                    disabled={profileBusy}
+                    onChange={e => void handleProfileSwitch(e.target.value)}
+                    className="input-field text-xs flex-1 py-1.5"
+                  >
+                    {profiles.map(p => (
+                      <option key={p.id} value={p.id}>{p.name}{p.is_default ? ' (default)' : ''}</option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    disabled={profileBusy}
+                    onClick={() => void handleCreateProfile()}
+                    className="p-2 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800"
+                    title="Create profile"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
             <div className="max-h-[34vh] overflow-y-auto pr-1 sidebar-nav-scroll space-y-1">
-              {navItems.map(item => (
+              {primaryNavItems.map(item => (
                 <button
                   key={item.id}
                   onClick={() => {
@@ -200,14 +298,54 @@ export default function Sidebar() {
                   }}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors duration-150 ${
                     activeView === item.id
-                      ? 'bg-sky-100 dark:bg-sky-950/40 text-sky-700 dark:text-sky-200'
-                      : 'hover:bg-surface-100 dark:hover:bg-surface-800 text-surface-600 dark:text-surface-400 hover:text-surface-950 dark:hover:text-white' 
+                      ? 'bg-primary-100 dark:bg-primary-950/40 text-primary-700 dark:text-primary-200'
+                      : 'hover:bg-surface-100 dark:hover:bg-surface-800 text-surface-600 dark:text-surface-400 hover:text-surface-950 dark:hover:text-white'
                   }`}
                 >
                   <item.icon className="w-5 h-5 shrink-0" />
                   <span className="font-semibold text-sm truncate">{item.label}</span>
                 </button>
               ))}
+
+              <div className="pt-1">
+                <button
+                  onClick={() => setToolsOpen(open => !open)}
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors duration-150 ${
+                    toolsActive
+                      ? 'bg-primary-100 dark:bg-primary-950/40 text-primary-700 dark:text-primary-200'
+                      : 'hover:bg-surface-100 dark:hover:bg-surface-800 text-surface-600 dark:text-surface-400 hover:text-surface-950 dark:hover:text-white'
+                  }`}
+                  title="Secondary tools"
+                >
+                  <Menu className="w-5 h-5 shrink-0" />
+                  <span className="font-semibold text-sm truncate flex-1 text-left">Tools</span>
+                  {toolsOpen || toolsActive
+                    ? <ChevronDown className="w-4 h-4 shrink-0 opacity-70" />
+                    : <ChevronRight className="w-4 h-4 shrink-0 opacity-70" />}
+                </button>
+                {(toolsOpen || toolsActive) && (
+                  <div className="mt-1 ml-2 pl-2 border-l border-surface-200 dark:border-surface-700 space-y-1">
+                    {toolsNavItems.map(item => (
+                      <button
+                        key={item.id}
+                        onClick={() => {
+                          setActiveView(item.id);
+                          setToolsOpen(true);
+                          if (window.innerWidth < 768) setSidebarOpen(false);
+                        }}
+                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors duration-150 ${
+                          activeView === item.id
+                            ? 'bg-primary-100 dark:bg-primary-950/40 text-primary-700 dark:text-primary-200'
+                            : 'hover:bg-surface-100 dark:hover:bg-surface-800 text-surface-600 dark:text-surface-400 hover:text-surface-950 dark:hover:text-white'
+                        }`}
+                      >
+                        <item.icon className="w-4 h-4 shrink-0" />
+                        <span className="font-medium text-sm truncate">{item.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

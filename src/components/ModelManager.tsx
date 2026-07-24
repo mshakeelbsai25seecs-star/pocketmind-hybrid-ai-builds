@@ -46,6 +46,14 @@ function formatSpeed(bytesPerSec: number): string {
   return `${(bytesPerSec / 1024 / 1024).toFixed(2)} MB/s`;
 }
 
+function quantFamilyKey(name: string): string {
+  return name
+    .replace(/\.gguf$/i, '')
+    .replace(/[._-]?(q[0-9](_k_[msl])?|Q[0-9](_K_[MSL])?)/g, '')
+    .replace(/[._-]+$/g, '')
+    .toLowerCase();
+}
+
 function formatTime(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return 'Unknown';
   const h = Math.floor(seconds / 3600);
@@ -109,6 +117,33 @@ export default function ModelManager() {
 
   const onlineFreeModels = useMemo(() => ONLINE_CHAT_MODELS.filter(m => m.tier === 'free' && (categoryFilter === 'all' || m.categories.includes(categoryFilter))), [categoryFilter]);
   const onlinePremiumModels = useMemo(() => ONLINE_CHAT_MODELS.filter(m => m.tier === 'premium' && (categoryFilter === 'all' || m.categories.includes(categoryFilter))), [categoryFilter]);
+
+  const quantFamilies = useMemo(() => {
+    const map = new Map<string, LocalModelRecord[]>();
+    for (const model of localModels) {
+      const key = quantFamilyKey(model.name || model.path);
+      const list = map.get(key) || [];
+      list.push(model);
+      map.set(key, list);
+    }
+    return Array.from(map.entries())
+      .filter(([, siblings]) => siblings.length > 1)
+      .map(([family, siblings]) => ({ family, siblings }));
+  }, [localModels]);
+
+  const catalogQuantGroups = useMemo(() => {
+    const map = new Map<string, DownloadableModel[]>();
+    for (const model of OFFLINE_CHAT_CATALOG) {
+      const key = quantFamilyKey(model.name);
+      const list = map.get(key) || [];
+      list.push(model);
+      map.set(key, list);
+    }
+    return Array.from(map.entries())
+      .filter(([, siblings]) => siblings.some(s => /Q[458]/i.test(s.quant)))
+      .slice(0, 8)
+      .map(([family, siblings]) => ({ family, siblings }));
+  }, []);
 
   const refreshModels = async () => {
     const models = await invoke<LocalModelRecord[]>('get_local_models');
@@ -473,26 +508,31 @@ export default function ModelManager() {
                 <p className={`font-medium ${error ? 'text-red-500' : ''}`}>{error || status}</p>
                 {progress && (
                   <div className="space-y-3">
-                    <div className="flex items-center justify-between text-sm text-surface-500">
-                      <span className="truncate">{progress.file_name}</span>
-                      <span>{percent.toFixed(2)}%</span>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="truncate text-sm text-surface-500">{progress.file_name}</span>
+                      <span className="text-sm font-semibold">{percent.toFixed(1)}%</span>
+                    </div>
+                    <div className="rounded-xl border border-primary-300/40 bg-primary-50/80 dark:bg-primary-950/30 px-4 py-3 flex items-end justify-between gap-3">
+                      <div>
+                        <p className="text-[11px] uppercase tracking-[0.16em] text-surface-500 font-bold">Download speed</p>
+                        <p className="text-3xl font-black tabular-nums text-primary-700 dark:text-primary-300">
+                          {formatSpeed(progress.speed_bytes_per_sec)}
+                        </p>
+                      </div>
+                      <div className="text-right text-sm text-surface-500">
+                        <p>ETA {formatTime(eta)}</p>
+                        <p>{formatBytes(progress.downloaded_bytes)} / {formatBytes(progress.total_bytes)}</p>
+                      </div>
                     </div>
                     <div className="h-3 bg-surface-200 dark:bg-surface-800 rounded-full overflow-hidden">
                       <div className="h-full bg-primary-500 transition-all duration-300" style={{ width: `${percent}%` }} />
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
-                      <InfoTile label="Downloaded" value={formatBytes(progress.downloaded_bytes)} />
-                      <InfoTile label="Total" value={formatBytes(progress.total_bytes)} />
-                      <InfoTile label="Speed" value={formatSpeed(progress.speed_bytes_per_sec)} />
-                      <InfoTile label="ETA" value={formatTime(eta)} />
                       <InfoTile label="Remaining" value={formatBytes(remaining)} />
                       <InfoTile label="Elapsed" value={formatTime(progress.elapsed_secs)} />
                       <InfoTile label="Retries" value={String(progress.retries)} />
                       <InfoTile label="Status" value={progress.status} />
                     </div>
-                    <p className="text-xs text-surface-500 break-all">
-                      Raw bytes: {progress.downloaded_bytes.toLocaleString()} / {progress.total_bytes?.toLocaleString() || 'unknown'}
-                    </p>
                   </div>
                 )}
               </div>
@@ -510,7 +550,7 @@ export default function ModelManager() {
             <InfoTile label="Q8 / FP16" value="Very large hardware only" />
             <InfoTile label="GPU layers -1" value="Automatic optimizer" />
           </div>
-          <p className="text-xs text-surface-500">Large 70B-class entries stay available for organizations with qualified RAM/VRAM. If a device cannot load them, PocketMind Hybrid AI should explain the fit issue instead of removing the option or crashing.</p>
+          <p className="text-xs text-surface-500">Large 70B / 72B / 405B / GLM-5.2 and other frontier entries stay listed for organizations with qualified RAM/VRAM or hosted APIs. Offline rows without a direct URL are import targets (paste a .gguf link or import a file). If a device cannot load a local weight, PocketMind explains the fit issue instead of removing the option or crashing.</p>
         </div>
 
         <div className="glass-panel rounded-xl p-5 space-y-4">
@@ -614,6 +654,62 @@ export default function ModelManager() {
             ))}
           </div>
         )}
+
+        <div className="glass-panel rounded-xl p-5 border border-surface-200 dark:border-surface-800 space-y-4">
+          <div>
+            <h2 className="font-semibold">Quantization switch</h2>
+            <p className="text-sm text-surface-500">
+              Pick among available GGUF quants for the same model family (Q4 / Q5 / Q8). This does not re-encode a single file.
+            </p>
+          </div>
+          {quantFamilies.length > 0 ? (
+            <div className="space-y-3">
+              {quantFamilies.map(group => (
+                <div key={group.family} className="rounded-xl border border-surface-200 dark:border-surface-800 p-3">
+                  <p className="text-sm font-semibold mb-2">{group.family}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {group.siblings.map(sibling => (
+                      <button
+                        key={sibling.id}
+                        onClick={() => selectLocalAnswerModel(sibling)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
+                          currentModel === sibling.path
+                            ? 'bg-green-600 text-white'
+                            : 'bg-surface-100 dark:bg-surface-800 hover:bg-primary-100 dark:hover:bg-primary-950/40'
+                        }`}
+                      >
+                        {(sibling.quantization || 'GGUF')} · Use
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-surface-500">
+              Import or download more than one quant of the same base model to switch here. Catalog downloads below offer Q4 / Q5 / Q8 when URLs are known.
+            </p>
+          )}
+          <div className="grid md:grid-cols-2 gap-3">
+            {catalogQuantGroups.map(group => (
+              <div key={group.family} className="rounded-xl border border-surface-200 dark:border-surface-800 p-3 space-y-2">
+                <p className="text-sm font-semibold">{group.siblings[0]?.name || group.family}</p>
+                <div className="flex flex-wrap gap-2">
+                  {group.siblings.map(item => (
+                    <button
+                      key={item.id}
+                      onClick={() => void startDownload(item)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary-600 hover:bg-primary-500 text-white"
+                      disabled={!!downloadingId || !item.url}
+                    >
+                      Download {item.quant}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
 
         <div className="glass-panel rounded-xl overflow-hidden">
           <div className="p-4 border-b border-surface-200 dark:border-surface-800 flex items-center justify-between">

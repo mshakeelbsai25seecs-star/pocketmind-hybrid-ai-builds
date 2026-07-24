@@ -75,7 +75,7 @@ export default function CollectionHealthPanel() {
             Dense coverage, per-partition models, HNSW indexes, FTS status, and failed files.
           </p>
         </div>
-        {busy ? <Loader2 className="w-5 h-5 animate-spin text-sky-500" /> : <Activity className="w-5 h-5 text-sky-500" />}
+        {busy ? <Loader2 className="w-5 h-5 animate-spin text-primary-500" /> : <Activity className="w-5 h-5 text-primary-500" />}
       </div>
 
       {error && (
@@ -102,7 +102,7 @@ export default function CollectionHealthPanel() {
           {(() => {
             const remoteOn = Boolean(remoteEmbed?.embeddings_enabled);
             return (
-              <div className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs ${remoteOn ? 'border-sky-200/70 dark:border-sky-900 bg-sky-50/70 dark:bg-sky-950/20 text-sky-800 dark:text-sky-200' : 'border-white/70 dark:border-surface-800 bg-surface-50/85 dark:bg-surface-950/55 text-surface-600 dark:text-surface-300'}`}>
+              <div className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs ${remoteOn ? 'border-primary-200/70 dark:border-primary-900 bg-primary-50/70 dark:bg-primary-950/20 text-primary-800 dark:text-primary-200' : 'border-white/70 dark:border-surface-800 bg-surface-50/85 dark:bg-surface-950/55 text-surface-600 dark:text-surface-300'}`}>
                 {remoteOn ? <Cloud className="w-4 h-4 shrink-0" /> : <HardDrive className="w-4 h-4 shrink-0" />}
                 <span>
                   <strong>Embeddings:</strong> {remoteOn ? 'organization server (local fallback)' : 'local'}
@@ -180,20 +180,20 @@ export default function CollectionHealthPanel() {
           </div>
 
           {readiness && (
-            <div className="rounded-xl border border-sky-200/70 dark:border-sky-900 bg-sky-50/70 dark:bg-sky-950/20 p-3 space-y-2">
-              <p className="text-xs font-bold uppercase tracking-[0.14em] text-sky-800 dark:text-sky-300">
+            <div className="rounded-xl border border-primary-200/70 dark:border-primary-900 bg-primary-50/70 dark:bg-primary-950/20 p-3 space-y-2">
+              <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary-800 dark:text-primary-300">
                 Server deployment targets
               </p>
-              <p className="text-xs text-sky-900 dark:text-sky-100">
+              <p className="text-xs text-primary-900 dark:text-primary-100">
                 Best-quality models for a server deployment (this machine may run smaller local fallbacks):
               </p>
-              <ul className="text-xs text-sky-900 dark:text-sky-100 space-y-1 list-disc pl-4">
+              <ul className="text-xs text-primary-900 dark:text-primary-100 space-y-1 list-disc pl-4">
                 <li><strong>Document search:</strong> BGE-M3 (or organization knowledge embeddings)</li>
                 <li><strong>Code search:</strong> Qwen3-Embedding-8B when GPU/RAM allows</li>
                 <li><strong>Result ranking:</strong> Qwen3-Reranker-4B under models/rerankers</li>
                 <li><strong>Answer model:</strong> 70B-class instruct or organization OpenAI-compatible endpoint</li>
               </ul>
-              <p className="text-[11px] text-sky-800/90 dark:text-sky-200/90">
+              <p className="text-[11px] text-primary-800/90 dark:text-primary-200/90">
                 After chunking/retrieval upgrades, rebuild each collection index for best accuracy.
               </p>
             </div>

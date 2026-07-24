@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Conductor.build–inspired: black canvas, white type, green action. -->
+    <color name="pm_black">#FF000000</color>
+    <color name="pm_near_black">#FF0A0A0A</color>
+    <color name="pm_panel">#FF111111</color>
+    <color name="pm_green">#FF22C55E</color>
+    <color name="pm_green_dim">#FF16A34A</color>
+    <color name="pm_white">#FFFFFFFF</color>
+    <color name="pm_muted">#FFA3A3A3</color>
+    <color name="pm_border">#FF2A2A2A</color>
+    <color name="pm_background_light">#FFFAFAFA</color>
+    <color name="pm_background_dark">#FF000000</color>
+    <color name="pm_surface_light">#FFFFFFFF</color>
+    <color name="pm_surface_dark">#FF0A0A0A</color>
+    <color name="pm_on_primary">#FF000000</color>
+    <color name="pm_on_background_light">#FF0A0A0A</color>
+    <color name="pm_on_background_dark">#FFFFFFFF</color>
+    <color name="pm_error">#FFF87171</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>

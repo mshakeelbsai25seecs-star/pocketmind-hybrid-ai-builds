@@ -1288,8 +1288,8 @@ export default function SocKnowledgeBase() {
       </div>
 
       <div className="grid md:grid-cols-5 gap-3">
-        <div className="rounded-2xl border border-sky-200/70 dark:border-sky-900/70 bg-sky-50/75 dark:bg-sky-950/20 p-4">
-          <p className="text-xs font-bold uppercase tracking-[0.16em] text-sky-700 dark:text-sky-300">Retrieval Mode</p>
+        <div className="rounded-2xl border border-primary-200/70 dark:border-primary-900/70 bg-primary-50/75 dark:bg-primary-950/20 p-4">
+          <p className="text-xs font-bold uppercase tracking-[0.16em] text-primary-700 dark:text-primary-300">Retrieval Mode</p>
           <p className="mt-1 text-sm font-black text-surface-950 dark:text-white">{SOC_RAG_RETRIEVAL_MODE_LABELS[retrievalMode]}</p>
         </div>
         <div className="rounded-2xl border border-white/70 dark:border-surface-800 bg-surface-50/85 dark:bg-surface-950/55 p-4">
@@ -1394,7 +1394,7 @@ Dense vectors are generated locally from indexed chunks when a local GGUF embedd
                 Shows what is registered, indexed, unindexed, metadata-only, and failed before a company data pack arrives.
               </p>
             </div>
-            <BarChart3 className="w-5 h-5 text-sky-500 shrink-0" />
+            <BarChart3 className="w-5 h-5 text-primary-500 shrink-0" />
           </div>
 
           <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1431,7 +1431,7 @@ Dense vectors are generated locally from indexed chunks when a local GGUF embedd
             </div>
           </div>
 
-          <div className="rounded-2xl border border-sky-200/70 dark:border-sky-900/70 bg-sky-50/75 dark:bg-sky-950/20 px-4 py-3 text-xs leading-5 text-sky-800 dark:text-sky-300">
+          <div className="rounded-2xl border border-primary-200/70 dark:border-primary-900/70 bg-primary-50/75 dark:bg-primary-950/20 px-4 py-3 text-xs leading-5 text-primary-800 dark:text-primary-300">
             Compact mode is faster. Full mode sends the complete selected context/report when deeper local model review is needed.
           </div>
 
@@ -1589,7 +1589,7 @@ Dense vectors are generated locally from indexed chunks when a local GGUF embedd
             </div>
           )}
           {notice && (
-            <div className="rounded-2xl border border-sky-200/80 dark:border-sky-900/70 bg-sky-50/90 dark:bg-sky-950/25 px-4 py-3 text-sm text-sky-700 dark:text-sky-300">
+            <div className="rounded-2xl border border-primary-200/80 dark:border-primary-900/70 bg-primary-50/90 dark:bg-primary-950/25 px-4 py-3 text-sm text-primary-700 dark:text-primary-300">
               {notice}
             </div>
           )}
@@ -1644,7 +1644,7 @@ Dense vectors are generated locally from indexed chunks when a local GGUF embedd
               const indexable = isSocIndexableTextPath(resource.filePath);
               const status = resource.indexStatus || 'not_indexed';
               return (
-                <article key={resource.id} className={`rounded-2xl border p-4 transition-all ${selected ? 'border-sky-300 dark:border-sky-700 bg-sky-50/75 dark:bg-sky-950/25' : 'border-white/70 dark:border-surface-800 bg-white/70 dark:bg-surface-900/45'}`}>
+                <article key={resource.id} className={`rounded-2xl border p-4 transition-all ${selected ? 'border-primary-300 dark:border-primary-700 bg-primary-50/75 dark:bg-primary-950/25' : 'border-white/70 dark:border-surface-800 bg-white/70 dark:bg-surface-900/45'}`}>
                   <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
@@ -1776,7 +1776,7 @@ Dense vectors are generated locally from indexed chunks when a local GGUF embedd
               const chunk: SocKnowledgeChunk = result.chunk;
               const selected = selectedSocKnowledgeChunkIds.includes(chunk.id);
               return (
-                <article key={chunk.id} className={`rounded-2xl border p-4 ${selected ? 'border-sky-300 dark:border-sky-700 bg-sky-50/80 dark:bg-sky-950/25' : 'border-white/70 dark:border-surface-800 bg-white/70 dark:bg-surface-900/45'}`}>
+                <article key={chunk.id} className={`rounded-2xl border p-4 ${selected ? 'border-primary-300 dark:border-primary-700 bg-primary-50/80 dark:bg-primary-950/25' : 'border-white/70 dark:border-surface-800 bg-white/70 dark:bg-surface-900/45'}`}>
                   <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
                     <div>
                       <p className="text-xs font-bold uppercase tracking-[0.16em] text-surface-500">Result {index + 1}</p>

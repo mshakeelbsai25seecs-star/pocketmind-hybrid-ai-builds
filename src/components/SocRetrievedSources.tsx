@@ -66,7 +66,7 @@ export default function SocRetrievedSources({
       )}
 
       {notice && !loading && (
-        <p className="text-xs text-sky-700 dark:text-sky-300">{notice}</p>
+        <p className="text-xs text-primary-700 dark:text-primary-300">{notice}</p>
       )}
 
       {!loading && !error && hits.length > 0 && (

@@ -45,6 +45,9 @@
         "unmaximize": true,
         "unminimize": true,
         "startDragging": true
+      },
+      "globalShortcut": {
+        "all": true
       }
     },
     "bundle": {
@@ -71,7 +74,10 @@
         "frameworks": [],
         "providerShortName": null,
         "signingIdentity": null
-      }
+      },
+      "resources": [
+        "resources/tooling/**"
+      ]
     },
     "security": {
       "csp": "default-src 'self'; connect-src 'self' http: https:; img-src 'self' blob: data: https:; style-src 'self' 'unsafe-inline'"

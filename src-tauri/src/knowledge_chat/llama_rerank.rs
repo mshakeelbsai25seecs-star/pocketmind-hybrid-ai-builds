@@ -748,16 +748,16 @@ mod tests {
     #[test]
     fn detects_qwen3_gguf_reranker() {
         assert!(is_llama_rerank_model(
-            r"D:\PocketMind\models\rerankers\Qwen3-Reranker-4B-Q4_K_M.gguf"
+            r"D:\nexus-ai-deep-fixed\runtime-data\models\rerankers\Qwen3-Reranker-4B-Q4_K_M.gguf"
         ));
         assert!(is_llama_rerank_model(
             r"D:\NexusAI\models\rerankers\custom-cross-encoder.gguf"
         ));
         assert!(!is_llama_rerank_model(
-            r"D:\PocketMind\models\rerankers\bge-reranker-base.onnx"
+            r"D:\nexus-ai-deep-fixed\runtime-data\models\rerankers\bge-reranker-base.onnx"
         ));
         assert!(!is_llama_rerank_model(
-            r"D:\PocketMind\models\embeddings\Qwen3-Embedding-8B.gguf"
+            r"D:\nexus-ai-deep-fixed\runtime-data\models\embeddings\Qwen3-Embedding-8B.gguf"
         ));
     }
 

@@ -22,7 +22,7 @@ function toneClasses(tone: StatusCardProps['tone'] = 'sky'): string {
     case 'indigo':
       return 'border-indigo-200/80 dark:border-indigo-900/70 bg-indigo-50/80 dark:bg-indigo-950/20 text-indigo-700 dark:text-indigo-300';
     default:
-      return 'border-sky-200/80 dark:border-sky-900/70 bg-sky-50/80 dark:bg-sky-950/20 text-sky-700 dark:text-sky-300';
+      return 'border-primary-200/80 dark:border-primary-900/70 bg-primary-50/80 dark:bg-primary-950/20 text-primary-700 dark:text-primary-300';
   }
 }
 

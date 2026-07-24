@@ -356,7 +356,7 @@ export default function SocReports({ workspaceInput, generatedPrompt }: SocRepor
 
           <div className="border-t border-white/70 dark:border-surface-800 p-4 space-y-3">
             {notice && (
-              <div className="rounded-2xl border border-sky-200/80 dark:border-sky-900/70 bg-sky-50/90 dark:bg-sky-950/25 px-4 py-3 text-sm text-sky-700 dark:text-sky-300">
+              <div className="rounded-2xl border border-primary-200/80 dark:border-primary-900/70 bg-primary-50/90 dark:bg-primary-950/25 px-4 py-3 text-sm text-primary-700 dark:text-primary-300">
                 {notice}
               </div>
             )}

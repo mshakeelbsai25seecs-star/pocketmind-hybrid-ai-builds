@@ -26,9 +26,10 @@ export function applyThemeClass(theme: BootTheme = readStoredTheme()): boolean {
   const root = document.documentElement;
   root.classList.toggle('dark', dark);
   root.style.colorScheme = dark ? 'dark' : 'light';
-  root.style.backgroundColor = dark ? '#020617' : '#f8fafc';
+  // Conductor blacks / off-white (match Android PmBlack / PmLightBg)
+  root.style.backgroundColor = dark ? '#000000' : '#fafafa';
   if (document.body) {
-    document.body.style.backgroundColor = dark ? '#020617' : '#f8fafc';
+    document.body.style.backgroundColor = dark ? '#000000' : '#fafafa';
   }
   return dark;
 }

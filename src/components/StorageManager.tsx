@@ -1,8 +1,17 @@
 import { useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
-import { HardDrive, Trash2, RefreshCw, AlertTriangle, Database, FolderOpen, CheckCircle2 } from 'lucide-react';
+import { open } from '@tauri-apps/api/dialog';
+import { HardDrive, Trash2, RefreshCw, AlertTriangle, Database, FolderOpen, CheckCircle2, Scan, FolderInput } from 'lucide-react';
 import { useAppStore } from '../store';
 import { LocalModelRecord } from '../types';
+import { FEATURE_FLAGS } from '../featureFlags';
+import {
+  batchProcessFolder,
+  deleteOrphanFiles,
+  scanOrphanFiles,
+  verifyLocalModelIntegrity,
+} from '../api/powerFeatures';
+import type { BatchFileResult, IntegrityResult, OrphanItem } from '../codeWorkspace/types';
 
 function formatBytes(bytes?: number | null) {
   if (!bytes || bytes <= 0) return '0 B';
@@ -18,6 +27,10 @@ export default function StorageManager() {
   const { localModels, conversations, messages, systemInfo, setLocalModels } = store;
   const [busyId, setBusyId] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [orphans, setOrphans] = useState<OrphanItem[]>([]);
+  const [orphanBusy, setOrphanBusy] = useState(false);
+  const [batchResults, setBatchResults] = useState<BatchFileResult[]>([]);
+  const [verifyResult, setVerifyResult] = useState<IntegrityResult | null>(null);
 
   const totalModelBytes = useMemo(() => localModels.reduce((sum, m) => sum + Math.max(0, m.size_bytes || 0), 0), [localModels]);
   const messageCount = useMemo(() => Object.values(messages).reduce((sum, list) => sum + list.length, 0), [messages]);
@@ -38,6 +51,71 @@ export default function StorageManager() {
       setStatus(`Removed ${model.name} from the library.`);
     } catch (err) {
       setStatus(`Failed to remove model: ${String(err)}`);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const scanOrphans = async () => {
+    if (!FEATURE_FLAGS.orphanCleaner) return;
+    setOrphanBusy(true);
+    try {
+      const rows = await scanOrphanFiles();
+      setOrphans(rows);
+      setStatus(`Found ${rows.length} orphan / stale file(s) (dry-run).`);
+    } catch (err) {
+      setStatus(String(err));
+    } finally {
+      setOrphanBusy(false);
+    }
+  };
+
+  const confirmDeleteOrphans = async () => {
+    const safe = orphans.filter(o => o.safe_to_delete);
+    if (safe.length === 0) {
+      setStatus('No safe-to-delete orphans selected.');
+      return;
+    }
+    if (!window.confirm(`Delete ${safe.length} orphan file(s)? This cannot be undone.`)) return;
+    setOrphanBusy(true);
+    try {
+      const n = await deleteOrphanFiles(safe.map(o => o.path));
+      setStatus(`Deleted ${n} file(s).`);
+      await scanOrphans();
+    } catch (err) {
+      setStatus(String(err));
+    } finally {
+      setOrphanBusy(false);
+    }
+  };
+
+  const runBatchProcess = async () => {
+    if (!FEATURE_FLAGS.batchDocumentProcessing) return;
+    const folder = await open({ directory: true, multiple: false });
+    if (typeof folder !== 'string') return;
+    setOrphanBusy(true);
+    try {
+      const rows = await batchProcessFolder(folder);
+      setBatchResults(rows);
+      setStatus(`Batch processed ${rows.length} file(s).`);
+    } catch (err) {
+      setStatus(String(err));
+    } finally {
+      setOrphanBusy(false);
+    }
+  };
+
+  const verifyModel = async (model: LocalModelRecord) => {
+    if (!FEATURE_FLAGS.modelSha256Verify) return;
+    setBusyId(model.id);
+    try {
+      const result = await verifyLocalModelIntegrity(model.path);
+      setVerifyResult(result);
+      setStatus(result.matched_expected === false
+        ? `SHA-256 mismatch for ${model.name}`
+        : `Verified ${model.name} · ${result.sha256.slice(0, 12)}…`);
+    } catch (err) {
+      setStatus(String(err));
     } finally {
       setBusyId(null);
     }
@@ -114,6 +192,14 @@ export default function StorageManager() {
                     <span className="text-xs rounded-full bg-surface-100 dark:bg-surface-800 px-2 py-1">{model.backend}</span>
                   </div>
                 </div>
+                <div className="flex flex-wrap gap-2">
+                <button
+                  disabled={busyId === model.id}
+                  onClick={() => verifyModel(model)}
+                  className="inline-flex items-center justify-center gap-2 rounded-xl border border-surface-200 dark:border-surface-700 px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                >
+                  <CheckCircle2 className="w-4 h-4" /> Verify SHA-256
+                </button>
                 <button
                   disabled={busyId === model.id}
                   onClick={() => removeModelRecord(model)}
@@ -121,11 +207,54 @@ export default function StorageManager() {
                 >
                   <Trash2 className="w-4 h-4" /> Remove record
                 </button>
+                </div>
               </div>
             ))}
           </div>
         )}
       </section>
+
+      {FEATURE_FLAGS.orphanCleaner && (
+        <section className="rounded-3xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 p-6 shadow-soft space-y-4">
+          <h2 className="text-xl font-bold flex items-center gap-2"><Scan className="w-5 h-5" /> Orphan cleaner</h2>
+          <p className="text-sm text-surface-500">Scan for stale partial downloads, orphan GGUF files, and old cache temp files.</p>
+          <div className="flex flex-wrap gap-2">
+            <button disabled={orphanBusy} onClick={() => void scanOrphans()} className="btn-secondary text-sm flex items-center gap-2">
+              <Scan className="w-4 h-4" /> Scan (dry-run)
+            </button>
+            <button disabled={orphanBusy || orphans.length === 0} onClick={() => void confirmDeleteOrphans()} className="btn-secondary text-sm text-red-600 dark:text-red-400">
+              Delete safe orphans
+            </button>
+            {FEATURE_FLAGS.batchDocumentProcessing && (
+              <button disabled={orphanBusy} onClick={() => void runBatchProcess()} className="btn-secondary text-sm flex items-center gap-2">
+                <FolderInput className="w-4 h-4" /> Batch process folder
+              </button>
+            )}
+          </div>
+          {orphans.length > 0 && (
+            <div className="max-h-56 overflow-y-auto divide-y divide-surface-200 dark:divide-surface-800 rounded-xl border border-surface-200 dark:border-surface-800">
+              {orphans.map(o => (
+                <div key={o.path} className="p-3 text-xs flex justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-semibold truncate">{o.path}</p>
+                    <p className="text-surface-500">{o.kind} · {formatBytes(o.size_bytes)}{o.safe_to_delete ? '' : ' · active model — skip'}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          {verifyResult && (
+            <p className="text-xs text-surface-500 break-all">Last verify: {verifyResult.sha256} ({formatBytes(verifyResult.size_bytes)})</p>
+          )}
+          {batchResults.length > 0 && (
+            <div className="max-h-40 overflow-y-auto text-xs space-y-1">
+              {batchResults.slice(0, 20).map(r => (
+                <div key={r.path} className={r.ok ? 'text-surface-600' : 'text-red-500'}>{r.path}: {r.summary}</div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       <section className="rounded-3xl border border-amber-200 dark:border-amber-900/60 bg-amber-50 dark:bg-amber-950/20 p-5 flex gap-3 text-sm text-amber-800 dark:text-amber-200">
         <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />

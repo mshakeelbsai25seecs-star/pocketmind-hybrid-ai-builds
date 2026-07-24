@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PocketMind Hybrid AI</string>
+
+    <!-- Permissions -->
+    <string name="permission_media_rationale">PocketMind needs access to your photos so you can attach images to your conversations.</string>
+    <string name="permission_biometric_rationale">Unlock PocketMind with your fingerprint or face to protect your conversations and API keys.</string>
+
+    <!-- Biometric prompt -->
+    <string name="biometric_prompt_title">Unlock PocketMind</string>
+    <string name="biometric_prompt_subtitle">Authenticate to continue</string>
+    <string name="biometric_prompt_negative_button">Cancel</string>
+
+    <!-- Common -->
+    <string name="action_ok">OK</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_retry">Retry</string>
+</resources>

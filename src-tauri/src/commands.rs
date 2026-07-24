@@ -32,7 +32,7 @@ pub struct AppState {
     pub kc_rerank_pool: Arc<crate::knowledge_chat::llama_rerank::KcRerankPool>,
 }
 
-async fn record_audit(
+pub(crate) async fn record_audit(
     state: &State<'_, AppState>,
     event_type: &str,
     category: &str,
@@ -362,6 +362,14 @@ pub async fn create_conversation(
 #[tauri::command]
 pub async fn get_conversations(state: State<'_, AppState>) -> AppResult<Vec<crate::database::Conversation>> {
     let db = state.db.lock().await;
+    let _ = crate::power_features::ensure_profile_schema(&db);
+    if db.conversations_have_profile_id() {
+        if let Ok(profile_id) = crate::power_features::active_profile_id(&db) {
+            if let Ok(convs) = db.get_conversations_by_profile(&profile_id) {
+                return Ok(convs);
+            }
+        }
+    }
     db.get_conversations().map_err(|e| e.into())
 }
 
@@ -1209,9 +1217,7 @@ pub struct BackupData {
     pub knowledge_chat: Option<KcBackupSnapshot>,
 }
 
-#[tauri::command]
-pub async fn export_backup(state: State<'_, AppState>) -> AppResult<BackupData> {
-    let db = state.db.lock().await;
+pub(crate) fn build_backup_data(db: &Database) -> AppResult<BackupData> {
     let conversations = db.get_conversations()?;
     let mut messages = BTreeMap::new();
     for conv in &conversations {
@@ -1225,7 +1231,7 @@ pub async fn export_backup(state: State<'_, AppState>) -> AppResult<BackupData> 
         settings.insert(key, value);
     }
 
-    let (kc_collections, kc_files) = crate::knowledge_chat::db::export_knowledge_chat_snapshot(&db)?;
+    let (kc_collections, kc_files) = crate::knowledge_chat::db::export_knowledge_chat_snapshot(db)?;
     let knowledge_chat = if kc_collections.is_empty() {
         None
     } else {
@@ -1235,7 +1241,7 @@ pub async fn export_backup(state: State<'_, AppState>) -> AppResult<BackupData> 
         })
     };
 
-    let backup = BackupData {
+    Ok(BackupData {
         app: "PocketMind Hybrid AI Desktop".to_string(),
         version: 2,
         exported_at: chrono::Utc::now().to_rfc3339(),
@@ -1245,7 +1251,81 @@ pub async fn export_backup(state: State<'_, AppState>) -> AppResult<BackupData> 
         local_models,
         settings,
         knowledge_chat,
-    };
+    })
+}
+
+pub(crate) fn apply_backup_data(db: &Database, backup: &BackupData) -> AppResult<String> {
+    if backup.app.trim().is_empty() || backup.version == 0 {
+        return Err(anyhow::anyhow!(
+            "This does not look like a valid PocketMind Hybrid AI backup file."
+        )
+        .into());
+    }
+
+    let mut imported_conversations = 0usize;
+    let mut imported_characters = 0usize;
+    let mut imported_models = 0usize;
+    let mut skipped_models = 0usize;
+
+    for character in &backup.characters {
+        let _ = db.create_character(
+            &character.name,
+            &character.description,
+            &character.system_prompt,
+            character.avatar_path.as_deref(),
+            &character.personality_traits,
+            character.folder_id.as_deref(),
+        )?;
+        imported_characters += 1;
+    }
+
+    for conv in &backup.conversations {
+        let msgs = backup.messages.get(&conv.id).cloned().unwrap_or_default();
+        let title = if conv.title.trim().is_empty() {
+            "Imported chat"
+        } else {
+            conv.title.as_str()
+        };
+        let _ = db.import_conversation(title, msgs, None)?;
+        imported_conversations += 1;
+    }
+
+    for model in &backup.local_models {
+        let path = PathBuf::from(&model.path);
+        if path.is_file() {
+            let _ = model_record_from_path(db, &path, model.source_url.as_deref());
+            imported_models += 1;
+        } else {
+            skipped_models += 1;
+        }
+    }
+
+    for (key, value) in &backup.settings {
+        if !key.to_lowercase().contains("api_key") && !key.to_lowercase().contains("secret") {
+            let _ = db.set_setting(key, value);
+        }
+    }
+
+    let mut imported_collections = 0usize;
+    if let Some(snapshot) = &backup.knowledge_chat {
+        crate::knowledge_chat::db::restore_knowledge_chat_snapshot(
+            db,
+            &snapshot.collections,
+            &snapshot.files,
+        )?;
+        imported_collections = snapshot.collections.len();
+    }
+
+    Ok(format!(
+        "Imported {} chats, {} characters, {} knowledge collections, and {} existing model records. Skipped {} model records because the GGUF files were not found on this computer. Rebuild knowledge collections after restore if chunks were not included.",
+        imported_conversations, imported_characters, imported_collections, imported_models, skipped_models
+    ))
+}
+
+#[tauri::command]
+pub async fn export_backup(state: State<'_, AppState>) -> AppResult<BackupData> {
+    let db = state.db.lock().await;
+    let backup = build_backup_data(&db)?;
     drop(db);
     record_audit(
         &state,
@@ -1262,66 +1342,8 @@ pub async fn export_backup(state: State<'_, AppState>) -> AppResult<BackupData> 
 
 #[tauri::command]
 pub async fn import_backup(state: State<'_, AppState>, backup: BackupData) -> AppResult<String> {
-    if backup.app.trim().is_empty() || backup.version == 0 {
-        return Err(anyhow::anyhow!("This does not look like a valid PocketMind Hybrid AI backup file.").into());
-    }
-
     let db = state.db.lock().await;
-    let mut imported_conversations = 0usize;
-    let mut imported_characters = 0usize;
-    let mut imported_models = 0usize;
-    let mut skipped_models = 0usize;
-
-    for character in backup.characters {
-        let _ = db.create_character(
-            &character.name,
-            &character.description,
-            &character.system_prompt,
-            character.avatar_path.as_deref(),
-            &character.personality_traits,
-            character.folder_id.as_deref(),
-        )?;
-        imported_characters += 1;
-    }
-
-    for conv in backup.conversations {
-        let msgs = backup.messages.get(&conv.id).cloned().unwrap_or_default();
-        let title = if conv.title.trim().is_empty() { "Imported chat" } else { conv.title.as_str() };
-        let _ = db.import_conversation(title, msgs, None)?;
-        imported_conversations += 1;
-    }
-
-    for model in backup.local_models {
-        let path = PathBuf::from(&model.path);
-        if path.is_file() {
-            let _ = model_record_from_path(&db, &path, model.source_url.as_deref());
-            imported_models += 1;
-        } else {
-            skipped_models += 1;
-        }
-    }
-
-    for (key, value) in backup.settings {
-        // Do not import encrypted API keys through settings. API keys are intentionally excluded.
-        if !key.to_lowercase().contains("api_key") && !key.to_lowercase().contains("secret") {
-            let _ = db.set_setting(&key, &value);
-        }
-    }
-
-    let mut imported_collections = 0usize;
-    if let Some(snapshot) = &backup.knowledge_chat {
-        crate::knowledge_chat::db::restore_knowledge_chat_snapshot(
-            &db,
-            &snapshot.collections,
-            &snapshot.files,
-        )?;
-        imported_collections = snapshot.collections.len();
-    }
-
-    let summary = format!(
-        "Imported {} chats, {} characters, {} knowledge collections, and {} existing model records. Skipped {} model records because the GGUF files were not found on this computer. Rebuild knowledge collections after restore if chunks were not included.",
-        imported_conversations, imported_characters, imported_collections, imported_models, skipped_models
-    );
+    let summary = apply_backup_data(&db, &backup)?;
     drop(db);
     record_audit(
         &state,

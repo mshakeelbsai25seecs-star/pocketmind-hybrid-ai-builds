@@ -108,7 +108,7 @@ export default function ImageStudio() {
   return (
     <div className="flex-1 min-w-0 overflow-y-auto overflow-x-hidden p-3 sm:p-5 lg:p-6">
       <div className="mx-auto w-full max-w-[1500px] space-y-5 sm:space-y-6">
-        <div className="relative overflow-hidden rounded-[2rem] border border-white/20 bg-gradient-to-br from-sky-600 via-blue-700 to-orange-500 p-4 sm:p-6 text-white shadow-2xl shadow-sky-900/20">
+        <div className="relative overflow-hidden rounded-[2rem] border border-white/20 bg-gradient-to-br from-primary-700 via-primary-600 to-primary-500 p-4 sm:p-6 text-white shadow-2xl shadow-primary-900/20">
           <div className="absolute -right-20 -top-20 w-64 h-64 rounded-full bg-white/20 blur-3xl" />
           <div className="relative flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
             <div className="min-w-0">

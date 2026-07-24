@@ -112,7 +112,7 @@ export default function MessageSources({
                   <span className="text-[10px] text-surface-500">{lineAnchor}</span>
                 )}
                 {confidenceLabel(conf) && (
-                  <span className="text-[10px] text-sky-700 dark:text-sky-300">{confidenceLabel(conf)}</span>
+                  <span className="text-[10px] text-primary-700 dark:text-primary-300">{confidenceLabel(conf)}</span>
                 )}
               </div>
               <p className="text-[11px] text-surface-600 dark:text-surface-400 mt-1 leading-relaxed whitespace-pre-wrap">
@@ -127,7 +127,7 @@ export default function MessageSources({
                 <button
                   type="button"
                   onClick={() => setExpanded(prev => ({ ...prev, [id]: !prev[id] }))}
-                  className="mt-1 text-[10px] font-semibold text-sky-700 dark:text-sky-300 hover:underline"
+                  className="mt-1 text-[10px] font-semibold text-primary-700 dark:text-primary-300 hover:underline"
                 >
                   {isOpen ? 'Show less' : 'Show more'}
                 </button>

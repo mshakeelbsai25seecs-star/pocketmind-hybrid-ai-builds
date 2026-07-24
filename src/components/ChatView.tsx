@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, isValidElement, memo } from 'react';
+import { useState, useRef, useEffect, isValidElement, memo, useMemo } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { open } from '@tauri-apps/api/dialog';
 import { listen } from '@tauri-apps/api/event';
@@ -21,17 +21,41 @@ import {
   SOC_GENERATION_PARAMS,
   SOC_SYSTEM_PROMPT,
 } from '../socChatHandoff';
+import { exportChatAs, type ChatExportKind } from '../chatExport';
+import ContextBudgetBar from './ContextBudgetBar';
+import DiffViewer from './DiffViewer';
+import { computeContextBudget, defaultKeepLastN } from '../contextBudget';
+import { FEATURE_FLAGS } from '../featureFlags';
+import { getSetting, setSetting } from '../api/powerFeatures';
 
 function humanError(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (typeof err === 'string') return err;
-  if (err && typeof err === 'object') {
+  let raw = '';
+  if (err instanceof Error) raw = err.message;
+  else if (typeof err === 'string') raw = err;
+  else if (err && typeof err === 'object') {
     const anyErr = err as any;
-    if (typeof anyErr.message === 'string') return anyErr.message;
-    if (typeof anyErr.error === 'string') return anyErr.error;
-    try { return JSON.stringify(err, null, 2); } catch { return String(err); }
+    if (typeof anyErr.message === 'string') raw = anyErr.message;
+    else if (typeof anyErr.error === 'string') raw = anyErr.error;
+    else {
+      try { raw = JSON.stringify(err, null, 2); } catch { raw = String(err); }
+    }
+  } else {
+    raw = String(err || 'Unknown error');
   }
-  return String(err || 'Unknown error');
+  const lower = raw.toLowerCase();
+  if (lower.includes('out of memory') || lower.includes('oom')) {
+    return 'Ran out of memory. Try a smaller GGUF (Q4), reduce GPU layers, or close other apps.';
+  }
+  if (lower.includes('vram') || lower.includes('ggml_cuda') || lower.includes('failed to allocate')) {
+    return 'GPU / VRAM allocation failed. Lower GPU layers or switch Runtime to CPU.';
+  }
+  if (lower.includes('no such file') || lower.includes('not found') || lower.includes('does not exist')) {
+    return 'A required file was not found. Check the model path in Models.';
+  }
+  if (lower.includes('connection refused') || lower.includes('failed to connect')) {
+    return 'Could not reach the server. Check Org Server / network, then retry.';
+  }
+  return raw;
 }
 
 function modelFileName(path: string | null): string {
@@ -763,6 +787,7 @@ type GenerationResponsePayload = {
 export default function ChatView() {
   const [input, setInput] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [busyCreatingChat, setBusyCreatingChat] = useState(false);
   const [generationStatus, setGenerationStatus] = useState<string | null>(null);
   const [showTuning, setShowTuning] = useState(false);
@@ -770,6 +795,9 @@ export default function ChatView() {
   const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const [includeAttachments, setIncludeAttachments] = useState(true);
+  const [keepLastN, setKeepLastN] = useState(defaultKeepLastN());
+  const [showCompareRewrite, setShowCompareRewrite] = useState(false);
+  const [compareOriginal, setCompareOriginal] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const streamingTextRef = useRef<string>('');
   const streamUiTimerRef = useRef<number | null>(null);
@@ -837,6 +865,42 @@ export default function ChatView() {
   const selectedModelName = modelFileName(currentModel);
   const canSend = Boolean(input.trim() && activeConversationId && currentModel && !isGenerating);
 
+  useEffect(() => {
+    if (!activeConversationId || !FEATURE_FLAGS.contextTrimSlider) return;
+    const key = `chat.trim.${activeConversationId}`;
+    void getSetting(key).then(v => {
+      const n = v ? Number(v) : defaultKeepLastN();
+      if (Number.isFinite(n) && n >= 2) setKeepLastN(Math.min(40, Math.max(2, Math.round(n))));
+      else setKeepLastN(defaultKeepLastN());
+    });
+  }, [activeConversationId]);
+
+  const persistKeepLastN = (n: number) => {
+    setKeepLastN(n);
+    if (activeConversationId) {
+      void setSetting(`chat.trim.${activeConversationId}`, String(n));
+    }
+  };
+
+  const lastAssistantMessage = useMemo(() => {
+    const list = currentMessages.filter(m => m.role === 'assistant' && m.content && m.content !== 'Thinking...');
+    return list[list.length - 1]?.content ?? '';
+  }, [currentMessages]);
+
+  const contextBudget = useMemo(() => {
+    if (!FEATURE_FLAGS.contextBudgetBar) return null;
+    const fileBlock = includeAttachments && attachments.length > 0
+      ? attachmentContextBlock(attachments, input, defaultParams.context_size, defaultParams.max_tokens)
+      : '';
+    const systemPrompt = activeCharacter?.system_prompt || 'PocketMind Hybrid AI assistant';
+    return computeContextBudget({
+      systemPrompt,
+      messages: currentMessages.filter(m => (m.role === 'user' || m.role === 'assistant') && m.content !== 'Thinking...'),
+      attachmentText: fileBlock || null,
+      contextSize: defaultParams.context_size,
+      keepLastN,
+    });
+  }, [activeCharacter?.system_prompt, attachments, currentMessages, defaultParams.context_size, defaultParams.max_tokens, includeAttachments, input, keepLastN]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
@@ -869,6 +933,21 @@ export default function ChatView() {
     await navigator.clipboard.writeText(text || '');
     setCopiedId('chat');
     setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const exportChat = async (kind: ChatExportKind) => {
+    setExportMenuOpen(false);
+    try {
+      const result = await exportChatAs(
+        activeConversationTitle,
+        selectedModelName,
+        currentMessages,
+        kind,
+      );
+      setGenerationStatus(result.message);
+    } catch (err) {
+      setGenerationError(humanError(err));
+    }
   };
 
   const deleteChat = async () => {
@@ -1120,7 +1199,7 @@ export default function ChatView() {
       const modelMessages = [
         ...conversationMessages
           .filter(m => (m.role === 'user' || m.role === 'assistant') && m.content && m.content !== 'Thinking...')
-          .slice(-6)
+          .slice(-keepLastN)
           .map(m => ({
             role: m.role === 'assistant' ? 'assistant' : 'user',
             content: sanitizeHistoryForModel(m.content, m.role)
@@ -1258,7 +1337,7 @@ export default function ChatView() {
     return (
       <div className="flex-1 flex items-center justify-center p-6">
         <div className="text-center space-y-5 max-w-xl px-6 py-8 premium-card">
-          <div className="w-16 h-16 rounded-2xl bg-sky-600 flex items-center justify-center mx-auto">
+          <div className="w-16 h-16 rounded-2xl bg-primary-600 flex items-center justify-center mx-auto">
             <Sparkles className="w-8 h-8 text-white" />
           </div>
           <div>
@@ -1285,7 +1364,7 @@ export default function ChatView() {
     <div className="flex-1 flex flex-col h-full min-w-0">
       <div className="min-h-16 border-b border-white/70 dark:border-surface-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 glass-panel flex-shrink-0">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-xl bg-sky-600 flex items-center justify-center flex-shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-primary-600 flex items-center justify-center flex-shrink-0">
             {activeCharacter ? <span className="text-sm font-bold text-white">{activeCharacter.name[0]}</span> : <Bot className="w-4 h-4 text-white" />}
           </div>
           <div className="min-w-0">
@@ -1294,8 +1373,31 @@ export default function ChatView() {
           </div>
         </div>
         <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
+          <button onClick={() => setShowCompareRewrite(v => !v)} className="btn-secondary text-sm whitespace-nowrap">Compare rewrite</button>
           <button onClick={() => setShowTuning(v => !v)} className="btn-secondary text-sm flex items-center gap-2 whitespace-nowrap"><SlidersHorizontal className="w-4 h-4" /> Tuning</button>
           <button onClick={copyChat} className="btn-secondary text-sm flex items-center gap-2 whitespace-nowrap" title="Copy whole chat"><ClipboardCopy className="w-4 h-4" /> {copiedId === 'chat' ? 'Copied' : 'Copy chat'}</button>
+          <div className="relative">
+            <button
+              onClick={() => setExportMenuOpen(v => !v)}
+              className="btn-secondary text-sm flex items-center gap-2 whitespace-nowrap"
+              title="Export chat"
+            >
+              <Download className="w-4 h-4" /> Export as…
+            </button>
+            {exportMenuOpen && (
+              <div className="absolute right-0 top-full mt-1 z-40 w-40 rounded-xl border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 shadow-md p-1">
+                {(['md', 'json', 'txt'] as const).map(kind => (
+                  <button
+                    key={kind}
+                    className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-surface-100 dark:hover:bg-surface-800"
+                    onClick={() => { void exportChat(kind); }}
+                  >
+                    {kind.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           {!isGenerating && (
             <button onClick={() => void unloadChatModel()} className="btn-secondary text-sm flex items-center gap-2 whitespace-nowrap" title="Free RAM/VRAM by unloading the local chat model">
               <Power className="w-4 h-4" /> Unload
@@ -1311,7 +1413,16 @@ export default function ChatView() {
 
       {showTuning && (
         <div className="border-b border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-950 p-4">
-          <div className="max-w-5xl mx-auto grid md:grid-cols-5 gap-3 text-sm">
+          <div className="max-w-5xl mx-auto space-y-4">
+            {FEATURE_FLAGS.contextBudgetBar && contextBudget && (
+              <ContextBudgetBar
+                budget={contextBudget}
+                keepLastN={keepLastN}
+                onKeepLastNChange={persistKeepLastN}
+                showSlider={FEATURE_FLAGS.contextTrimSlider}
+              />
+            )}
+          <div className="grid md:grid-cols-5 gap-3 text-sm">
             <label>Creativity
               <input className="input-field mt-1" type="number" step="0.05" min="0" max="2" value={defaultParams.temperature} onChange={e => setDefaultParams({ temperature: Number(e.target.value) })} />
             </label>
@@ -1340,6 +1451,27 @@ export default function ChatView() {
               <span className="text-xs text-surface-500 self-center">Runtime tip: GPU layers -1 lets PocketMind Hybrid AI decide. It tries full GPU, then CPU + GPU split, then CPU fallback.</span>
             </div>
           </div>
+          </div>
+        </div>
+      )}
+
+      {showCompareRewrite && FEATURE_FLAGS.diffViewer && (
+        <div className="border-b border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-950 p-4">
+          <div className="max-w-5xl mx-auto space-y-3">
+            <p className="text-sm font-bold">Compare rewrite vs last assistant message</p>
+            <textarea
+              value={compareOriginal}
+              onChange={e => setCompareOriginal(e.target.value)}
+              rows={4}
+              placeholder="Paste original text to compare…"
+              className="input-field w-full text-sm font-mono"
+            />
+            {compareOriginal && lastAssistantMessage ? (
+              <DiffViewer original={compareOriginal} modified={lastAssistantMessage} />
+            ) : (
+              <p className="text-xs text-surface-500">Paste original text and ensure the chat has an assistant reply.</p>
+            )}
+          </div>
         </div>
       )}
 
@@ -1352,7 +1484,7 @@ export default function ChatView() {
       )}
 
       {generationStatus && (
-        <div className="mx-4 mt-4 rounded-2xl border border-sky-300/40 bg-sky-50/85 dark:bg-sky-950/20 p-3 text-sm text-sky-700 dark:text-sky-300 flex items-center gap-2 shadow-lg shadow-sky-500/5">
+        <div className="mx-4 mt-4 rounded-2xl border border-primary-300/40 bg-primary-50/85 dark:bg-primary-950/20 p-3 text-sm text-primary-700 dark:text-primary-300 flex items-center gap-2 shadow-lg shadow-primary-500/5">
           <div className="w-2 h-2 rounded-full bg-current animate-pulse" /> {generationStatus}
         </div>
       )}
@@ -1368,11 +1500,11 @@ export default function ChatView() {
 
         {currentMessages.map((message) => (
           <div key={message.id} className={`group flex gap-3 sm:gap-4 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}>
-            <div className={`w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center ${message.role === 'user' ? 'bg-orange-100 dark:bg-orange-900/40' : 'bg-sky-600'}`}>
-              {message.role === 'user' ? <User className="w-4 h-4 text-orange-600 dark:text-orange-300" /> : <Bot className="w-4 h-4 text-white" />}
+            <div className={`w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center ${message.role === 'user' ? 'bg-surface-200 dark:bg-surface-700' : 'bg-primary-500'}`}>
+              {message.role === 'user' ? <User className="w-4 h-4 text-surface-700 dark:text-surface-200" /> : <Bot className="w-4 h-4 text-surface-950" />}
             </div>
             <div className={`flex-1 min-w-0 max-w-[min(52rem,100%)] ${message.role === 'user' ? 'text-right' : ''}`}>
-              <div className={`inline-block chat-message-surface max-w-full rounded-xl px-4 py-3 text-left overflow-hidden ${message.role === 'user' ? 'bg-sky-600 text-white' : 'bg-white dark:bg-surface-900 text-surface-900 dark:text-surface-100 border border-surface-200 dark:border-surface-800' }`}>
+              <div className={`inline-block chat-message-surface max-w-full rounded-xl px-4 py-3 text-left overflow-hidden ${message.role === 'user' ? 'bg-primary-600 text-white' : 'bg-white dark:bg-surface-900 text-surface-900 dark:text-surface-100 border border-surface-200 dark:border-surface-800' }`}>
                 {message.role === 'assistant' ? (
                   <MarkdownMessage content={message.content || generationStatus || 'Starting local model...'} />
                 ) : <MarkdownMessage content={message.content} variant="user" />}
@@ -1393,7 +1525,7 @@ export default function ChatView() {
       <div className="border-t border-white/70 dark:border-surface-800/80 p-3 sm:p-4 glass-panel flex-shrink-0">
         <div className="max-w-4xl mx-auto space-y-2">
           {(attachments.length > 0 || attachmentNotice) && (
-            <div className="rounded-2xl border border-white/70 dark:border-surface-800 bg-white/70 dark:bg-surface-900/60 p-2 shadow-lg shadow-sky-500/5">
+            <div className="rounded-2xl border border-white/70 dark:border-surface-800 bg-white/70 dark:bg-surface-900/60 p-2 shadow-lg shadow-primary-500/5">
               <div className="flex items-center justify-between gap-2 mb-2">
                 <label className="flex items-center gap-2 text-xs text-surface-500"><input type="checkbox" checked={includeAttachments} onChange={e => setIncludeAttachments(e.target.checked)} /> Use indexed attachments in next message</label>
                 {attachments.length > 0 && <button onClick={() => setAttachments([])} className="text-xs px-2 py-1 rounded-lg hover:bg-surface-200 dark:hover:bg-surface-800">Clear</button>}
@@ -1439,7 +1571,7 @@ export default function ChatView() {
           <div className="composer-shell flex items-end gap-2 sm:gap-3 p-2 sm:p-3">
             <button onClick={attachFiles} disabled={attachmentBusy} className="p-2 rounded-xl hover:bg-surface-200 dark:hover:bg-surface-700 transition-colors flex-shrink-0" title="Attach PDF, DOCX, text, code, spreadsheet, or image"><Paperclip className="w-5 h-5 text-surface-500" /></button>
             <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} placeholder={currentModel ? 'Message PocketMind Hybrid AI...' : 'Select a model before chatting...'} rows={1} disabled={!currentModel || isGenerating} className="flex-1 bg-transparent border-none focus:outline-none resize-none py-2 max-h-32 text-surface-900 dark:text-surface-100 placeholder:text-surface-400 disabled:opacity-60" style={{ minHeight: '24px' }} />
-            <button onClick={isGenerating ? stopGeneration : () => void handleSend()} disabled={!isGenerating && !canSend} className={`p-2 rounded-xl transition-all shadow-md ${isGenerating ? 'bg-red-600 hover:bg-red-500 text-white' : canSend ? 'bg-gradient-to-br from-sky-600 via-blue-600 to-orange-500 hover:brightness-110 text-white shadow-sky-500/20' : 'bg-surface-200 dark:bg-surface-700 text-surface-400 cursor-not-allowed'}`} title={isGenerating ? 'Stop response' : !currentModel ? 'Select a model first' : 'Send'}>
+            <button onClick={isGenerating ? stopGeneration : () => void handleSend()} disabled={!isGenerating && !canSend} className={`p-2 rounded-xl transition-all shadow-md ${isGenerating ? 'bg-red-600 hover:bg-red-500 text-white' : canSend ? 'bg-primary-500 hover:bg-primary-600 text-surface-950 shadow-primary-500/20' : 'bg-surface-200 dark:bg-surface-700 text-surface-400 cursor-not-allowed'}`} title={isGenerating ? 'Stop response' : !currentModel ? 'Select a model first' : 'Send'}>
               {isGenerating ? <Square className="w-5 h-5" /> : <Send className="w-5 h-5" />}
             </button>
           </div>

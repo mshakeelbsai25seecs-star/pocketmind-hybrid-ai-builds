@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    PocketMind Hybrid AI talks to a locally hosted Nexus AI backend that
+    typically runs on the same LAN (or on the device itself via localhost)
+    without TLS. This config allows cleartext (HTTP) traffic only for private
+    / loopback network ranges, while all other (public internet) traffic
+    still requires HTTPS.
+-->
+<network-security-config>
+    <!-- Loopback + common private LAN ranges (RFC 1918 + link-local). -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="true">localhost</domain>
+        <domain includeSubdomains="true">127.0.0.1</domain>
+        <domain includeSubdomains="true">10.0.2.2</domain>
+
+        <!-- 192.168.0.0/16 -->
+        <domain includeSubdomains="true">192.168.0.0</domain>
+
+        <!-- 10.0.0.0/8 -->
+        <domain includeSubdomains="true">10.0.0.0</domain>
+
+        <!-- 172.16.0.0/12 -->
+        <domain includeSubdomains="true">172.16.0.0</domain>
+
+        <!-- Link-local (mDNS / .local) -->
+        <domain includeSubdomains="true">169.254.0.0</domain>
+    </domain-config>
+
+    <!-- Default: require HTTPS for everything else. -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

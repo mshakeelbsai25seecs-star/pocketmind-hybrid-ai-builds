@@ -1599,7 +1599,7 @@ export default function KnowledgeChatPanel() {
       </div>
 
       {conversationLoading && (
-        <div className="mb-4 rounded-2xl border border-sky-200/70 dark:border-sky-900 bg-sky-50/85 dark:bg-sky-950/20 px-4 py-3 text-sm text-sky-800 dark:text-sky-200 flex items-center gap-2">
+        <div className="mb-4 rounded-2xl border border-primary-200/70 dark:border-primary-900 bg-primary-50/85 dark:bg-primary-950/20 px-4 py-3 text-sm text-primary-800 dark:text-primary-200 flex items-center gap-2">
           <Loader2 className="w-4 h-4 animate-spin" /> Starting chat session…
         </div>
       )}
@@ -1626,7 +1626,7 @@ export default function KnowledgeChatPanel() {
       )}
 
       {serverRagMode && chatReady && (
-        <div className="mb-4 rounded-2xl border border-sky-200/70 dark:border-sky-900 bg-sky-50/85 dark:bg-sky-950/20 px-4 py-3 text-sm text-sky-800 dark:text-sky-200">
+        <div className="mb-4 rounded-2xl border border-primary-200/70 dark:border-primary-900 bg-primary-50/85 dark:bg-primary-950/20 px-4 py-3 text-sm text-primary-800 dark:text-primary-200">
           Organization server mode — questions go to your company gateway. Local folder search is skipped.
         </div>
       )}
@@ -1647,7 +1647,7 @@ export default function KnowledgeChatPanel() {
       <div className="flex-1 overflow-y-auto rounded-2xl border border-white/70 dark:border-surface-800 bg-surface-50/85 dark:bg-surface-950/55 p-4 space-y-4 min-h-[18rem]" aria-live="polite">
         {messages.length === 0 && !conversationLoading && (
           <div className="text-center text-sm text-surface-500 py-10">
-            <BookOpenCheck className="w-8 h-8 mx-auto mb-3 text-sky-500" />
+            <BookOpenCheck className="w-8 h-8 mx-auto mb-3 text-primary-500" />
             Ask about files in this folder.
           </div>
         )}
@@ -1655,7 +1655,7 @@ export default function KnowledgeChatPanel() {
           const meta = parseMessageMetadata(message.metadata);
           return (
           <div key={message.id} className={`rounded-2xl px-4 py-3 ${message.role === 'user'
-            ? 'bg-sky-50/90 dark:bg-sky-950/25 border border-sky-200/70 dark:border-sky-900 ml-8'
+            ? 'bg-primary-50/90 dark:bg-primary-950/25 border border-primary-200/70 dark:border-primary-900 ml-8'
             : 'bg-white/85 dark:bg-surface-900/60 border border-white/70 dark:border-surface-800 mr-8'}`}>
             <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-surface-500 mb-1">{message.role === 'user' ? 'You' : 'Answer'}</p>
             {message.role === 'assistant' ? (
@@ -1744,11 +1744,11 @@ export default function KnowledgeChatPanel() {
       )}
 
       {generationStatus && (
-        <p className="mt-3 text-xs text-sky-700 dark:text-sky-300 flex items-center gap-2">
+        <p className="mt-3 text-xs text-primary-700 dark:text-primary-300 flex items-center gap-2">
           <Loader2 className="w-3.5 h-3.5 animate-spin" /> {generationStatus}
         </p>
       )}
-      {notice && <p className="mt-3 text-xs text-sky-700 dark:text-sky-300">{notice}</p>}
+      {notice && <p className="mt-3 text-xs text-primary-700 dark:text-primary-300">{notice}</p>}
       {error && <p className="mt-3 text-xs text-amber-700 dark:text-amber-300" role="alert">{error}</p>}
 
       <div className="mt-4 flex flex-col sm:flex-row gap-2">

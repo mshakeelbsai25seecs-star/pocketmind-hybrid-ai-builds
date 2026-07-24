@@ -70,7 +70,7 @@ export default function SettingsPanel() {
                 <div>
                   <label className="block text-sm font-medium mb-2">Accent Color</label>
                   <div className="flex gap-2">
-                    {['#0ea5e9', '#8b5cf6', '#ec4899', '#10b981', '#f59e0b'].map(color => (
+                    {['#22c55e', '#16a34a', '#a3a3a3', '#f5f5f5', '#0a0a0a'].map(color => (
                       <button key={color} onClick={() => setAccentColor(color)} className={`w-8 h-8 rounded-full transition-all ${accentColor === color ? 'ring-2 ring-offset-2 ring-surface-400 scale-110' : ''}`} style={{ backgroundColor: color }} />
                     ))}
                   </div>

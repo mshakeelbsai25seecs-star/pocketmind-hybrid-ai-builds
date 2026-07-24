@@ -51,7 +51,7 @@ function titleFromPath(value: string): string {
 
 function statusTone(status: SocDataPackChecklistStatus): string {
   if (status === 'tested') return 'border-emerald-300 dark:border-emerald-800 bg-emerald-50/75 dark:bg-emerald-950/20';
-  if (status === 'indexed' || status === 'imported') return 'border-sky-300 dark:border-sky-800 bg-sky-50/75 dark:bg-sky-950/20';
+  if (status === 'indexed' || status === 'imported') return 'border-primary-300 dark:border-primary-800 bg-primary-50/75 dark:bg-primary-950/20';
   if (status === 'sanitized' || status === 'received') return 'border-amber-300 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/15';
   return 'border-white/70 dark:border-surface-800 bg-surface-50/85 dark:bg-surface-950/55 hover:bg-white/90 dark:hover:bg-surface-900/60';
 }
@@ -268,9 +268,9 @@ export default function SocDataPackIntake() {
         </div>
       </div>
 
-      <div className="rounded-2xl border border-sky-200/70 dark:border-sky-900/70 bg-sky-50/80 dark:bg-sky-950/20 p-4">
+      <div className="rounded-2xl border border-primary-200/70 dark:border-primary-900/70 bg-primary-50/80 dark:bg-primary-950/20 p-4">
         <div className="flex items-start gap-3">
-          <FolderTree className="w-5 h-5 text-sky-600 dark:text-sky-300 mt-0.5 shrink-0" />
+          <FolderTree className="w-5 h-5 text-primary-600 dark:text-primary-300 mt-0.5 shrink-0" />
           <div className="min-w-0 flex-1">
             <h3 className="font-black text-surface-950 dark:text-white">Company intake folder guide</h3>
             <p className="mt-1 text-sm leading-6 text-surface-600 dark:text-surface-300">
@@ -333,7 +333,7 @@ export default function SocDataPackIntake() {
         <div className="space-y-5">
           <div className="rounded-2xl border border-white/70 dark:border-surface-800 bg-surface-50/85 dark:bg-surface-950/55 p-4 space-y-4">
             <div className="flex items-center gap-2">
-              <ScanSearch className="w-5 h-5 text-sky-600 dark:text-sky-300" />
+              <ScanSearch className="w-5 h-5 text-primary-600 dark:text-primary-300" />
               <div>
                 <h3 className="font-black text-surface-950 dark:text-white">Bulk Company Data Scan</h3>
                 <p className="text-xs text-surface-500 dark:text-surface-400">Scan a sanitized intake folder, classify files, then import supported items into the Offline Knowledge Base.</p>
@@ -368,7 +368,7 @@ export default function SocDataPackIntake() {
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="text-xs font-black text-surface-950 dark:text-white">{file.name}</span>
                       <span className="rounded-full bg-surface-100 dark:bg-surface-800 px-2 py-0.5 text-[10px] font-bold text-surface-600 dark:text-surface-300">{companyDataTypeLabel(file.dataType)}</span>
-                      <span className="rounded-full bg-sky-100 dark:bg-sky-950/40 px-2 py-0.5 text-[10px] font-bold text-sky-700 dark:text-sky-300">{file.inferredCategory}</span>
+                      <span className="rounded-full bg-primary-100 dark:bg-primary-950/40 px-2 py-0.5 text-[10px] font-bold text-primary-700 dark:text-primary-300">{file.inferredCategory}</span>
                       {file.duplicate && <span className="rounded-full bg-amber-100 dark:bg-amber-950/40 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-300">duplicate</span>}
                     </div>
                     <p className="mt-1 font-mono text-[11px] text-surface-500 dark:text-surface-400 truncate">{file.path}</p>
@@ -423,7 +423,7 @@ export default function SocDataPackIntake() {
           </div>
         </div>
         <div className="grid md:grid-cols-3 gap-2 text-xs text-surface-600 dark:text-surface-300">
-          <div className="rounded-xl border border-white/70 dark:border-surface-800 bg-white/70 dark:bg-surface-900/45 p-3"><FileText className="w-4 h-4 mb-2 text-sky-500" />Rules / parsers / logs → detection engineering and validator workflows.</div>
+          <div className="rounded-xl border border-white/70 dark:border-surface-800 bg-white/70 dark:bg-surface-900/45 p-3"><FileText className="w-4 h-4 mb-2 text-primary-500" />Rules / parsers / logs → detection engineering and validator workflows.</div>
           <div className="rounded-xl border border-white/70 dark:border-surface-800 bg-white/70 dark:bg-surface-900/45 p-3"><Database className="w-4 h-4 mb-2 text-indigo-500" />Alerts / TP / FP → triage, decision tuning, and evaluation cases.</div>
           <div className="rounded-xl border border-white/70 dark:border-surface-800 bg-white/70 dark:bg-surface-900/45 p-3"><Archive className="w-4 h-4 mb-2 text-emerald-500" />SOPs / connectors / playbooks → safe response planning and report exports.</div>
         </div>
@@ -435,7 +435,7 @@ export default function SocDataPackIntake() {
         </div>
       )}
       {notice && (
-        <div className="rounded-2xl border border-sky-200/80 dark:border-sky-900/70 bg-sky-50/90 dark:bg-sky-950/25 px-4 py-3 text-sm text-sky-700 dark:text-sky-300">
+        <div className="rounded-2xl border border-primary-200/80 dark:border-primary-900/70 bg-primary-50/90 dark:bg-primary-950/25 px-4 py-3 text-sm text-primary-700 dark:text-primary-300">
           {notice}
         </div>
       )}

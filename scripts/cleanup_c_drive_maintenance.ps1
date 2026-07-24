@@ -33,7 +33,7 @@ Write-Host "C: free before: ${freeBefore} GB"
 $freed = 0.0
 
 # Cursor / VS Code sandbox cargo caches (biggest regrow item when TEMP points to C:)
-foreach ($tempRoot in @($env:TEMP, "$env:LOCALAPPDATA\Temp", 'D:\PocketMind\cache\tmp')) {
+foreach ($tempRoot in @($env:TEMP, "$env:LOCALAPPDATA\Temp", 'D:\nexus-ai-deep-fixed\runtime-data\cache\tmp')) {
   if (-not $tempRoot) { continue }
   $sandbox = Join-Path $tempRoot 'cursor-sandbox-cache'
   $freed += Remove-IfExists $sandbox 'cursor-sandbox-cache'
@@ -41,7 +41,7 @@ foreach ($tempRoot in @($env:TEMP, "$env:LOCALAPPDATA\Temp", 'D:\PocketMind\cach
 
 # Stale temp files (older than 2 days)
 $cutoff = (Get-Date).AddDays(-2)
-foreach ($tempRoot in @($env:TEMP, "$env:LOCALAPPDATA\Temp", 'D:\PocketMind\cache\tmp')) {
+foreach ($tempRoot in @($env:TEMP, "$env:LOCALAPPDATA\Temp", 'D:\nexus-ai-deep-fixed\runtime-data\cache\tmp')) {
   if (-not (Test-Path -LiteralPath $tempRoot)) { continue }
   Get-ChildItem -LiteralPath $tempRoot -Force -ErrorAction SilentlyContinue |
     Where-Object { $_.LastWriteTime -lt $cutoff } |

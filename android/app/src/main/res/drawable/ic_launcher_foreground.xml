@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Simple PocketMind mark: a sky-blue rounded "brain/chat" bubble with an
+    orange spark, used as the adaptive icon foreground layer.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Chat bubble body (sky blue). -->
+    <path
+        android:fillColor="#2196F3"
+        android:pathData="M54,24
+            C71.67,24 86,36.65 86,52.3
+            C86,67.95 71.67,80.6 54,80.6
+            C48.9,80.6 44.08,79.58 39.82,77.77
+            L24,84
+            L29.6,68.9
+            C24.9,63.9 22,58.4 22,52.3
+            C22,36.65 36.33,24 54,24
+            Z" />
+
+    <!-- Inner highlight to suggest depth. -->
+    <path
+        android:fillColor="#64B5F6"
+        android:pathData="M54,32
+            C67.25,32 78,41.1 78,52.3
+            C78,63.5 67.25,72.6 54,72.6
+            C50.2,72.6 46.62,71.85 43.46,70.5
+            L33,74.5
+            L36.6,64.3
+            C32.7,60.4 30,56.6 30,52.3
+            C30,41.1 40.75,32 54,32
+            Z" />
+
+    <!-- Orange spark / spark of intelligence. -->
+    <path
+        android:fillColor="#FF9800"
+        android:pathData="M55,40
+            L59,50
+            L69,54
+            L59,58
+            L55,68
+            L51,58
+            L41,54
+            L51,50
+            Z" />
+</vector>

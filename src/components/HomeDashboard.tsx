@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/tauri';
-import { Activity, Bot, CheckCircle, Cpu, Download, FileText, HardDrive, MessageSquare, ShieldCheck, Wrench } from 'lucide-react';
+import { Activity, Bot, CheckCircle, Cpu, Download, FileText, HardDrive, MessageSquare, ShieldCheck } from 'lucide-react';
 import { useAppStore } from '../store';
 import { Conversation, Message } from '../types';
 
@@ -46,8 +46,6 @@ export default function HomeDashboard() {
     { title: 'Knowledge Chat', desc: 'Index company folders and ask grounded questions.', icon: FileText, action: 'Open Knowledge Chat', view: 'knowledge-chat' as const },
     { title: 'Chat', desc: 'Local or online conversations.', icon: MessageSquare, action: 'Open Chat', view: 'chat' as const },
     { title: 'Models', desc: 'Import, scan, and select GGUF models.', icon: Download, action: 'Manage Models', view: 'models' as const },
-    { title: 'Diagnostics', desc: 'Runtime health and recovery tools.', icon: Wrench, action: 'Run Checks', view: 'diagnostics' as const },
-    { title: 'Characters', desc: 'Personas for different workflows.', icon: Bot, action: 'Open Characters', view: 'characters' as const },
   ];
 
   return (
@@ -63,7 +61,7 @@ export default function HomeDashboard() {
               <div className="flex flex-wrap gap-3">
                 <button onClick={createChat} disabled={!currentModel} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">New Chat</button>
                 <button onClick={() => setActiveView('models')} className="btn-secondary">Select Model</button>
-                <button onClick={() => setActiveView('diagnostics')} className="btn-secondary">Diagnostics</button>
+                <button onClick={() => setActiveView('enterprise-server')} className="btn-secondary">Org Server</button>
               </div>
               {!currentModel && <p className="text-sm text-amber-500">Select a model before chatting.</p>}
             </div>
@@ -80,8 +78,8 @@ export default function HomeDashboard() {
         <section className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
           {cards.map(card => (
             <button key={card.title} onClick={() => setActiveView(card.view)} className="group text-left premium-card p-5">
-              <div className="h-10 w-10 rounded-xl bg-sky-100 dark:bg-sky-950/40 flex items-center justify-center mb-3">
-                <card.icon className="w-5 h-5 text-sky-600 dark:text-sky-300" />
+              <div className="h-10 w-10 rounded-xl bg-primary-100 dark:bg-primary-950/40 flex items-center justify-center mb-3">
+                <card.icon className="w-5 h-5 text-primary-600 dark:text-primary-300" />
               </div>
               <h3 className="font-bold text-lg mb-1">{card.title}</h3>
               <p className="text-sm text-surface-500 leading-relaxed mb-3">{card.desc}</p>

@@ -224,7 +224,7 @@ export default function SocKnowledgeCollection() {
       </div>
 
       {indexProgress && (
-        <div className="rounded-2xl border border-sky-200/70 dark:border-sky-900/60 bg-sky-50/80 dark:bg-sky-950/20 px-4 py-3 text-sm text-sky-800 dark:text-sky-200">
+        <div className="rounded-2xl border border-primary-200/70 dark:border-primary-900/60 bg-primary-50/80 dark:bg-primary-950/20 px-4 py-3 text-sm text-primary-800 dark:text-primary-200">
           <p className="font-bold">{indexProgress.phase}</p>
           <p>{indexProgress.message}</p>
           {indexProgress.total > 0 && (

@@ -53,8 +53,8 @@ export function pathPlaceholder(config: DeploymentConfig | null | undefined, kin
   if (root) return root;
   if (isWindowsPlatform()) {
     return kind === 'models'
-      ? 'D:\\PocketMind\\models'
-      : 'D:\\PocketMind\\company-data';
+      ? 'D:\\nexus-ai-deep-fixed\\runtime-data\\models'
+      : 'D:\\nexus-ai-deep-fixed\\runtime-data\\company-data';
   }
   return kind === 'models'
     ? '/var/lib/pocketmind/models'

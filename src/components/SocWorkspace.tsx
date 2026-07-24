@@ -284,8 +284,8 @@ export default function SocWorkspace() {
                 type="button"
                 onClick={() => setActiveAction(action.id)}
                 className={`text-left rounded-2xl border p-3 transition-all ${activeAction === action.id
-                  ? 'border-sky-300 dark:border-sky-700 bg-sky-50/90 dark:bg-sky-950/30 shadow-lg shadow-sky-500/10'
-                  : 'border-white/70 dark:border-surface-800 bg-white/60 dark:bg-surface-900/50 hover:bg-sky-50/70 dark:hover:bg-surface-900'}`}
+                  ? 'border-primary-300 dark:border-primary-700 bg-primary-50/90 dark:bg-primary-950/30 shadow-lg shadow-primary-500/10'
+                  : 'border-white/70 dark:border-surface-800 bg-white/60 dark:bg-surface-900/50 hover:bg-primary-50/70 dark:hover:bg-surface-900'}`}
               >
                 <span className="block text-sm font-black text-surface-950 dark:text-white">{action.label}</span>
               </button>
@@ -297,7 +297,7 @@ export default function SocWorkspace() {
               <div>
                 <p className="text-xs font-bold uppercase tracking-[0.16em] text-surface-500">Prepared prompt</p>
                 <p className="text-sm font-bold text-surface-900 dark:text-white">{activeActionMeta.label}</p>
-                <p className="mt-1 text-xs font-semibold text-sky-700 dark:text-sky-300">
+                <p className="mt-1 text-xs font-semibold text-primary-700 dark:text-primary-300">
                   {grounded.contextHits.length} auto-retrieved snippet{grounded.contextHits.length === 1 ? '' : 's'}
                   {grounded.selectedManualChunks.length > 0 ? ` + ${grounded.selectedManualChunks.length} manual` : ''}
                 </p>
@@ -313,7 +313,7 @@ export default function SocWorkspace() {
           </div>
 
           {notice && (
-            <div className="rounded-2xl border border-sky-200/70 dark:border-sky-800/60 bg-sky-50/90 dark:bg-sky-950/25 px-4 py-3 text-sm text-sky-700 dark:text-sky-300">
+            <div className="rounded-2xl border border-primary-200/70 dark:border-primary-800/60 bg-primary-50/90 dark:bg-primary-950/25 px-4 py-3 text-sm text-primary-700 dark:text-primary-300">
               {notice}
             </div>
           )}

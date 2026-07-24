@@ -18,6 +18,8 @@ import ImageStudio from './ImageStudio';
 import EnterpriseServer from './EnterpriseServer';
 import SocWorkspace from './SocWorkspace';
 import KnowledgeChatWorkspace from './knowledgeChat/KnowledgeChatWorkspace';
+import CodeWorkspaceLayout from './codeWorkspace/CodeWorkspaceLayout';
+import QuickComposeOverlay from './QuickComposeOverlay';
 
 export default function Layout() {
   const activeView = useAppStore(s => s.activeView);
@@ -25,6 +27,7 @@ export default function Layout() {
   const setupCompleted = useAppStore(s => s.setupCompleted);
   const theme = useAppStore(s => s.theme);
   const setActiveView = useAppStore(s => s.setActiveView);
+  const workspaceEpoch = useAppStore(s => s.workspaceEpoch);
   const [hydrated, setHydrated] = useState(() => useAppStore.persist.hasHydrated());
 
   useEffect(() => {
@@ -87,6 +90,7 @@ export default function Layout() {
         {activeView === 'chat' && <ChatView />}
         {activeView === 'soc' && <SocWorkspace />}
         {activeView === 'knowledge-chat' && <KnowledgeChatWorkspace />}
+        {activeView === 'code-workspace' && <CodeWorkspaceLayout key={workspaceEpoch} />}
         {activeView === 'hardware' && <HardwareMonitor />}
         {activeView === 'runtime' && <RuntimeManager />}
         {activeView === 'models' && <ModelManager />}
@@ -100,6 +104,7 @@ export default function Layout() {
         {activeView === 'backup' && <BackupRestore />}
         {activeView === 'help' && <HelpCenter />}
       </main>
+      <QuickComposeOverlay />
     </div>
   );
 }

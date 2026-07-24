@@ -147,7 +147,7 @@ export const COMMON_CHARACTER_PRESETS: CharacterPreset[] = [
     icon: Search,
     description: 'Analyze documents, compare information, extract key points, and build reports.',
     traits: ['analytical', 'evidence-focused', 'structured'],
-    recommendedModels: ['Qwen 72B', 'Llama 70B', 'Mistral 7B', 'Gemini Flash'],
+    recommendedModels: ['GLM-5.2', 'Llama 405B', 'Qwen 72B', 'Llama 70B', 'Mistral Large'],
     prompt: [
       'You are a careful research analyst.',
       'Use provided documents and attachments as primary context.',

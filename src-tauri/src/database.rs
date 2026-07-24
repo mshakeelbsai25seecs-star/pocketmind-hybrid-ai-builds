@@ -556,11 +556,22 @@ impl Database {
     pub fn create_conversation(&self, title: &str, character_id: Option<&str>, model_id: Option<&str>, mode: &str) -> Result<String> {
         let id = Uuid::new_v4().to_string();
         let now = Utc::now().timestamp();
-        self.conn.execute(
-            "INSERT INTO conversations (id, title, character_id, model_id, mode, created_at, updated_at) 
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![&id, title, character_id, model_id, mode, now, now],
-        )?;
+        if self.conversations_have_profile_id() {
+            let profile_id = self
+                .get_setting("active_workspace_profile")?
+                .unwrap_or_else(|| "default".to_string());
+            self.conn.execute(
+                "INSERT INTO conversations (id, title, character_id, model_id, mode, created_at, updated_at, profile_id)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                params![&id, title, character_id, model_id, mode, now, now, profile_id],
+            )?;
+        } else {
+            self.conn.execute(
+                "INSERT INTO conversations (id, title, character_id, model_id, mode, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                params![&id, title, character_id, model_id, mode, now, now],
+            )?;
+        }
         Ok(id)
     }
 
@@ -570,6 +581,33 @@ impl Database {
              FROM conversations ORDER BY updated_at DESC"
         )?;
         let rows = stmt.query_map([], |row| {
+            Ok(Conversation {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                character_id: row.get(2)?,
+                model_id: row.get(3)?,
+                mode: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn conversations_have_profile_id(&self) -> bool {
+        self.conn
+            .prepare("SELECT profile_id FROM conversations LIMIT 1")
+            .is_ok()
+    }
+
+    pub fn get_conversations_by_profile(&self, profile_id: &str) -> Result<Vec<Conversation>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, title, character_id, model_id, mode, created_at, updated_at
+             FROM conversations
+             WHERE profile_id = ?1 OR (profile_id IS NULL AND ?1 = 'default')
+             ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map(params![profile_id], |row| {
             Ok(Conversation {
                 id: row.get(0)?,
                 title: row.get(1)?,

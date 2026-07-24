@@ -1,7 +1,24 @@
 import CollectionPanel from './CollectionPanel';
 import KnowledgeChatPanel from './KnowledgeChatPanel';
+import ContextBudgetBar from '../ContextBudgetBar';
+import { FEATURE_FLAGS } from '../../featureFlags';
+import { computeContextBudget, defaultKeepLastN } from '../../contextBudget';
+import { useAppStore } from '../../store';
+import { useMemo } from 'react';
 
 export default function KnowledgeChatWorkspace() {
+  const defaultParams = useAppStore(s => s.defaultParams);
+  const budget = useMemo(() => {
+    if (!FEATURE_FLAGS.contextBudgetBar) return null;
+    return computeContextBudget({
+      systemPrompt: 'Knowledge Chat RAG context',
+      messages: [],
+      ragBundle: '(retrieval bundle at send time)',
+      contextSize: defaultParams.context_size,
+      keepLastN: defaultKeepLastN(),
+    });
+  }, [defaultParams.context_size]);
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="shrink-0 border-b border-surface-200/80 dark:border-surface-800 px-4 sm:px-6 lg:px-8 py-4 sm:py-5">
@@ -12,6 +29,9 @@ export default function KnowledgeChatWorkspace() {
               Point at a local folder, build an index, then ask questions. Answers cite the files they came from.
             </p>
           </div>
+          {budget && (
+            <ContextBudgetBar budget={budget} keepLastN={budget.keepLastN} showSlider={false} />
+          )}
         </div>
       </div>
 

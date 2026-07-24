@@ -15,15 +15,21 @@ mod ocr_settings;
 mod audit;
 mod gguf;
 mod knowledge_chat;
+mod tooling;
+mod code_workspace;
+mod power_features;
+mod power_commands;
 
-use tauri::{Manager, WindowEvent};
+use tauri::{GlobalShortcutManager, Manager, WindowEvent};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
 
 use commands::AppState;
 use database::Database;
 use hardware::HardwareMonitor;
 use crypto::CryptoVault;
+use llm::InferenceBackend;
 
 fn main() {
     env_logger::init();
@@ -140,20 +146,122 @@ fn main() {
             commands::log_audit_event,
             commands::get_audit_log,
             commands::export_audit_log,
+            power_commands::tooling_status,
+            power_commands::tooling_repair,
+            power_commands::list_workspace_profiles,
+            power_commands::create_workspace_profile,
+            power_commands::switch_workspace_profile,
+            power_commands::delete_workspace_profile,
+            power_commands::get_active_workspace_profile,
+            power_commands::configure_backup_schedule,
+            power_commands::get_backup_schedule,
+            power_commands::run_encrypted_backup,
+            power_commands::restore_encrypted_backup,
+            power_commands::verify_local_model_integrity,
+            power_commands::scan_orphan_files,
+            power_commands::delete_orphan_files,
+            power_commands::batch_process_folder,
+            power_commands::cw_can_use,
+            power_commands::cw_list_dir,
+            power_commands::cw_glob,
+            power_commands::cw_grep,
+            power_commands::cw_read_file,
+            power_commands::cw_apply_edit_preview,
+            power_commands::cw_apply_edit_write,
+            power_commands::cw_run_sandbox,
         ])
         .setup(|app| {
             knowledge_chat::qa_corpus::spawn_startup_bootstrap(app.handle());
+
+            let handle = app.handle();
+            if let Err(err) = app.global_shortcut_manager().register("Ctrl+Shift+Space", move || {
+                let _ = handle.emit_all("quick-compose-open", ());
+            }) {
+                log::warn!("Failed to register Ctrl+Shift+Space quick-compose shortcut: {err}");
+            }
+
+            // Ensure workspace profile schema exists before profile-aware queries run.
+            {
+                let state = app.state::<AppState>();
+                let db = tauri::async_runtime::block_on(state.db.lock());
+                if let Err(err) = power_features::ensure_profile_schema(&db) {
+                    log::warn!("Workspace profile schema init: {err}");
+                }
+            }
+
+            // Smart RAM offload: under sustained memory pressure, reduce gpu_layers
+            // and unload the chat model so Automatic Optimizer relaunches leaner next turn.
+            let pressure_db = app.state::<AppState>().db.clone();
+            let pressure_hw = app.state::<AppState>().hardware.clone();
+            let pressure_backend = app.state::<AppState>().local_backend.clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_secs(45)).await;
+                    let info = {
+                        let mut hw = pressure_hw.lock().await;
+                        hw.get_system_info()
+                    };
+                    let total = info.memory.total_bytes.max(1);
+                    let available = info.memory.available_bytes;
+                    let pressure = (available as f64 / total as f64) < 0.12;
+                    if !pressure {
+                        continue;
+                    }
+                    let mut config = {
+                        let db = pressure_db.lock().await;
+                        deployment::load_deployment_config(&db)
+                    };
+                    if config.gpu_layers > 0 {
+                        let reduced = (config.gpu_layers / 2).max(0);
+                        if reduced != config.gpu_layers {
+                            log::warn!(
+                                "Memory pressure detected ({:.1}% free); reducing gpu_layers {} → {}",
+                                (available as f64 / total as f64) * 100.0,
+                                config.gpu_layers,
+                                reduced
+                            );
+                            config.gpu_layers = reduced;
+                            let db = pressure_db.lock().await;
+                            let _ = deployment::save_deployment_config(&db, &config);
+                            crate::llm::runtime_discovery::set_embed_gpu_layers(config.gpu_layers);
+                        }
+                    }
+                    let _ = pressure_backend.unload_model().await;
+                }
+            });
+
+            // Scheduled encrypted backup loop (checks every 15 minutes).
+            let backup_db = app.state::<AppState>().db.clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    tokio::time::sleep(Duration::from_secs(900)).await;
+                    power_commands::tick_backup_scheduler(backup_db.clone()).await;
+                }
+            });
+
             Ok(())
         })
         .on_window_event(|event| {
-            if let WindowEvent::CloseRequested { .. } = event.event() {
-                let state = event.window().state::<AppState>();
-                let embed_pool = state.kc_embed_pool.clone();
-                let rerank_pool = state.kc_rerank_pool.clone();
-                tauri::async_runtime::spawn(async move {
-                    embed_pool.shutdown().await;
-                    rerank_pool.shutdown().await;
-                });
+            match event.event() {
+                WindowEvent::CloseRequested { .. } => {
+                    let state = event.window().state::<AppState>();
+                    let embed_pool = state.kc_embed_pool.clone();
+                    let rerank_pool = state.kc_rerank_pool.clone();
+                    tauri::async_runtime::spawn(async move {
+                        embed_pool.shutdown().await;
+                        rerank_pool.shutdown().await;
+                    });
+                }
+                WindowEvent::Resized(_) => {
+                    if event.window().is_minimized().unwrap_or(false) {
+                        let state = event.window().state::<AppState>();
+                        let backend = state.local_backend.clone();
+                        tauri::async_runtime::spawn(async move {
+                            let _ = backend.unload_model().await;
+                        });
+                    }
+                }
+                _ => {}
             }
         })
         .run(tauri::generate_context!())

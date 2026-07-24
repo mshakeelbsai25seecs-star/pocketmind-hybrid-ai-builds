@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 pub const DEPLOY_MODE_WORKSTATION: &str = "workstation";
 pub const DEPLOY_MODE_SERVER: &str = "server";
 
-/// Preferred Windows storage root when the D: drive is available (large models, indexes, cache).
+/// Preferred Windows storage root — colocated with the repo for a single manageable tree.
 #[cfg(target_os = "windows")]
-pub const WINDOWS_PREFERRED_DATA_ROOT: &str = r"D:\PocketMind";
+pub const WINDOWS_PREFERRED_DATA_ROOT: &str = r"D:\nexus-ai-deep-fixed\runtime-data";
 
 /// Previous brand folder name — kept so upgrades still find existing installs.
 #[cfg(target_os = "windows")]

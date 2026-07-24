@@ -78,9 +78,9 @@ export function describeRetrievalConfig(config: RetrievalConfigView): string {
 
 /** Expected on-disk model paths after the user downloads the Qwen3 GGUFs. */
 export const MODEL_DROP_PATHS = {
-  codeEmbedding: String.raw`D:\PocketMind\models\embeddings\Qwen3-Embedding-8B-Q4_K_M.gguf`,
-  docEmbedding: String.raw`D:\PocketMind\models\embeddings\bge-m3-Q4_K_M.gguf`,
-  reranker: String.raw`D:\PocketMind\models\rerankers\Qwen3-Reranker-4B-Q4_K_M.gguf`,
+  codeEmbedding: String.raw`D:\nexus-ai-deep-fixed\runtime-data\models\embeddings\Qwen3-Embedding-8B-Q4_K_M.gguf`,
+  docEmbedding: String.raw`D:\nexus-ai-deep-fixed\runtime-data\models\embeddings\bge-m3-Q4_K_M.gguf`,
+  reranker: String.raw`D:\nexus-ai-deep-fixed\runtime-data\models\rerankers\Qwen3-Reranker-4B-Q4_K_M.gguf`,
 } as const;
 
 /** Hugging Face download pages for the expected GGUFs. */

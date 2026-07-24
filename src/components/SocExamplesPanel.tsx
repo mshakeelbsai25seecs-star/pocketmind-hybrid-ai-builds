@@ -165,7 +165,7 @@ export default function SocExamplesPanel({ onApplySample }: SocExamplesPanelProp
       </div>
 
       {notice && (
-        <div className="rounded-2xl border border-sky-200/70 dark:border-sky-900/70 bg-sky-50/90 dark:bg-sky-950/25 px-4 py-3 text-sm text-sky-800 dark:text-sky-300">
+        <div className="rounded-2xl border border-primary-200/70 dark:border-primary-900/70 bg-primary-50/90 dark:bg-primary-950/25 px-4 py-3 text-sm text-primary-800 dark:text-primary-300">
           {notice}
         </div>
       )}
