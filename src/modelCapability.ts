@@ -22,6 +22,8 @@ const LARGE_ONLINE_IDS = [
   'claude-3-opus',
   'claude-sonnet-4',
   'claude-opus',
+  'deepseek-v4-pro',
+  'deepseek-v4-flash',
   'deepseek-chat',
   'deepseek-reasoner',
   'deepseek-v3',
