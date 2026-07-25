@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '../store';
 import { invoke } from '@tauri-apps/api/tauri';
-import { Conversation, Message } from '../types';
+import { AppView, Conversation, Message } from '../types';
 import { FEATURE_FLAGS } from '../featureFlags';
 import {
   createWorkspaceProfile,
@@ -16,6 +16,13 @@ import {
   switchWorkspaceProfile,
 } from '../api/powerFeatures';
 import type { WorkspaceProfile } from '../codeWorkspace/types';
+import {
+  conversationMatchesHistoryMode,
+  historyModeForView,
+  historySectionTitle,
+  isKnowledgeChatMode,
+  isPocketCodeMode,
+} from '../conversationModes';
 
 function safeTitle(title: string | null | undefined): string {
   const value = (title || '').trim();
@@ -54,11 +61,17 @@ export default function Sidebar() {
   const [activeProfileId, setActiveProfileId] = useState('default');
   const [profileBusy, setProfileBusy] = useState(false);
 
+  // PocketCode uses an in-layout history rail; other non-chat views hide the list.
+  const historyMode = historyModeForView(activeView);
+  const showHistoryList = historyMode === 'chat' || historyMode === 'knowledge' || historyMode === 'soc';
+
   const filteredConversations = useMemo(() => {
+    if (!historyMode || !showHistoryList) return [];
+    const byMode = conversations.filter(c => conversationMatchesHistoryMode(c.mode, historyMode));
     const q = search.trim().toLowerCase();
-    if (!q) return conversations;
-    return conversations.filter(c => safeTitle(c.title).toLowerCase().includes(q));
-  }, [conversations, search]);
+    if (!q) return byMode;
+    return byMode.filter(c => safeTitle(c.title).toLowerCase().includes(q));
+  }, [conversations, search, historyMode, showHistoryList]);
 
   const refreshConversations = async () => {
     const convs = await invoke<Conversation[]>('get_conversations');
@@ -117,6 +130,16 @@ export default function Sidebar() {
   };
 
   const handleNewChat = async () => {
+    if (historyMode === 'knowledge') {
+      setActiveView('knowledge-chat');
+      setSidebarOpen(false);
+      return;
+    }
+    if (historyMode === 'pocketcode' || activeView === 'code-workspace') {
+      setActiveView('code-workspace');
+      setSidebarOpen(false);
+      return;
+    }
     try {
       const id = await invoke<string>('create_conversation', {
         title: 'New Chat',
@@ -125,6 +148,7 @@ export default function Sidebar() {
         mode: 'chat'
       });
       setActiveConversation(id);
+      useAppStore.getState().rememberConversationForMode('chat', id);
       setMessages(id, []);
       await refreshConversations();
       setActiveView('chat');
@@ -135,14 +159,61 @@ export default function Sidebar() {
   };
 
   const handleSelectConversation = async (id: string) => {
-    setActiveConversation(id);
     const conv = conversations.find(c => c.id === id);
-    setActiveCharacter(conv?.character_id || null);
+    if (!conv) return;
+    // Never open a conversation from the wrong mode list into Chat/KC incorrectly.
+    if (isPocketCodeMode(conv.mode)) {
+      setActiveView('code-workspace');
+      useAppStore.getState().rememberConversationForMode('pocketcode', id);
+      setSidebarOpen(false);
+      return;
+    }
+    setActiveConversation(id);
+    setActiveCharacter(conv.character_id || null);
     const msgs = await invoke<Message[]>('get_messages', { conversationId: id });
     setMessages(id, msgs);
-    const isKnowledgeChat = conv?.mode === 'knowledge' || conv?.mode === 'knowledge-server-rag';
-    setActiveView(isKnowledgeChat ? 'knowledge-chat' : 'chat');
+    if (isKnowledgeChatMode(conv.mode)) {
+      useAppStore.getState().rememberConversationForMode('knowledge', id);
+      setActiveView('knowledge-chat');
+    } else if (conv.mode === 'soc') {
+      useAppStore.getState().rememberConversationForMode('soc', id);
+      setActiveView('soc');
+    } else {
+      useAppStore.getState().rememberConversationForMode('chat', id);
+      setActiveView('chat');
+    }
     setSidebarOpen(false);
+  };
+
+  const navigateToView = (viewId: AppView) => {
+    const store = useAppStore.getState();
+    const targetHistory = historyModeForView(viewId);
+    if (targetHistory === 'chat') {
+      const lastId = store.lastConversationIdByMode.chat;
+      const last = lastId ? store.conversations.find(c => c.id === lastId && conversationMatchesHistoryMode(c.mode, 'chat')) : null;
+      if (last) {
+        void handleSelectConversation(last.id);
+        return;
+      }
+      const chatOnly = store.conversations.find(c => conversationMatchesHistoryMode(c.mode, 'chat'));
+      if (chatOnly) {
+        void handleSelectConversation(chatOnly.id);
+        return;
+      }
+      store.setActiveConversation(null);
+    } else if (targetHistory === 'knowledge') {
+      const active = store.conversations.find(c => c.id === store.activeConversationId);
+      if (active && !isKnowledgeChatMode(active.mode)) {
+        store.setActiveConversation(null);
+      }
+    } else if (targetHistory === 'pocketcode') {
+      const active = store.conversations.find(c => c.id === store.activeConversationId);
+      if (active && !isPocketCodeMode(active.mode)) {
+        store.setActiveConversation(null);
+      }
+    }
+    setActiveView(viewId);
+    if (window.innerWidth < 768) setSidebarOpen(false);
   };
 
   const handleRename = async (conv: Conversation) => {
@@ -197,7 +268,7 @@ export default function Sidebar() {
     { id: 'chat' as const, icon: MessageSquare, label: 'Chats' },
     { id: 'soc' as const, icon: ShieldCheck, label: 'Fortinet Copilot' },
     { id: 'knowledge-chat' as const, icon: LibraryBig, label: 'Knowledge Chat' },
-    ...(FEATURE_FLAGS.codeWorkspace ? [{ id: 'code-workspace' as const, icon: Code2, label: 'Code Workspace' }] : []),
+    ...(FEATURE_FLAGS.codeWorkspace ? [{ id: 'code-workspace' as const, icon: Code2, label: 'PocketCode' }] : []),
     { id: 'models' as const, icon: Download, label: 'Models' },
     { id: 'enterprise-server' as const, icon: ServerCog, label: 'Org Server' },
     { id: 'image-studio' as const, icon: ImageIcon, label: 'Image Studio' },
@@ -218,6 +289,8 @@ export default function Sidebar() {
   const toolsActive = toolsNavItems.some(item => item.id === activeView);
 
   if (!sidebarOpen) {
+    // PocketCode hosts its own open-nav control in the Files toolbar.
+    if (activeView === 'code-workspace') return null;
     return (
       <button
         onClick={() => setSidebarOpen(true)}
@@ -292,10 +365,7 @@ export default function Sidebar() {
               {primaryNavItems.map(item => (
                 <button
                   key={item.id}
-                  onClick={() => {
-                    setActiveView(item.id);
-                    if (window.innerWidth < 768) setSidebarOpen(false);
-                  }}
+                  onClick={() => navigateToView(item.id)}
                   className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors duration-150 ${
                     activeView === item.id
                       ? 'bg-primary-100 dark:bg-primary-950/40 text-primary-700 dark:text-primary-200'
@@ -350,76 +420,92 @@ export default function Sidebar() {
           </div>
         </div>
 
-        <div className="flex-1 min-h-0 flex flex-col p-3">
-          <div className="flex items-center justify-between gap-2 mb-2 px-1 flex-shrink-0">
-            <span className="text-[11px] font-bold text-surface-500 uppercase tracking-[0.18em]">Chats</span>
-            <button onClick={handleNewChat} className="p-1.5 rounded-lg hover:bg-surface-200 dark:hover:bg-surface-800 transition-colors" title="New chat">
-              <Plus className="w-4 h-4" />
-            </button>
-          </div>
+        {showHistoryList && historyMode ? (
+          <div className="flex-1 min-h-0 flex flex-col p-3">
+            <div className="flex items-center justify-between gap-2 mb-2 px-1 flex-shrink-0">
+              <span className="text-[11px] font-bold text-surface-500 uppercase tracking-[0.18em]">
+                {historySectionTitle(historyMode)}
+              </span>
+              <button
+                onClick={() => void handleNewChat()}
+                className="p-1.5 rounded-lg hover:bg-surface-200 dark:hover:bg-surface-800 transition-colors"
+                title={historyMode === 'knowledge' ? 'Open Knowledge Chat' : 'New chat'}
+              >
+                <Plus className="w-4 h-4" />
+              </button>
+            </div>
 
-          <input
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-            placeholder="Search chats..."
-            className="input-field mb-3 text-sm flex-shrink-0 shadow-sm"
-          />
+            <input
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder={historyMode === 'knowledge' ? 'Search knowledge chats…' : 'Search chats…'}
+              className="input-field mb-3 text-sm flex-shrink-0 shadow-sm"
+            />
 
-          <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-1 sidebar-chat-scroll">
-            {filteredConversations.length === 0 && (
-              <div className="rounded-2xl border border-dashed border-surface-300 dark:border-surface-700 p-4 text-sm text-surface-500 text-center">
-                No chats yet. Start a new conversation.
-              </div>
-            )}
-
-            {filteredConversations.map(conv => {
-              const active = activeConversationId === conv.id;
-              const title = safeTitle(conv.title);
-              return (
-                <div key={conv.id} className="relative group/chat">
-                  <button
-                    onClick={() => handleSelectConversation(conv.id)}
-                    disabled={busyChatId === conv.id}
-                    className={`w-full text-left px-3 py-2.5 pr-10 rounded-xl text-sm transition-colors ${
-                      active
-                        ? 'bg-surface-100 dark:bg-surface-800 text-surface-950 dark:text-surface-50 font-semibold'
-                        : 'hover:bg-surface-100 dark:hover:bg-surface-800/70 text-surface-600 dark:text-surface-400 hover:text-surface-950 dark:hover:text-white' 
-                    }`}
-                    title={title}
-                  >
-                    <span className="block truncate">{title}</span>
-                    <span className="block text-[11px] text-surface-500 font-normal truncate">{shortDate(conv.updated_at)} • {conv.mode || 'chat'}</span>
-                  </button>
-
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setOpenMenuId(openMenuId === conv.id ? null : conv.id);
-                    }}
-                    className={`absolute right-2 top-2 p-1.5 rounded-lg transition-colors ${openMenuId === conv.id ? 'bg-surface-300 dark:bg-surface-700' : 'opacity-100 md:opacity-0 md:group-hover/chat:opacity-100 hover:bg-surface-300 dark:hover:bg-surface-700'}`}
-                    title="Chat options"
-                  >
-                    <MoreVertical className="w-4 h-4" />
-                  </button>
-
-                  {openMenuId === conv.id && (
-                    <div className="absolute right-2 top-10 z-50 w-44 rounded-xl border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 shadow-md p-1">
-                      <button onClick={() => handleRename(conv)} className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm hover:bg-surface-100 dark:hover:bg-surface-800">
-                        <Edit3 className="w-4 h-4" /> Rename
-                      </button>
-                      <button onClick={() => handleCopyChat(conv)} className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm hover:bg-surface-100 dark:hover:bg-surface-800">
-                        <Copy className="w-4 h-4" /> Copy chat
-                      </button>
-                      <button onClick={() => handleDelete(conv)} className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30">
-                        <Trash2 className="w-4 h-4" /> Delete
-                      </button>
-                    </div>
-                  )}
+            <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-1 sidebar-chat-scroll">
+              {filteredConversations.length === 0 && (
+                <div className="rounded-2xl border border-dashed border-surface-300 dark:border-surface-700 p-4 text-sm text-surface-500 text-center">
+                  {historyMode === 'knowledge'
+                    ? 'No knowledge chats yet. Open Knowledge Chat to start.'
+                    : 'No chats yet. Start a new conversation.'}
                 </div>
-              );
-            })}
+              )}
+
+              {filteredConversations.map(conv => {
+                const active = activeConversationId === conv.id;
+                const title = safeTitle(conv.title);
+                return (
+                  <div key={conv.id} className="relative group/chat">
+                    <button
+                      onClick={() => void handleSelectConversation(conv.id)}
+                      disabled={busyChatId === conv.id}
+                      className={`w-full text-left px-3 py-2.5 pr-10 rounded-xl text-sm transition-colors ${
+                        active
+                          ? 'bg-surface-100 dark:bg-surface-800 text-surface-950 dark:text-surface-50 font-semibold'
+                          : 'hover:bg-surface-100 dark:hover:bg-surface-800/70 text-surface-600 dark:text-surface-400 hover:text-surface-950 dark:hover:text-white'
+                      }`}
+                      title={title}
+                    >
+                      <span className="block truncate">{title}</span>
+                      <span className="block text-[11px] text-surface-500 font-normal truncate">{shortDate(conv.updated_at)}</span>
+                    </button>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpenMenuId(openMenuId === conv.id ? null : conv.id);
+                      }}
+                      className={`absolute right-2 top-2 p-1.5 rounded-lg transition-colors ${openMenuId === conv.id ? 'bg-surface-300 dark:bg-surface-700' : 'opacity-100 md:opacity-0 md:group-hover/chat:opacity-100 hover:bg-surface-300 dark:hover:bg-surface-700'}`}
+                      title="Chat options"
+                    >
+                      <MoreVertical className="w-4 h-4" />
+                    </button>
+
+                    {openMenuId === conv.id && (
+                      <div className="absolute right-2 top-10 z-50 w-44 rounded-xl border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 shadow-md p-1">
+                        <button onClick={() => void handleRename(conv)} className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm hover:bg-surface-100 dark:hover:bg-surface-800">
+                          <Edit3 className="w-4 h-4" /> Rename
+                        </button>
+                        <button onClick={() => void handleCopyChat(conv)} className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm hover:bg-surface-100 dark:hover:bg-surface-800">
+                          <Copy className="w-4 h-4" /> Copy chat
+                        </button>
+                        <button onClick={() => void handleDelete(conv)} className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30">
+                          <Trash2 className="w-4 h-4" /> Delete
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="flex-1 min-h-0 p-4 text-xs text-surface-500">
+            {activeView === 'code-workspace'
+              ? 'Agent history lives inside PocketCode.'
+              : 'Switch to Chats or Knowledge Chat to see that mode’s history.'}
+          </div>
+        )}
 
         <div className="p-4 border-t border-surface-200 dark:border-surface-800 flex-shrink-0">
           <div className="flex items-center gap-2 text-xs text-surface-500">

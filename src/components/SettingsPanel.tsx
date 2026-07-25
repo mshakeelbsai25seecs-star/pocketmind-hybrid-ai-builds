@@ -1,32 +1,64 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import DeploymentSettingsPanel from './DeploymentSettingsPanel';
 import SecuritySettingsPanel from './SecuritySettingsPanel';
 import AuditLogPanel from './AuditLogPanel';
-import { Key, Shield, Cpu, Palette, Globe, Database, ExternalLink, Trash2, CheckCircle, AlertTriangle } from 'lucide-react';
+import McpSettingsPanel from './McpSettingsPanel';
+import { Key, Shield, Cpu, Palette, Globe, Database, ExternalLink, Trash2, CheckCircle, AlertTriangle, Loader2 } from 'lucide-react';
 import { useAppStore } from '../store';
+import { CHAT_API_PROVIDERS } from '../apiProviders';
+import { validateApiKey, type ApiKeyValidation } from '../apiKeyValidation';
 
-const PROVIDERS = [
-  { id: 'groq', name: 'Groq', url: 'https://console.groq.com/keys', freeModels: true },
-  { id: 'openrouter', name: 'OpenRouter', url: 'https://openrouter.ai/keys', freeModels: true },
-  { id: 'openai', name: 'OpenAI', url: 'https://platform.openai.com/api-keys', freeModels: false },
-  { id: 'anthropic', name: 'Anthropic', url: 'https://console.anthropic.com/settings/keys', freeModels: false },
-  { id: 'deepseek', name: 'DeepSeek', url: 'https://platform.deepseek.com/api_keys', freeModels: true },
-  { id: 'mistral', name: 'Mistral AI', url: 'https://console.mistral.ai/api-keys/', freeModels: false },
-  { id: 'together', name: 'Together AI', url: 'https://api.together.xyz/settings/api-keys', freeModels: false },
-  { id: 'gemini', name: 'Google Gemini', url: 'https://aistudio.google.com/app/apikey', freeModels: true },
-];
+type SettingsTab = 'general' | 'providers' | 'mcp' | 'deployment' | 'security' | 'audit' | 'advanced';
 
 export default function SettingsPanel() {
   const store = useAppStore();
   const { theme, setTheme, accentColor, setAccentColor, performanceMode, setPerformanceMode } = store;
-  const [activeTab, setActiveTab] = useState<'general' | 'providers' | 'deployment' | 'security' | 'audit' | 'advanced'>('general');
+  const [activeTab, setActiveTab] = useState<SettingsTab>('general');
   const [apiKeys, setApiKeys] = useState<Record<string, string>>({});
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
+  const [validating, setValidating] = useState<Record<string, boolean>>({});
+  const [validation, setValidation] = useState<Record<string, ApiKeyValidation | null>>({});
+
+  useEffect(() => {
+    try {
+      const tab = sessionStorage.getItem('pm.settings.tab') as SettingsTab | null;
+      if (tab === 'mcp' || tab === 'general' || tab === 'providers' || tab === 'deployment'
+        || tab === 'security' || tab === 'audit' || tab === 'advanced') {
+        setActiveTab(tab);
+        sessionStorage.removeItem('pm.settings.tab');
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const runValidate = async (provider: string, key?: string) => {
+    setValidating(prev => ({ ...prev, [provider]: true }));
+    try {
+      const result = await validateApiKey(provider, key);
+      setValidation(prev => ({ ...prev, [provider]: result }));
+      return result;
+    } catch (err) {
+      const fail: ApiKeyValidation = {
+        ok: false,
+        provider,
+        message: String(err),
+      };
+      setValidation(prev => ({ ...prev, [provider]: fail }));
+      return fail;
+    } finally {
+      setValidating(prev => ({ ...prev, [provider]: false }));
+    }
+  };
 
   const handleSaveKey = async (provider: string, key: string) => {
-    await invoke('store_api_key', { provider, key });
-    setApiKeys({ ...apiKeys, [provider]: key });
+    const trimmed = key.trim();
+    if (!trimmed) return;
+    const result = await runValidate(provider, trimmed);
+    if (!result.ok) return;
+    await invoke('store_api_key', { provider, key: trimmed });
+    setApiKeys({ ...apiKeys, [provider]: trimmed });
   };
 
   const handleRemoveKey = async (provider: string) => {
@@ -34,6 +66,7 @@ export default function SettingsPanel() {
     const newKeys = { ...apiKeys };
     delete newKeys[provider];
     setApiKeys(newKeys);
+    setValidation(prev => ({ ...prev, [provider]: null }));
   };
 
   return (
@@ -44,10 +77,10 @@ export default function SettingsPanel() {
           <p className="text-surface-500">Configure PocketMind Hybrid AI to your preferences</p>
         </div>
 
-        <div className="flex gap-1 p-1 bg-surface-100 dark:bg-surface-900 rounded-lg w-fit">
-          {(['general', 'providers', 'deployment', 'security', 'audit', 'advanced'] as const).map(tab => (
+        <div className="flex flex-wrap gap-1 p-1 bg-surface-100 dark:bg-surface-900 rounded-lg w-fit">
+          {(['general', 'providers', 'mcp', 'deployment', 'security', 'audit', 'advanced'] as const).map(tab => (
             <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === tab ? 'bg-white dark:bg-surface-800 shadow-sm' : 'text-surface-500 hover:text-surface-700 dark:hover:text-surface-300'}`}>
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              {tab === 'mcp' ? 'MCP' : tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
           ))}
         </div>
@@ -102,9 +135,12 @@ export default function SettingsPanel() {
           <div className="space-y-4">
             <div className="glass-panel rounded-xl p-6">
               <div className="flex items-center gap-2 mb-4"><Shield className="w-5 h-5 text-primary-500" /><h3 className="font-semibold">API Key Management</h3></div>
-              <p className="text-sm text-surface-500 mb-6">Your API keys are encrypted locally using AES-256-GCM. Never sent to our servers.</p>
+              <p className="text-sm text-surface-500 mb-6">
+                Your API keys are encrypted locally using AES-256-GCM. Never sent to our servers.
+                After saving a key, select a model from that provider in Models (OpenAI, DeepSeek, Mistral, Anthropic, Gemini, OpenRouter, Groq, Cerebras, Together).
+              </p>
               <div className="space-y-4">
-                {PROVIDERS.map(provider => (
+                {CHAT_API_PROVIDERS.map(provider => (
                   <div key={provider.id} className="border border-surface-200 dark:border-surface-800 rounded-lg p-4">
                     <div className="flex items-center justify-between mb-3">
                       <div className="flex items-center gap-3">
@@ -117,21 +153,56 @@ export default function SettingsPanel() {
                       <a href={provider.url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary-600 dark:text-primary-400 flex items-center gap-1 hover:underline">Get key <ExternalLink className="w-3 h-3" /></a>
                     </div>
                     <div className="flex gap-2">
-                      <input type={showKey[provider.id] ? 'text' : 'password'} value={apiKeys[provider.id] || ''} onChange={e => setApiKeys({...apiKeys, [provider.id]: e.target.value})} placeholder="Paste API key" className="input-field text-sm" />
+                      <input
+                        type={showKey[provider.id] ? 'text' : 'password'}
+                        value={apiKeys[provider.id] || ''}
+                        onChange={e => {
+                          setApiKeys({ ...apiKeys, [provider.id]: e.target.value });
+                          setValidation(prev => ({ ...prev, [provider.id]: null }));
+                        }}
+                        placeholder="Paste API key"
+                        className="input-field text-sm"
+                      />
                       <button onClick={() => setShowKey({...showKey, [provider.id]: !showKey[provider.id]})} className="p-2 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"><Key className="w-4 h-4 text-surface-500" /></button>
+                      <button
+                        type="button"
+                        disabled={!!validating[provider.id]}
+                        onClick={() => void runValidate(provider.id, apiKeys[provider.id])}
+                        className="btn-secondary px-3 text-sm disabled:opacity-50"
+                        title="Test pasted key, or the saved key if the field is empty"
+                      >
+                        {validating[provider.id] ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Test'}
+                      </button>
                       {apiKeys[provider.id] && (
                         <>
-                          <button onClick={() => handleSaveKey(provider.id, apiKeys[provider.id])} className="btn-primary px-3">Save</button>
+                          <button
+                            type="button"
+                            disabled={!!validating[provider.id]}
+                            onClick={() => void handleSaveKey(provider.id, apiKeys[provider.id])}
+                            className="btn-primary px-3 disabled:opacity-50"
+                          >
+                            Save
+                          </button>
                           <button onClick={() => handleRemoveKey(provider.id)} className="p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 transition-colors"><Trash2 className="w-4 h-4" /></button>
                         </>
                       )}
                     </div>
+                    {validation[provider.id] && (
+                      <p className={`mt-2 text-xs flex items-start gap-1.5 ${validation[provider.id]!.ok ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                        {validation[provider.id]!.ok
+                          ? <CheckCircle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                          : <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />}
+                        <span className="break-words">{validation[provider.id]!.message}</span>
+                      </p>
+                    )}
                   </div>
                 ))}
               </div>
             </div>
           </div>
         )}
+
+        {activeTab === 'mcp' && <McpSettingsPanel />}
 
         {activeTab === 'deployment' && <DeploymentSettingsPanel />}
 

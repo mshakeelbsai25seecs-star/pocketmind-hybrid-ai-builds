@@ -308,20 +308,19 @@ export default function KnowledgeChatPanel() {
   const generationRef = useRef(0);
   const sendInFlightRef = useRef(false);
 
-  const {
-    currentModel,
-    defaultParams,
-    productConfig,
-    setProductConfig,
-    localModels,
-    setCurrentModel,
-    setActiveView,
-    setConversations,
-    setMessages: setStoreMessages,
-    setActiveConversation,
-    activeConversationId: appActiveConversationId,
-    conversations: appConversations,
-  } = useAppStore();
+  const currentModel = useAppStore(s => s.currentModel);
+  const defaultParams = useAppStore(s => s.defaultParams);
+  const productConfig = useAppStore(s => s.productConfig);
+  const setProductConfig = useAppStore(s => s.setProductConfig);
+  const localModels = useAppStore(s => s.localModels);
+  const setCurrentModel = useAppStore(s => s.setCurrentModel);
+  const setActiveView = useAppStore(s => s.setActiveView);
+  const setConversations = useAppStore(s => s.setConversations);
+  const setStoreMessages = useAppStore(s => s.setMessages);
+  const setActiveConversation = useAppStore(s => s.setActiveConversation);
+  const appActiveConversationId = useAppStore(s => s.activeConversationId);
+  const appConversations = useAppStore(s => s.conversations);
+  const lastKnowledgeConversationId = useAppStore(s => s.lastConversationIdByMode.knowledge);
   const {
     collections,
     activeCollectionId,
@@ -448,29 +447,35 @@ export default function KnowledgeChatPanel() {
 
         let resolvedId: string | null = null;
         let resolvedMessages: Message[] = [];
-        let restoreSource: 'stored' | 'app-active' | 'db-title' | 'created' = 'created';
+        let restoreSource: 'stored' | 'last-mode' | 'db-title' | 'created' = 'created';
 
-        if (storedId) {
-          const msgs = await loadMessages(storedId);
-          if (msgs) {
-            resolvedId = storedId;
-            resolvedMessages = msgs;
-            restoreSource = 'stored';
-          }
-        }
+        const belongsToCollection = (convTitle: string | undefined) => {
+          if (!convTitle) return false;
+          return convTitle === title || convTitle.startsWith(`Knowledge Chat: ${activeCollection.name}`);
+        };
 
-        if (!resolvedId && appActiveConversationId) {
-          const activeConv = (useAppStore.getState().conversations.find(c => c.id === appActiveConversationId)
-            || appConversations.find(c => c.id === appActiveConversationId));
-          if (activeConv && activeConv.mode === mode) {
-            const msgs = await loadMessages(appActiveConversationId);
-            if (msgs) {
-              resolvedId = appActiveConversationId;
-              resolvedMessages = msgs;
-              restoreSource = 'app-active';
-            }
+        const tryResolve = async (candidate: string | null | undefined, source: typeof restoreSource) => {
+          if (!candidate || resolvedId) return;
+          const storeSnap = useAppStore.getState();
+          const conv = storeSnap.conversations.find(c => c.id === candidate)
+            || appConversations.find(c => c.id === candidate);
+          if (conv) {
+            if (conv.mode !== mode) return;
+            if (source !== 'stored' && !belongsToCollection(conv.title)) return;
+          } else if (source !== 'stored') {
+            return;
           }
-        }
+          const msgs = await loadMessages(candidate);
+          if (!msgs) return;
+          resolvedId = candidate;
+          resolvedMessages = msgs;
+          restoreSource = source;
+        };
+
+        // Sidebar pick (same collection) wins so history switching works; else collection map.
+        await tryResolve(lastKnowledgeConversationId, 'last-mode');
+        await tryResolve(appActiveConversationId, 'last-mode');
+        await tryResolve(storedId, 'stored');
 
         if (!resolvedId) {
           const convs = await invoke<Conversation[]>('get_conversations');
@@ -516,6 +521,7 @@ export default function KnowledgeChatPanel() {
         setMessages(resolvedMessages);
         setStoreMessages(resolvedId, resolvedMessages);
         setActiveConversation(resolvedId);
+        useAppStore.getState().rememberConversationForMode(mode, resolvedId);
         try {
           const convs = await invoke<Conversation[]>('get_conversations');
           if (!cancelled) setConversations(convs);
@@ -534,8 +540,9 @@ export default function KnowledgeChatPanel() {
     })();
     return () => { cancelled = true; };
     // Intentionally omit currentModel: changing answer model must not wipe the thread.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- restore map + collection/mode only
-  }, [activeCollection?.id, activeCollection?.name, chatReady, serverRagMode]);
+    // Include last knowledge id so Sidebar selection switches the active KC thread.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- restore map + collection/mode + sidebar pick
+  }, [activeCollection?.id, activeCollection?.name, chatReady, serverRagMode, lastKnowledgeConversationId]);
 
   const stopGeneration = async () => {
     generationRef.current += 1;

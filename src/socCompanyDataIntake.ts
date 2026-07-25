@@ -12,7 +12,10 @@ import { mergeSocDataPackChecklist, getCompanyIntakeReadinessStats, isStatusAtLe
 
 export const SOC_COMPANY_INTAKE_SUBDIR = 'intake';
 
-/** @deprecated Use deployment config soc intake root instead */
+/**
+ * @deprecated Prefer `socIntakeRoot(deploymentConfig)` from `deploymentConfig.ts`.
+ * Kept as a thin compatibility shim for SOC intake UI; do not add new call sites.
+ */
 export const SOC_COMPANY_INTAKE_ROOT = '';
 
 export function resolveSocIntakeRoot(config?: { socDataRoot: string; socIntakeSubdir: string }): string {

@@ -45,7 +45,7 @@ impl OcrEngine {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OcrImageRagConfig {
     pub ocr_engine: String,
-    /// Phase 0 default false; Phase 1 enables true by default in load when unset after ship.
+    /// Default true (shipped): light preprocess before OCR when the engine supports it.
     pub ocr_preprocess: bool,
     pub ocr_llm_repair: bool,
     pub ocr_caption_figures: bool,
@@ -62,7 +62,6 @@ impl Default for OcrImageRagConfig {
     fn default() -> Self {
         Self {
             ocr_engine: OcrEngine::Auto.as_str().to_string(),
-            // Plan Phase 0: store false until Phase 1 ready; we enable default true once Phase 1 ships.
             ocr_preprocess: true,
             ocr_llm_repair: false,
             ocr_caption_figures: false,

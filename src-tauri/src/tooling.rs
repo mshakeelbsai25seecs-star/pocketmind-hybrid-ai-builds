@@ -1,4 +1,5 @@
 //! Resolve vendored Code Workspace tooling (ripgrep, Python, Node).
+//! Host PATH tools for other languages are resolved by `sandbox_runners`.
 
 use serde::Serialize;
 use std::fs;

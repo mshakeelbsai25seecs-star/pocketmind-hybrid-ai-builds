@@ -145,7 +145,7 @@ export default function EnterpriseServer() {
     }
   };
 
-  const useModel = async (modelId?: string) => {
+  const useModel = async (modelId?: string, dest: 'chat' | 'pocketcode' = 'chat') => {
     const id = (modelId || selectedModel).trim();
     if (!id) {
       setError('Choose a server model first.');
@@ -158,18 +158,24 @@ export default function EnterpriseServer() {
       store.setCurrentModel(`enterprise:${id}`);
 
       const title = `Server: ${normalizeModelName(id)}`;
-      const conversationId = await invoke<string>('create_conversation', {
-        title: 'New Chat',
-        characterId: store.activeCharacterId || null,
-        modelId: `enterprise:${id}`,
-        mode: 'organization-server',
-      });
-      store.setActiveConversation(conversationId);
-      store.setMessages(conversationId, []);
-      const convs = await invoke<Conversation[]>('get_conversations');
-      store.setConversations(convs);
-      store.setActiveView('chat');
-      setStatus(`${title} is now active. A new server chat has been created.`);
+      if (dest === 'pocketcode') {
+        store.setActiveView('code-workspace');
+        setStatus(`${title} is active for PocketCode (org chat completions — not Knowledge Chat Server RAG).`);
+      } else {
+        const conversationId = await invoke<string>('create_conversation', {
+          title: 'New Chat',
+          characterId: store.activeCharacterId || null,
+          modelId: `enterprise:${id}`,
+          mode: 'organization-server',
+        });
+        store.setActiveConversation(conversationId);
+        store.rememberConversationForMode('chat', conversationId);
+        store.setMessages(conversationId, []);
+        const convs = await invoke<Conversation[]>('get_conversations');
+        store.setConversations(convs);
+        store.setActiveView('chat');
+        setStatus(`${title} is now active. A new server chat has been created.`);
+      }
     } catch (err) {
       setError(humanError(err));
     } finally {
@@ -440,9 +446,14 @@ export default function EnterpriseServer() {
                     </div>
                     {active && <CheckCircle2 className="w-5 h-5 text-primary-500 shrink-0" />}
                   </div>
-                  <button onClick={() => useModel(model.id)} disabled={busy} className="btn-primary w-full mt-4">
-                    Use in Chat
-                  </button>
+                  <div className="mt-4 grid grid-cols-1 gap-2">
+                    <button onClick={() => void useModel(model.id, 'chat')} disabled={busy} className="btn-primary w-full">
+                      Use in Chat
+                    </button>
+                    <button onClick={() => void useModel(model.id, 'pocketcode')} disabled={busy} className="btn-secondary w-full">
+                      Use in PocketCode
+                    </button>
+                  </div>
                 </div>
               );
             })}

@@ -1,12 +1,23 @@
 /**
- * Gates Code Workspace write/run tools to ≥70B local models or large online models.
+ * Gates PocketCode write/run tools to ≥30B local models, large online models,
+ * or any organization (enterprise:) server model.
  * Smaller models keep read-only Knowledge Chat / Codebase Explorer.
  */
 
+export const POCKETCODE_MIN_LOCAL_B = 30;
+
 const LARGE_ONLINE_IDS = [
+  'gpt-5.5',
+  'gpt-5.4',
+  'gpt-5',
   'gpt-4o',
   'gpt-4.1',
   'gpt-4-turbo',
+  'claude-opus-4-8',
+  'claude-opus-4-7',
+  'claude-opus-4-6',
+  'claude-sonnet-4-6',
+  'claude-sonnet-5',
   'claude-3.5-sonnet',
   'claude-3-opus',
   'claude-sonnet-4',
@@ -21,10 +32,15 @@ const LARGE_ONLINE_IDS = [
   'meta-llama-3.1-405b',
   'qwen2.5-72b',
   'qwen-2.5-72b',
+  'qwen2.5-coder-32b',
   'command-r-plus',
   'glm-5.2',
   'glm-5',
   'z-ai/glm',
+  'gemini-2.5-pro',
+  'gemini-2.5-flash',
+  'gemini-2.0-flash',
+  'pixtral',
 ];
 
 export function parseParamsBillions(label: string | null | undefined): number | null {
@@ -48,30 +64,30 @@ export function canUseCodeWorkspaceAgent(
 ): { allowed: boolean; reason: string } {
   if (opts?.forceAllow) return { allowed: true, reason: 'Override enabled' };
   if (!modelPath) {
-    return { allowed: false, reason: 'Select a model of 70B+ parameters (or a large online model) for Code Workspace.' };
+    return { allowed: false, reason: 'Select a 30B+ local model, an online model, or an org server model for PocketCode.' };
   }
-  if (modelPath.startsWith('remote:') || modelPath.startsWith('enterprise:')) {
-    if (isLargeOnlineModel(modelPath)) {
-      return { allowed: true, reason: 'Large online / org model' };
-    }
+  if (modelPath.startsWith('enterprise:')) {
+    return { allowed: true, reason: 'Organization server model' };
+  }
+  if (modelPath.startsWith('remote:')) {
+    // User-selected online models are always allowed (including Gemini 2.5 Flash, etc.).
     return {
-      allowed: false,
-      reason: 'This online model is not tagged as large enough for Code Workspace edit/run tools. Use Folder Q&A / Codebase Explorer instead, or pick a 70B-class / frontier model.',
+      allowed: true,
+      reason: isLargeOnlineModel(modelPath) ? 'Online model' : 'Online model (user selected)',
     };
   }
   const params = opts?.paramsBillions ?? parseParamsBillions(modelPath);
-  if (params != null && params >= 70) {
+  if (params != null && params >= POCKETCODE_MIN_LOCAL_B) {
     return { allowed: true, reason: `Local model ≈ ${params}B` };
   }
   if (params != null) {
     return {
       allowed: false,
-      reason: `Local model ≈ ${params}B is below the 70B Code Workspace gate. Use Knowledge Chat Codebase Explorer (read-only) or switch to a 70B+ GGUF.`,
+      reason: `Local model ≈ ${params}B is below the 30B PocketCode gate. Use Knowledge Chat Codebase Explorer (read-only) or switch to a 30B+ GGUF / org server.`,
     };
   }
-  // Unknown size: deny write/run by default (safer).
   return {
     allowed: false,
-    reason: 'Could not determine model size. Code Workspace requires an explicit ≥70B local GGUF or a known large online model.',
+    reason: 'Could not determine model size. PocketCode requires an explicit ≥30B local GGUF, an online model, or an org server model.',
   };
 }

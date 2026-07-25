@@ -6,6 +6,8 @@ import { Download, FolderSearch, HardDrive, Link as LinkIcon, RefreshCcw, Search
 import { useAppStore } from '../store';
 import { LocalModelRecord, OnlineChatModel, ModelCategoryId, Conversation } from '../types';
 import { MODEL_CATEGORIES, OFFLINE_CHAT_CATALOG, ONLINE_CHAT_MODELS } from '../modelCatalog';
+import { CHAT_API_PROVIDERS } from '../apiProviders';
+import { validateApiKey, type ApiKeyValidation } from '../apiKeyValidation';
 import { pathPlaceholder } from '../platformPaths';
 import { answerModelLabel, remoteModelPath } from '../answerModel';
 
@@ -89,6 +91,8 @@ export default function ModelManager() {
   const [categoryFilter, setCategoryFilter] = useState<ModelCategoryId | 'all'>('all');
   const [configuredProviders, setConfiguredProviders] = useState<string[]>([]);
   const [apiKeyInputs, setApiKeyInputs] = useState<Record<string, string>>({});
+  const [keyValidating, setKeyValidating] = useState<Record<string, boolean>>({});
+  const [keyValidation, setKeyValidation] = useState<Record<string, ApiKeyValidation | null>>({});
   const {
     localModels,
     setLocalModels,
@@ -117,6 +121,7 @@ export default function ModelManager() {
 
   const onlineFreeModels = useMemo(() => ONLINE_CHAT_MODELS.filter(m => m.tier === 'free' && (categoryFilter === 'all' || m.categories.includes(categoryFilter))), [categoryFilter]);
   const onlinePremiumModels = useMemo(() => ONLINE_CHAT_MODELS.filter(m => m.tier === 'premium' && (categoryFilter === 'all' || m.categories.includes(categoryFilter))), [categoryFilter]);
+  const visionOnlineCount = useMemo(() => ONLINE_CHAT_MODELS.filter(m => m.categories.includes('vision')).length, []);
 
   const quantFamilies = useMemo(() => {
     const map = new Map<string, LocalModelRecord[]>();
@@ -300,7 +305,9 @@ export default function ModelManager() {
       return;
     }
     setError('');
-    announce('Starting download. Progress will stay visible in the status panel below.');
+    announce(model?.mmprojUrl
+      ? 'Starting GGUF download, then mmproj for offline vision…'
+      : 'Starting download. Progress will stay visible in the status panel below.');
     setProgress({
       id: model?.id || 'direct',
       file_name: fileNameFromUrl(url),
@@ -319,9 +326,21 @@ export default function ModelManager() {
         destDir: modelsDir,
         name: model?.name || null,
       });
+      if (model?.mmprojUrl) {
+        announce('GGUF ready. Downloading mmproj projector for vision…');
+        await invoke<LocalModelRecord>('download_model', {
+          url: model.mmprojUrl,
+          destDir: modelsDir,
+          name: `${model.name} mmproj`,
+        });
+      }
       await refreshModels();
       await startFreshChatForModel(record.path, record.name);
-      announce(`Download complete. A fresh chat has been created for ${record.name}.`);
+      announce(
+        model?.visionCapable || model?.mmprojUrl
+          ? `Download complete (vision-ready if mmproj is beside the GGUF). Fresh chat created for ${record.name}.`
+          : `Download complete. A fresh chat has been created for ${record.name}.`,
+      );
     } catch (err) {
       announce(String(err), true);
     } finally {
@@ -391,19 +410,45 @@ export default function ModelManager() {
   };
 
 
+  const testProviderKey = async (provider: string) => {
+    setKeyValidating(prev => ({ ...prev, [provider]: true }));
+    try {
+      const result = await validateApiKey(provider, apiKeyInputs[provider]);
+      setKeyValidation(prev => ({ ...prev, [provider]: result }));
+      announce(result.message, !result.ok);
+      return result;
+    } catch (err) {
+      const fail: ApiKeyValidation = { ok: false, provider, message: String(err) };
+      setKeyValidation(prev => ({ ...prev, [provider]: fail }));
+      announce(String(err), true);
+      return fail;
+    } finally {
+      setKeyValidating(prev => ({ ...prev, [provider]: false }));
+    }
+  };
+
   const saveProviderKey = async (provider: string) => {
     const key = (apiKeyInputs[provider] || '').trim();
     if (!key) {
       announce(`Paste an API key for ${provider} first.`, true);
       return;
     }
+    setKeyValidating(prev => ({ ...prev, [provider]: true }));
     try {
+      const result = await validateApiKey(provider, key);
+      setKeyValidation(prev => ({ ...prev, [provider]: result }));
+      if (!result.ok) {
+        announce(result.message, true);
+        return;
+      }
       await invoke('store_api_key', { provider, key });
       setApiKeyInputs(prev => ({ ...prev, [provider]: '' }));
       await refreshProviders();
-      announce(`${provider} API key saved locally and encrypted. You can now use ${provider} online models.`);
+      announce(`${provider}: ${result.message} Saved locally (encrypted).`);
     } catch (err) {
       announce(String(err), true);
+    } finally {
+      setKeyValidating(prev => ({ ...prev, [provider]: false }));
     }
   };
 
@@ -581,44 +626,101 @@ export default function ModelManager() {
           <div className="glass-panel rounded-xl overflow-hidden">
             <div className="p-4 border-b border-surface-200 dark:border-surface-800">
               <h2 className="font-semibold flex items-center gap-2"><Globe2 className="w-5 h-5 text-primary-500" /> {activeTab === 'online-free' ? 'Online Free / Free Tier Chat Models' : 'Online Premium Chat Models'}</h2>
-              <p className="text-sm text-surface-500">Bring your own API key. Keys stay on this device. Use selects the model for Chat and Knowledge Chat so you can test the RAG pipeline with a large online model.</p>
+              <p className="text-sm text-surface-500">
+                Bring your own API key (OpenAI, Anthropic, DeepSeek, Mistral, Gemini, OpenRouter, Groq, Cerebras, Together). Keys stay on this device.
+                Select a model after saving. Vision-capable models ({visionOnlineCount}) can understand screenshots and PDF pages in Chat and PocketCode.
+              </p>
+              <div className="flex flex-wrap gap-2 mt-3">
+                <button
+                  type="button"
+                  onClick={() => setCategoryFilter(categoryFilter === 'vision' ? 'all' : 'vision')}
+                  className={`text-xs px-2.5 py-1 rounded-full font-semibold ${categoryFilter === 'vision' ? 'bg-sky-600 text-white' : 'bg-sky-100 text-sky-800 dark:bg-sky-950/40 dark:text-sky-200'}`}
+                >
+                  Vision models
+                </button>
+                {categoryFilter !== 'all' && categoryFilter !== 'vision' && (
+                  <button type="button" onClick={() => setCategoryFilter('all')} className="text-xs text-surface-500 underline">Clear filter</button>
+                )}
+              </div>
             </div>
             <div className="p-4 grid lg:grid-cols-[320px_1fr] gap-4">
-              <div className="rounded-xl border border-surface-200 dark:border-surface-800 p-4 bg-surface-50 dark:bg-surface-950/40 space-y-4">
+              <div className="rounded-xl border border-surface-200 dark:border-surface-800 p-4 bg-surface-50 dark:bg-surface-950/40 space-y-4 max-h-[40rem] overflow-y-auto">
                 <div>
                   <p className="font-semibold flex items-center gap-2"><KeyRound className="w-4 h-4 text-primary-500" /> API Keys</p>
-                  <p className="text-xs text-surface-500 mt-1">Configured: {configuredProviders.length ? configuredProviders.join(', ') : 'none yet'}</p>
+                  <p className="text-xs text-surface-500 mt-1">
+                    All providers listed. Configured: {configuredProviders.length ? configuredProviders.join(', ') : 'none yet'}.
+                    Select a model from that provider after saving.
+                  </p>
                 </div>
-                {Array.from(new Set(ONLINE_CHAT_MODELS.filter(m => m.tier === (activeTab === 'online-free' ? 'free' : 'premium')).map(m => m.provider))).map(provider => {
-                  const model = ONLINE_CHAT_MODELS.find(m => m.provider === provider)!;
-                  return (
-                    <div key={provider} className="space-y-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-sm font-medium">{model.providerName}</span>
-                        <span className={`text-[10px] px-2 py-0.5 rounded-full ${configuredProviders.includes(provider) ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-surface-200 dark:bg-surface-800 text-surface-500'}`}>{configuredProviders.includes(provider) ? 'Saved' : 'Needed'}</span>
-                      </div>
-                      <input type="password" value={apiKeyInputs[provider] || ''} onChange={e => setApiKeyInputs(prev => ({ ...prev, [provider]: e.target.value }))} placeholder={`${model.providerName} API key`} className="input-field text-sm" />
-                      <div className="flex gap-2">
-                        <button onClick={() => saveProviderKey(provider)} className="btn-secondary text-xs flex-1">Save key</button>
-                        <button onClick={() => window.open(model.apiKeyUrl, '_blank')} className="btn-secondary text-xs">Get key</button>
-                      </div>
+                {CHAT_API_PROVIDERS.map(provider => (
+                  <div key={provider.id} className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-sm font-medium">{provider.name}</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full ${configuredProviders.includes(provider.id) ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-surface-200 dark:bg-surface-800 text-surface-500'}`}>{configuredProviders.includes(provider.id) ? 'Saved' : 'Needed'}</span>
                     </div>
-                  );
-                })}
+                    <input
+                      type="password"
+                      value={apiKeyInputs[provider.id] || ''}
+                      onChange={e => {
+                        setApiKeyInputs(prev => ({ ...prev, [provider.id]: e.target.value }));
+                        setKeyValidation(prev => ({ ...prev, [provider.id]: null }));
+                      }}
+                      placeholder={`${provider.name} API key`}
+                      className="input-field text-sm"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        disabled={!!keyValidating[provider.id]}
+                        onClick={() => void testProviderKey(provider.id)}
+                        className="btn-secondary text-xs disabled:opacity-50"
+                        title="Test pasted key, or the saved key if empty"
+                      >
+                        {keyValidating[provider.id] ? 'Testing…' : 'Test'}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!!keyValidating[provider.id]}
+                        onClick={() => void saveProviderKey(provider.id)}
+                        className="btn-secondary text-xs flex-1 disabled:opacity-50"
+                      >
+                        Save key
+                      </button>
+                      <button type="button" onClick={() => window.open(provider.url, '_blank')} className="btn-secondary text-xs">Get key</button>
+                    </div>
+                    {keyValidation[provider.id] && (
+                      <p className={`text-[11px] ${keyValidation[provider.id]!.ok ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
+                        {keyValidation[provider.id]!.message}
+                      </p>
+                    )}
+                  </div>
+                ))}
               </div>
               <div className="grid md:grid-cols-2 gap-4">
                 {(activeTab === 'online-free' ? onlineFreeModels : onlinePremiumModels).map(model => (
                   <div key={model.id} className="rounded-xl border border-surface-200 dark:border-surface-800 p-4 bg-white/60 dark:bg-surface-950/40 hover:border-primary-400/50 transition-colors">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <p className="font-semibold">{model.name}</p>
+                        <p className="font-semibold flex items-center gap-2">
+                          {model.name}
+                          {model.categories.includes('vision') && (
+                            <span className="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded-md bg-sky-100 text-sky-800 dark:bg-sky-950/50 dark:text-sky-200">Vision</span>
+                          )}
+                        </p>
                         <p className="text-xs text-surface-500">{model.providerName} • {model.modelId}</p>
                       </div>
                       <span className={`text-[10px] uppercase tracking-wide px-2 py-1 rounded-full ${model.tier === 'free' ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-300' : 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300'}`}>{model.tier}</span>
                     </div>
                     <p className="text-sm text-surface-600 dark:text-surface-400 mt-3">{model.recommendedUse}</p>
                     <div className="flex flex-wrap gap-1.5 mt-3">
-                      {model.categories.map(cat => <span key={cat} className="text-[10px] px-2 py-1 rounded-full bg-surface-100 dark:bg-surface-800 text-surface-500">{cat}</span>)}
+                      {model.categories.map(cat => (
+                        <span
+                          key={cat}
+                          className={`text-[10px] px-2 py-1 rounded-full ${cat === 'vision' ? 'bg-sky-100 dark:bg-sky-950/40 text-sky-700 dark:text-sky-300' : 'bg-surface-100 dark:bg-surface-800 text-surface-500'}`}
+                        >
+                          {cat}
+                        </span>
+                      ))}
                     </div>
                     <div className="grid grid-cols-2 gap-2 text-xs mt-4">
                       <InfoTile label="Speed" value={model.speed} />
@@ -773,7 +875,15 @@ export default function ModelManager() {
             <tbody className="divide-y divide-surface-200 dark:divide-surface-800">
               {filtered.map(model => (
                 <tr key={model.id} className="hover:bg-surface-50 dark:hover:bg-surface-900/50 transition-colors">
-                  <td className="px-4 py-4"><p className="font-medium">{model.name}</p><p className="text-xs text-surface-500">{model.params} parameters • {model.recommendedUse}</p></td>
+                  <td className="px-4 py-4">
+                    <p className="font-medium flex items-center gap-2">
+                      {model.name}
+                      {(model.visionCapable || model.categories.includes('vision')) && (
+                        <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 dark:bg-sky-950/40 dark:text-sky-200">Vision</span>
+                      )}
+                    </p>
+                    <p className="text-xs text-surface-500">{model.params} parameters • {model.recommendedUse}</p>
+                  </td>
                   <td className="px-4 py-4"><span className="px-2 py-1 rounded-md bg-surface-100 dark:bg-surface-800 text-xs font-medium">{model.quant}</span></td>
                   <td className="px-4 py-4 text-sm">{model.size}</td>
                   <td className="px-4 py-4 text-sm">{model.ram}</td>

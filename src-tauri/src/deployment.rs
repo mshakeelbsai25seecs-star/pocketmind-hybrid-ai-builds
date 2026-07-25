@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 pub const DEPLOY_MODE_WORKSTATION: &str = "workstation";
 pub const DEPLOY_MODE_SERVER: &str = "server";
 
-/// Preferred Windows storage root — colocated with the repo for a single manageable tree.
+/// Dev-tree Windows storage root — used only when it already exists (local developer installs).
 #[cfg(target_os = "windows")]
-pub const WINDOWS_PREFERRED_DATA_ROOT: &str = r"D:\nexus-ai-deep-fixed\runtime-data";
+pub const WINDOWS_DEV_DATA_ROOT: &str = r"D:\nexus-ai-deep-fixed\runtime-data";
 
 /// Previous brand folder name — kept so upgrades still find existing installs.
 #[cfg(target_os = "windows")]
@@ -106,13 +106,23 @@ pub fn preferred_data_root() -> PathBuf {
     }
     #[cfg(target_os = "windows")]
     {
-        let root = PathBuf::from(WINDOWS_PREFERRED_DATA_ROOT);
+        let portable = dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"))
+            .join("PocketMind");
+        let dev = PathBuf::from(WINDOWS_DEV_DATA_ROOT);
         let legacy = PathBuf::from(WINDOWS_LEGACY_DATA_ROOT);
-        if !root.exists() && legacy.exists() {
+        // Prefer an already-initialized install so upgrades do not relocate data.
+        if portable.exists() {
+            return portable;
+        }
+        if dev.exists() {
+            return dev;
+        }
+        if legacy.exists() {
             return legacy;
         }
-        let _ = std::fs::create_dir_all(&root);
-        return root;
+        let _ = std::fs::create_dir_all(&portable);
+        return portable;
     }
     #[cfg(target_os = "macos")]
     {

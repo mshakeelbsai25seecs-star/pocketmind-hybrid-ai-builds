@@ -127,6 +127,34 @@ For AMD/Intel/Vulkan machines:
 - [ ] Storage page shows local model records and chat counts.
 - [ ] Help Center explains model, runtime, API key, GPU, download, and attachment issues clearly.
 
+## 11. Online providers and API keys
+
+- [ ] Settings → Providers: save key runs validate-first (or Test) for each configured provider.
+- [ ] Invalid keys show a clear error; `402`/`429` are treated as authenticated-with-warning where applicable.
+- [ ] Chat one-liner works for at least one online provider when a key is present.
+
+## 12. PocketCode (native tools + JSON fallback)
+
+- [ ] `toolProtocolForModel` is `native` for `remote:openai/*`, `remote:groq/*`, `remote:anthropic/*`, `remote:gemini/*` (and other OpenAI-compat natives).
+- [ ] Local GGUF uses JSON tool protocol (not native).
+- [ ] Agent run with native tools: permission overlay appears before tool execution; `done` ends the loop.
+- [ ] Multi-turn tools work (assistant tool call → tool result → final answer) on Anthropic and/or Gemini when keys exist.
+- [ ] JSON fallback agent run works on a local model (or clear “model too small” policy messaging for models under 30B).
+
+## 13. MCP
+
+- [ ] Settings → MCP: enable a server (e.g. workspace filesystem); list tools succeeds.
+- [ ] PocketCode MCP tool call requires user confirmation.
+- [ ] Connect Cursor / Sync to Cursor writes project `.cursor/mcp.json` without crashing.
+- [ ] No silent model failover when MCP or tools fail.
+
+## 14. Knowledge Chat smoke
+
+- [ ] Index a folder (e.g. `test-fixtures/kc-qa-corpus` subset); scan completes.
+- [ ] Ask 3 grounded questions; sources appear on answers.
+- [ ] Low-confidence block (when enabled in Security) prevents weak generation.
+- [ ] Missing reranker/embedding does not crash; falls back with clear status.
+
 ## Release decision
 
 Only share the build when local chat, runtime scan, model health check, chat management, and diagnostics pass on the build machine. GPU acceleration should be treated as validated only after real hardware testing confirms it.

@@ -9,10 +9,14 @@ import { SOC_DEFAULT_DENSE_EMBEDDING_SETTINGS } from './socKnowledgeIndex';
 import type { DeploymentConfig } from './deploymentConfig';
 import type { ProductConfig } from './productConfig';
 import type { PendingChatOptions } from './socChatHandoff';
+import type { HistoryModeKey } from './conversationModes';
+import { historyKeyForConversationMode } from './conversationModes';
 
 interface AppState {
   sidebarOpen: boolean;
   activeConversationId: string | null;
+  /** Last active conversation per history bucket (chat / knowledge / pocketcode / soc). */
+  lastConversationIdByMode: Partial<Record<HistoryModeKey, string | null>>;
   activeCharacterId: string | null;
   activeView: AppView;
   theme: ThemeMode;
@@ -26,6 +30,10 @@ interface AppState {
   systemInfo: SystemInfo | null;
   recommendations: ModelRecommendation[];
   currentModel: string | null;
+  /** Last non-enterprise model for one-click swap from PocketCode org server strip. */
+  lastLocalModel: string | null;
+  /** Last enterprise:{id} model for one-click return to org server. */
+  lastEnterpriseModel: string | null;
   setupCompleted: boolean;
   modelsDir: string;
   isGenerating: boolean;
@@ -48,6 +56,7 @@ interface AppState {
 
   setSidebarOpen: (open: boolean) => void;
   setActiveConversation: (id: string | null) => void;
+  rememberConversationForMode: (mode: string | null | undefined, id: string | null) => void;
   setActiveCharacter: (id: string | null) => void;
   setActiveView: (view: AppView) => void;
   setTheme: (theme: ThemeMode) => void;
@@ -65,6 +74,8 @@ interface AppState {
   setSystemInfo: (info: SystemInfo) => void;
   setRecommendations: (recs: ModelRecommendation[]) => void;
   setCurrentModel: (model: string | null) => void;
+  setLastLocalModel: (model: string | null) => void;
+  setLastEnterpriseModel: (model: string | null) => void;
   setSetupCompleted: (completed: boolean) => void;
   setModelsDir: (dir: string) => void;
   setIsGenerating: (generating: boolean) => void;
@@ -114,10 +125,11 @@ export const useAppStore = create<AppState>()(
     (set) => ({
       sidebarOpen: true,
       activeConversationId: null,
+      lastConversationIdByMode: {},
       activeCharacterId: null,
       activeView: 'chat',
       theme: 'system',
-      accentColor: '#0ea5e9',
+      accentColor: '#22c55e',
       performanceMode: 'balanced',
       conversations: [],
       messages: {},
@@ -126,6 +138,8 @@ export const useAppStore = create<AppState>()(
       systemInfo: null,
       recommendations: [],
       currentModel: null,
+      lastLocalModel: null,
+      lastEnterpriseModel: null,
       setupCompleted: false,
       modelsDir: '',
       isGenerating: false,
@@ -147,7 +161,23 @@ export const useAppStore = create<AppState>()(
       defaultParams: SAFE_DEFAULT_PARAMS,
 
       setSidebarOpen: (open) => set({ sidebarOpen: open }),
-      setActiveConversation: (id) => set({ activeConversationId: id, generationError: null }),
+      setActiveConversation: (id) => set((state) => {
+        const conv = id ? state.conversations.find(c => c.id === id) : null;
+        const key = conv ? historyKeyForConversationMode(conv.mode) : null;
+        return {
+          activeConversationId: id,
+          generationError: null,
+          lastConversationIdByMode: key
+            ? { ...state.lastConversationIdByMode, [key]: id }
+            : state.lastConversationIdByMode,
+        };
+      }),
+      rememberConversationForMode: (mode, id) => set((state) => {
+        const key = historyKeyForConversationMode(mode);
+        return {
+          lastConversationIdByMode: { ...state.lastConversationIdByMode, [key]: id },
+        };
+      }),
       setActiveCharacter: (id) => set({ activeCharacterId: id }),
       setActiveView: (view) => set({ activeView: view }),
       setTheme: (theme) => set({ theme }),
@@ -198,7 +228,17 @@ export const useAppStore = create<AppState>()(
       setLocalModels: (models) => set({ localModels: models }),
       setSystemInfo: (info) => set({ systemInfo: info }),
       setRecommendations: (recs) => set({ recommendations: recs }),
-      setCurrentModel: (model) => set({ currentModel: model }),
+      setCurrentModel: (model) => set((state) => {
+        const patch: Partial<AppState> = { currentModel: model };
+        if (model?.startsWith('enterprise:')) {
+          patch.lastEnterpriseModel = model;
+        } else if (model) {
+          patch.lastLocalModel = model;
+        }
+        return { ...state, ...patch };
+      }),
+      setLastLocalModel: (model) => set({ lastLocalModel: model }),
+      setLastEnterpriseModel: (model) => set({ lastEnterpriseModel: model }),
       setSetupCompleted: (completed) => set({ setupCompleted: completed }),
       setModelsDir: (dir) => set({ modelsDir: dir }),
       setIsGenerating: (generating) => set({ isGenerating: generating }),
@@ -272,8 +312,11 @@ export const useAppStore = create<AppState>()(
         performanceMode: state.performanceMode,
         defaultParams: state.defaultParams,
         activeConversationId: state.activeConversationId,
+        lastConversationIdByMode: state.lastConversationIdByMode,
         activeCharacterId: state.activeCharacterId,
         currentModel: state.currentModel,
+        lastLocalModel: state.lastLocalModel,
+        lastEnterpriseModel: state.lastEnterpriseModel,
         setupCompleted: state.setupCompleted,
         modelsDir: state.modelsDir,
         socKnowledgeResources: state.socKnowledgeResources.map(resource => ({

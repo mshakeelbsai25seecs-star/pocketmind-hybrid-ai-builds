@@ -19,16 +19,24 @@ import EnterpriseServer from './EnterpriseServer';
 import SocWorkspace from './SocWorkspace';
 import KnowledgeChatWorkspace from './knowledgeChat/KnowledgeChatWorkspace';
 import CodeWorkspaceLayout from './codeWorkspace/CodeWorkspaceLayout';
+import AgentPermissionOverlay from './codeWorkspace/AgentPermissionOverlay';
 import QuickComposeOverlay from './QuickComposeOverlay';
+import { useAgentSession } from './codeWorkspace/agentSession';
 
 export default function Layout() {
   const activeView = useAppStore(s => s.activeView);
   const sidebarOpen = useAppStore(s => s.sidebarOpen);
   const setupCompleted = useAppStore(s => s.setupCompleted);
-  const theme = useAppStore(s => s.theme);
   const setActiveView = useAppStore(s => s.setActiveView);
-  const workspaceEpoch = useAppStore(s => s.workspaceEpoch);
   const [hydrated, setHydrated] = useState(() => useAppStore.persist.hasHydrated());
+  const agentSnap = useAgentSession();
+  // Keep PocketCode mounted while an agent turn (or permission gate) is live
+  // so React unmount cannot drop the only UI that was previously blocking progress.
+  const keepCodeWorkspace =
+    activeView === 'code-workspace'
+    || agentSnap.running
+    || agentSnap.waitingFor === 'edit'
+    || agentSnap.waitingFor === 'sandbox';
 
   useEffect(() => {
     if (useAppStore.persist.hasHydrated()) {
@@ -49,38 +57,6 @@ export default function Layout() {
     }
   }, [hydrated, setupCompleted, activeView, setActiveView]);
 
-  // #region agent log
-  useEffect(() => {
-    const root = document.documentElement;
-    const bodyCs = getComputedStyle(document.body);
-    const layout = document.querySelector('.app-gradient-bg');
-    const layoutCs = layout ? getComputedStyle(layout) : null;
-    const rootEl = document.getElementById('root');
-    fetch('http://127.0.0.1:7414/ingest/28bf2132-0f52-40ef-96b9-4e681c1d7653', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7d5a77' },
-      body: JSON.stringify({
-        sessionId: '7d5a77',
-        runId: 'white-ui-2',
-        hypothesisId: 'H4',
-        location: 'Layout.tsx:mount',
-        message: 'layout_visible_theme_state',
-        data: {
-          theme,
-          activeView,
-          setupCompleted,
-          hydrated,
-          htmlHasDark: root.classList.contains('dark'),
-          bodyBg: bodyCs.backgroundColor,
-          layoutBg: layoutCs ? layoutCs.backgroundColor : null,
-          rootHasChildren: !!rootEl && rootEl.childElementCount > 0,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => undefined);
-  }, [theme, activeView, setupCompleted, hydrated]);
-  // #endregion
-
   return (
     <div className="relative flex h-screen w-screen overflow-hidden app-gradient-bg text-surface-950 dark:text-surface-50">
       <Sidebar />
@@ -90,7 +66,17 @@ export default function Layout() {
         {activeView === 'chat' && <ChatView />}
         {activeView === 'soc' && <SocWorkspace />}
         {activeView === 'knowledge-chat' && <KnowledgeChatWorkspace />}
-        {activeView === 'code-workspace' && <CodeWorkspaceLayout key={workspaceEpoch} />}
+        {keepCodeWorkspace && (
+          <div
+            className={
+              activeView === 'code-workspace'
+                ? 'flex-1 min-h-0 flex flex-col'
+                : 'hidden'
+            }
+          >
+            <CodeWorkspaceLayout />
+          </div>
+        )}
         {activeView === 'hardware' && <HardwareMonitor />}
         {activeView === 'runtime' && <RuntimeManager />}
         {activeView === 'models' && <ModelManager />}
@@ -104,6 +90,7 @@ export default function Layout() {
         {activeView === 'backup' && <BackupRestore />}
         {activeView === 'help' && <HelpCenter />}
       </main>
+      <AgentPermissionOverlay />
       <QuickComposeOverlay />
     </div>
   );

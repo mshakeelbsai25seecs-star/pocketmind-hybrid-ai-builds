@@ -13,7 +13,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { useAppStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
-import { AttachmentContext, Conversation } from '../types';
+import { AttachmentContext, Conversation, Message } from '../types';
 import {
   mergeGenerationParams,
   PendingChatOptions,
@@ -27,6 +27,8 @@ import DiffViewer from './DiffViewer';
 import { computeContextBudget, defaultKeepLastN } from '../contextBudget';
 import { FEATURE_FLAGS } from '../featureFlags';
 import { getSetting, setSetting } from '../api/powerFeatures';
+import { chipForPath, prepareAttachmentsForModel } from '../attachments/prepareAttachments';
+import { modelSupportsVision } from '../codeWorkspace/visionCapability';
 
 function humanError(err: unknown): string {
   let raw = '';
@@ -858,12 +860,33 @@ export default function ChatView() {
     setConversations: s.setConversations,
   })));
 
-  const currentMessages = activeConversationId ? messages[activeConversationId] || [] : [];
   const activeConversation = conversations.find(c => c.id === activeConversationId);
-  const activeConversationTitle = activeConversation?.title || 'New Chat';
-  const activeCharacter = characters.find(c => c.id === (activeCharacterId || activeConversation?.character_id));
+  const chatModeOk = !activeConversation || (activeConversation.mode || 'chat') === 'chat'
+    || activeConversation.mode === 'organization-server';
+  const effectiveConversationId = chatModeOk ? activeConversationId : null;
+  const currentMessages = effectiveConversationId ? messages[effectiveConversationId] || [] : [];
+  const activeConversationTitle = chatModeOk ? (activeConversation?.title || 'New Chat') : 'New Chat';
+  const activeCharacter = characters.find(c => c.id === (activeCharacterId || (chatModeOk ? activeConversation?.character_id : null)));
   const selectedModelName = modelFileName(currentModel);
-  const canSend = Boolean(input.trim() && activeConversationId && currentModel && !isGenerating);
+  const canSend = Boolean(input.trim() && effectiveConversationId && currentModel && !isGenerating);
+
+  // If a knowledge/pocketcode thread is still active, clear it so Chat never shows mixed history.
+  useEffect(() => {
+    if (!activeConversationId || !activeConversation) return;
+    const mode = activeConversation.mode || 'chat';
+    if (mode === 'chat' || mode === 'organization-server') return;
+    const lastChat = useAppStore.getState().lastConversationIdByMode.chat;
+    const fallback = conversations.find(c => c.id === lastChat && (c.mode || 'chat') === 'chat')
+      || conversations.find(c => (c.mode || 'chat') === 'chat');
+    if (fallback) {
+      void invoke<Message[]>('get_messages', { conversationId: fallback.id }).then(msgs => {
+        setMessages(fallback.id, msgs);
+        setActiveConversation(fallback.id);
+      });
+    } else {
+      setActiveConversation(null);
+    }
+  }, [activeConversationId, activeConversation, conversations, setActiveConversation, setMessages]);
 
   useEffect(() => {
     if (!activeConversationId || !FEATURE_FLAGS.contextTrimSlider) return;
@@ -917,6 +940,7 @@ export default function ChatView() {
         mode: 'chat'
       });
       setActiveConversation(id);
+      useAppStore.getState().rememberConversationForMode('chat', id);
       setMessages(id, []);
       const convs = await invoke<Conversation[]>('get_conversations');
       setConversations(convs);
@@ -1255,6 +1279,23 @@ export default function ChatView() {
       });
 
       try {
+        let visionImages: Array<{ mime: string; base64: string }> = [];
+        if (includeAttachments && attachments.length > 0) {
+          try {
+            const prepared = await prepareAttachmentsForModel(
+              attachments.map(a => a.path),
+              currentModel,
+              { maxCharsPerFile: 12_000, maxTotalChars: 24_000, pdfPages: 3 },
+            );
+            visionImages = prepared.images;
+            if (prepared.notices.length) {
+              setAttachmentNotice(prepared.notices.slice(0, 3).join(' · '));
+            }
+          } catch (prepErr) {
+            console.warn('Attachment vision prepare failed:', prepErr);
+          }
+        }
+
         await invoke('stream_generate', {
           request: {
             prompt: userModelContent,
@@ -1262,7 +1303,8 @@ export default function ChatView() {
             system_prompt: systemPrompt,
             params: generationParams,
             model_path: currentModel,
-            backend: currentModel.startsWith('enterprise:') ? 'enterprise' : currentModel.startsWith('remote:') ? 'remote' : 'llama.cpp'
+            backend: currentModel.startsWith('enterprise:') ? 'enterprise' : currentModel.startsWith('remote:') ? 'remote' : 'llama.cpp',
+            images: visionImages,
           }
         });
       } catch (err) {
@@ -1552,24 +1594,35 @@ export default function ChatView() {
                 </div>
               )}
               <div className="flex gap-2 overflow-x-auto pb-1">
-                {attachments.map(a => (
+                {attachments.map(a => {
+                  const chip = chipForPath(a.path, currentModel);
+                  return (
                   <div key={a.path} className="shrink-0 max-w-[16rem] rounded-xl border border-surface-200 dark:border-surface-700 bg-white/70 dark:bg-surface-950/50 px-3 py-2 flex items-start gap-2">
                     <FileText className="w-4 h-4 mt-0.5 text-primary-500 shrink-0" />
                     <div className="min-w-0">
-                      <div className="text-xs font-semibold truncate">{a.name}</div>
+                      <div className="text-xs font-semibold truncate flex items-center gap-1.5">
+                        <span className={`uppercase text-[9px] font-bold ${
+                          chip.understand === 'vision' ? 'text-emerald-600' : chip.understand === 'doc-text' ? 'text-sky-600' : 'text-amber-600'
+                        }`}
+                        >
+                          {chip.understand === 'doc-text' ? 'doc' : chip.understand}
+                        </span>
+                        <span className="truncate">{a.name}</span>
+                      </div>
                       <div className="text-[11px] text-surface-500 truncate">{a.kind} • {mb(a.size_bytes)} • {a.chunk_count || a.chunks?.length || 1} section(s)</div>
-                      <div className="text-[11px] text-surface-400 truncate">{compactChars(a.indexed_chars)} indexed</div>
+                      <div className="text-[11px] text-surface-400 truncate" title={chip.notice}>{chip.notice || `${compactChars(a.indexed_chars)} indexed`}</div>
                       {a.warnings?.length > 0 && <div className="text-[11px] text-amber-500 truncate">{a.warnings[0]}</div>}
                     </div>
                     <button onClick={() => removeAttachment(a.path)} className="p-0.5 rounded hover:bg-surface-200 dark:hover:bg-surface-800" title="Remove attachment"><X className="w-3.5 h-3.5" /></button>
                   </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           )}
 
           <div className="composer-shell flex items-end gap-2 sm:gap-3 p-2 sm:p-3">
-            <button onClick={attachFiles} disabled={attachmentBusy} className="p-2 rounded-xl hover:bg-surface-200 dark:hover:bg-surface-700 transition-colors flex-shrink-0" title="Attach PDF, DOCX, text, code, spreadsheet, or image"><Paperclip className="w-5 h-5 text-surface-500" /></button>
+            <button onClick={attachFiles} disabled={attachmentBusy} className="p-2 rounded-xl hover:bg-surface-200 dark:hover:bg-surface-700 transition-colors flex-shrink-0" title={modelSupportsVision(currentModel) ? 'Attach docs/images — vision model will see images & PDF pages' : 'Attach PDF, DOCX, text, code, spreadsheet, or image (images need a vision model)'}><Paperclip className="w-5 h-5 text-surface-500" /></button>
             <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} placeholder={currentModel ? 'Message PocketMind Hybrid AI...' : 'Select a model before chatting...'} rows={1} disabled={!currentModel || isGenerating} className="flex-1 bg-transparent border-none focus:outline-none resize-none py-2 max-h-32 text-surface-900 dark:text-surface-100 placeholder:text-surface-400 disabled:opacity-60" style={{ minHeight: '24px' }} />
             <button onClick={isGenerating ? stopGeneration : () => void handleSend()} disabled={!isGenerating && !canSend} className={`p-2 rounded-xl transition-all shadow-md ${isGenerating ? 'bg-red-600 hover:bg-red-500 text-white' : canSend ? 'bg-primary-500 hover:bg-primary-600 text-surface-950 shadow-primary-500/20' : 'bg-surface-200 dark:bg-surface-700 text-surface-400 cursor-not-allowed'}`} title={isGenerating ? 'Stop response' : !currentModel ? 'Select a model first' : 'Send'}>
               {isGenerating ? <Square className="w-5 h-5" /> : <Send className="w-5 h-5" />}

@@ -16,7 +16,15 @@ mod audit;
 mod gguf;
 mod knowledge_chat;
 mod tooling;
+mod sandbox_runners;
 mod code_workspace;
+mod cw_checkpoints;
+mod cw_symbol_index;
+mod cw_plans;
+mod cw_ocr;
+mod cw_pdf_pages;
+mod cw_skills;
+mod mcp_host;
 mod power_features;
 mod power_commands;
 
@@ -78,6 +86,7 @@ fn main() {
             commands::store_api_key,
             commands::remove_api_key,
             commands::get_api_key_providers,
+            commands::validate_api_key,
             commands::get_enterprise_server_config,
             commands::save_enterprise_server_config,
             commands::get_enterprise_server_token,
@@ -169,6 +178,42 @@ fn main() {
             power_commands::cw_apply_edit_preview,
             power_commands::cw_apply_edit_write,
             power_commands::cw_run_sandbox,
+            power_commands::cw_list_runners,
+            power_commands::cw_delete_file,
+            power_commands::cw_checkpoint_begin,
+            power_commands::cw_checkpoint_snapshot_write,
+            power_commands::cw_checkpoint_snapshot_delete,
+            power_commands::cw_list_checkpoints,
+            power_commands::cw_restore_checkpoint,
+            power_commands::cw_restore_checkpoint_file,
+            power_commands::cw_checkpoint_manifest,
+            power_commands::cw_ensure_symbol_index,
+            power_commands::cw_repo_map,
+            power_commands::cw_find_symbol,
+            power_commands::cw_read_symbol,
+            power_commands::cw_plan_write,
+            power_commands::cw_plan_read,
+            power_commands::cw_plan_list,
+            power_commands::cw_plan_update_markdown,
+            power_commands::cw_plan_update_status,
+            power_commands::cw_ocr_image,
+            power_commands::cw_image_base64,
+            power_commands::cw_pdf_page_images,
+            power_commands::local_model_vision_ready,
+            power_commands::cw_whisper_transcribe,
+            power_commands::cw_list_skills,
+            power_commands::cw_read_skill,
+            power_commands::cw_skills_dirs,
+            power_commands::mcp_list_servers,
+            power_commands::mcp_get_config,
+            power_commands::mcp_save_config,
+            power_commands::mcp_list_tools,
+            power_commands::mcp_call_tool,
+            power_commands::mcp_test_server,
+            power_commands::mcp_config_path,
+            power_commands::mcp_setup_cursor_bridge,
+            power_commands::mcp_export_to_cursor,
+            power_commands::mcp_cursor_paths,
         ])
         .setup(|app| {
             knowledge_chat::qa_corpus::spawn_startup_bootstrap(app.handle());

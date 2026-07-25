@@ -66,7 +66,10 @@ export function normalizeSocPath(value: string): string {
   return trimmed.replace(/\//g, '\\');
 }
 
-/** @deprecated Use isPathUnderDeploymentRoots from deploymentConfig with deployment settings */
+/**
+ * @deprecated Use `isPathUnderDeploymentRoots` from `deploymentConfig.ts`.
+ * Compatibility shim — always returns true for non-empty paths.
+ */
 export function isDDriveSocPath(value: string): boolean {
   return value.trim().length > 0;
 }

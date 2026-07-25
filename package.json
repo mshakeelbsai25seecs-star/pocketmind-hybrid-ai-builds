@@ -1,12 +1,14 @@
 {
   "name": "nexus-ai",
   "private": true,
-  "version": "0.1.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
+    "test:kc-selftest": "node scripts/run-kc-selftests.mjs",
+    "test:tool-protocol": "npx --yes tsx -e \"import { toolProtocolForModel } from './src/codeWorkspace/toolSchemas.ts'; const cases=[['remote:anthropic/x','native'],['remote:gemini/x','native'],['remote:groq/x','native'],['D:/m.gguf','json']]; for (const [p,e] of cases){ const g=toolProtocolForModel(p); if(g!==e){ console.error(p,g,e); process.exit(1);} } console.log('tool-protocol ok');\"",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:dev:macos": "bash scripts/tauri-dev-macos.sh",
@@ -28,7 +30,7 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^1.5.0",
-    "diff": "^9.0.0",
+    "diff": "^7.0.0",
     "framer-motion": "^10.16.0",
     "highlight.js": "^11.9.0",
     "lucide-react": "^0.294.0",
@@ -37,11 +39,9 @@
     "react-markdown": "^9.0.0",
     "rehype-highlight": "^7.0.0",
     "remark-gfm": "^4.0.0",
-    "diff": "^7.0.0",
     "zustand": "^4.4.7"
   },
   "devDependencies": {
-    "@types/diff": "^7.0.0",
     "@tauri-apps/cli": "^1.5.0",
     "@types/diff": "^7.0.2",
     "@types/react": "^18.2.0",

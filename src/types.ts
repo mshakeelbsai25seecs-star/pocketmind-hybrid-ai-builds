@@ -112,11 +112,40 @@ export interface GenerationParams {
   flash_attention: boolean;
 }
 
+export interface ToolCallFunction {
+  name: string;
+  arguments: string;
+}
+
+export interface ToolCall {
+  id: string;
+  type?: string;
+  function: ToolCallFunction;
+}
+
+export interface OpenAiFunctionTool {
+  type: 'function';
+  function: {
+    name: string;
+    description?: string;
+    parameters?: Record<string, unknown>;
+  };
+}
+
+export interface ChatMessage {
+  role: string;
+  content: string;
+  tool_calls?: ToolCall[];
+  tool_call_id?: string;
+  name?: string;
+}
+
 export interface GenerationChunk {
   text: string;
   finish_reason?: string;
   tokens_generated: number;
   tokens_per_sec: number;
+  tool_calls?: ToolCall[] | null;
 }
 
 export type ThemeMode = 'light' | 'dark' | 'system';
@@ -497,11 +526,14 @@ export interface OfflineChatModelCatalogItem {
   categories: ModelCategoryId[];
   recommendedUse: string;
   url: string;
+  /** Companion multimodal projector GGUF for offline vision. */
+  mmprojUrl?: string;
+  visionCapable?: boolean;
 }
 
 export interface OnlineChatModel {
   id: string;
-  provider: 'groq' | 'gemini' | 'openrouter' | 'together' | 'openai' | 'deepseek' | 'mistral';
+  provider: 'groq' | 'cerebras' | 'gemini' | 'openrouter' | 'together' | 'openai' | 'anthropic' | 'deepseek' | 'mistral';
   providerName: string;
   modelId: string;
   name: string;

@@ -29,11 +29,9 @@ function Copy-One([string]$Path) {
 }
 
 # Only ship installer + main app binary (never build-script junk from deps/)
-Copy-One (Join-Path $releaseDir "bundle\nsis\PocketMind Hybrid AI_0.1.0_x64-setup.exe")
-Copy-One (Join-Path $releaseDir "bundle\msi\PocketMind Hybrid AI_0.1.0_x64_en-US.msi")
 Copy-One (Join-Path $releaseDir "PocketMind Hybrid AI.exe")
 
-# Fallback: any *setup.exe / product exe at bundle roots only (not recursive into deps)
+# Prefer any NSIS/MSI under bundle/ (versioned names change with tauri.conf package.version)
 $nsis = Join-Path $releaseDir "bundle\nsis"
 $msi = Join-Path $releaseDir "bundle\msi"
 if (Test-Path $nsis) {
@@ -68,15 +66,22 @@ foreach ($doc in @("INSTALL.md", "WHAT_IS_INCLUDED.md", "README.md")) {
   }
 }
 
+$guide = Join-Path $RepoRoot "PRODUCT_GUIDE.md"
+if (Test-Path $guide) {
+  Copy-Item $guide -Destination (Join-Path $OutDir "PRODUCT_GUIDE.md") -Force
+  Write-Host "Copied PRODUCT_GUIDE.md"
+}
+
 New-Item -ItemType Directory -Force -Path (Join-Path $OutDir "models\embeddings") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $OutDir "models\rerankers") | Out-Null
 
 @"
 PocketMind Hybrid AI - Windows (tester)
 
-1. Run PocketMind Hybrid AI_0.1.0_x64-setup.exe (or open PocketMind Hybrid AI.exe).
+1. Run the NSIS/MSI installer if present, or open PocketMind Hybrid AI.exe.
 2. Add your .gguf models in Settings.
 3. Knowledge Chat: pick a folder, Scan, Build Index, then ask in your own words.
+4. Full product guide (for operators): PRODUCT_GUIDE.md in the source repo / handoff pack.
 
 If Windows warns: More info -> Run anyway.
 

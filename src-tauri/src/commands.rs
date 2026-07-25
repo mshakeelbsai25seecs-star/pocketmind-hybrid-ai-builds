@@ -477,6 +477,7 @@ pub async fn generate_response(
         finish_reason,
         tokens_generated,
         tokens_per_sec,
+        tool_calls: None,
     })
 }
 
@@ -507,6 +508,7 @@ pub async fn stream_generate(
                     finish_reason: Some("error".to_string()),
                     tokens_generated: 0,
                     tokens_per_sec: 0.0,
+                    tool_calls: None,
                 }).await;
             }
         });
@@ -554,6 +556,7 @@ pub async fn stream_generate(
                     finish_reason: Some("error".to_string()),
                     tokens_generated: 0,
                     tokens_per_sec: 0.0,
+                    tool_calls: None,
                 }).await;
             }
         });
@@ -597,6 +600,7 @@ pub async fn stream_generate(
                     finish_reason: Some("error".to_string()),
                     tokens_generated: 0,
                     tokens_per_sec: 0.0,
+                    tool_calls: None,
                 }).await;
             }
         });
@@ -735,6 +739,26 @@ pub async fn get_api_key_providers(state: State<'_, AppState>) -> AppResult<Vec<
     let db = state.db.lock().await;
     let keys = db.get_all_api_keys()?;
     Ok(keys.into_iter().map(|k| k.provider).collect())
+}
+
+#[tauri::command]
+pub async fn validate_api_key(
+    state: State<'_, AppState>,
+    provider: String,
+    key: Option<String>,
+) -> AppResult<crate::llm::remote::ApiKeyValidation> {
+    let trimmed = key.as_deref().map(str::trim).unwrap_or("").to_string();
+    let api_key = if !trimmed.is_empty() {
+        trimmed
+    } else {
+        let db = state.db.lock().await;
+        let encrypted = db
+            .get_api_key(&provider)?
+            .ok_or_else(|| AppError::Unknown(format!("No saved API key for {provider}.")))?;
+        drop(db);
+        state.crypto.decrypt(&encrypted)?
+    };
+    Ok(crate::llm::remote::RemoteBackend::validate_api_key(&provider, &api_key).await)
 }
 
 // Models

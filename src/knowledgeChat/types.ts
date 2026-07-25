@@ -599,7 +599,13 @@ export interface KnowledgeChatMessageMeta {
 export const KC_DEFAULT_EMBEDDING_MODEL = '';
 
 export const QA_CORPUS_NAME = 'PocketMind Hybrid AI QA Corpus';
-export const QA_CORPUS_RUNTIME_PATH = 'D:\\nexus-ai-deep-fixed\\runtime-data\\qa-corpus';
+/** Directory name under the active data root (`NEXUS_DATA_ROOT` / Settings → Deployment). */
+export const QA_CORPUS_DIR_NAME = 'qa-corpus';
+/**
+ * Display hint only — real runtime path is resolved in Rust via `preferred_data_root()/qa-corpus`.
+ * Do not treat this as a filesystem path on disk.
+ */
+export const QA_CORPUS_RUNTIME_PATH = `%DATA_ROOT%\\${QA_CORPUS_DIR_NAME}`;
 
 export interface KcQaCorpusBootstrapResult {
   collection_id: string;

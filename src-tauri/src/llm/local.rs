@@ -18,7 +18,48 @@ pub struct LlamaCppBackend {
     model_loaded: Arc<Mutex<bool>>,
     loaded_model_path: Arc<Mutex<Option<String>>>,
     loaded_runtime_signature: Arc<Mutex<Option<String>>>,
+    loaded_mmproj: Arc<Mutex<Option<String>>>,
     port: u16,
+}
+
+/// Locate a paired mmproj next to a GGUF (offline vision).
+pub fn find_mmproj_for_model(model_path: &str) -> Option<String> {
+    let p = Path::new(model_path);
+    let parent = p.parent()?;
+    let stem = p.file_stem()?.to_str()?;
+    let candidates = [
+        parent.join(format!("{stem}.mmproj")),
+        parent.join(format!("{stem}.mmproj.gguf")),
+        parent.join(format!("{stem}-mmproj-f16.gguf")),
+        parent.join(format!("{stem}-mmproj-Q8_0.gguf")),
+        parent.join("mmproj.gguf"),
+        parent.join("mmproj-model-f16.gguf"),
+    ];
+    for c in candidates {
+        if c.is_file() {
+            return Some(c.to_string_lossy().to_string());
+        }
+    }
+    // Any *mmproj*.gguf in the same folder
+    if let Ok(rd) = std::fs::read_dir(parent) {
+        let mut found: Vec<_> = rd
+            .flatten()
+            .map(|e| e.path())
+            .filter(|path| {
+                path.is_file()
+                    && path
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .map(|n| n.to_ascii_lowercase().contains("mmproj"))
+                        .unwrap_or(false)
+            })
+            .collect();
+        found.sort();
+        if let Some(path) = found.into_iter().next() {
+            return Some(path.to_string_lossy().to_string());
+        }
+    }
+    None
 }
 
 #[derive(Debug, Clone)]
@@ -38,10 +79,15 @@ impl LlamaCppBackend {
             model_loaded: Arc::new(Mutex::new(false)),
             loaded_model_path: Arc::new(Mutex::new(None)),
             loaded_runtime_signature: Arc::new(Mutex::new(None)),
+            loaded_mmproj: Arc::new(Mutex::new(None)),
             // Use a free per-process port instead of a fixed port. This prevents PocketMind Hybrid AI
             // from accidentally talking to an old leftover llama-server.exe instance.
             port: Self::find_free_port().unwrap_or(18082),
         }
+    }
+
+    pub async fn current_mmproj_path(&self) -> Option<String> {
+        self.loaded_mmproj.lock().await.clone()
     }
 
     fn find_free_port() -> Option<u16> {
@@ -51,9 +97,11 @@ impl LlamaCppBackend {
     }
 
     fn requested_signature(path: &str, params: &GenerationParams) -> String {
+        let mm = find_mmproj_for_model(path).unwrap_or_default();
         format!(
-            "{}|gpu={}|ctx={}|batch={}|flash={}|threads={}",
+            "{}|mmproj={}|gpu={}|ctx={}|batch={}|flash={}|threads={}",
             path,
+            mm,
             params.gpu_layers,
             params.context_size,
             params.batch_size,
@@ -174,9 +222,15 @@ impl LlamaCppBackend {
             args.push(scale.to_string());
         }
 
+        if let Some(mmproj) = find_mmproj_for_model(path) {
+            args.push("--mmproj".to_string());
+            args.push(mmproj);
+        }
+
         // Do not force llama.cpp chat templates here. PocketMind Hybrid AI builds prompts itself and
         // uses the /completion endpoint so the selected model always receives the
-        // actual latest user instruction.
+        // actual latest user instruction. When mmproj is loaded and images are attached,
+        // generate_stream uses /v1/chat/completions instead.
 
         args
     }
@@ -347,18 +401,69 @@ fn is_knowledge_system_prompt(system: &str) -> bool {
         || system.contains("Nexus Codebase Explorer")
 }
 
+fn is_code_workspace_system_prompt(system: &str) -> bool {
+    system.contains("PocketMind Code Workspace")
+        || system.contains("CRITICAL OUTPUT FORMAT")
+}
+
+fn build_llama3_multiturn(system: &str, messages: &[super::ChatMessage]) -> String {
+    let mut out = String::from("<|begin_of_text|>");
+    out.push_str(&format!(
+        "<|start_header_id|>system<|end_header_id|>\n\n{}<|eot_id|>",
+        system.trim()
+    ));
+    for m in messages {
+        let role = if m.role == "assistant" { "assistant" } else { "user" };
+        out.push_str(&format!(
+            "<|start_header_id|>{}<|end_header_id|>\n\n{}<|eot_id|>",
+            role,
+            m.content.trim()
+        ));
+    }
+    out.push_str("<|start_header_id|>assistant<|end_header_id|>\n\n");
+    out
+}
+
+fn build_chatml_multiturn(system: &str, messages: &[super::ChatMessage]) -> String {
+    let mut out = format!("<|im_start|>system\n{}<|im_end|>\n", system.trim());
+    for m in messages {
+        let role = if m.role == "assistant" { "assistant" } else { "user" };
+        out.push_str(&format!(
+            "<|im_start|>{}\n{}<|im_end|>\n",
+            role,
+            m.content.trim()
+        ));
+    }
+    out.push_str("<|im_start|>assistant\n");
+    out
+}
+
+fn build_phi_multiturn(system: &str, messages: &[super::ChatMessage]) -> String {
+    let mut out = format!("<|system|>\n{}<|end|>\n", system.trim());
+    for m in messages {
+        if m.role == "assistant" {
+            out.push_str(&format!("<|assistant|>\n{}<|end|>\n", m.content.trim()));
+        } else {
+            out.push_str(&format!("<|user|>\n{}<|end|>\n", m.content.trim()));
+        }
+    }
+    out.push_str("<|assistant|>\n");
+    out
+}
+
 fn build_manual_prompt(request: &GenerationRequest, system: &str) -> String {
     // Keep only recent real turns and build the prompt ourselves. This avoids a class of
     // llama-server chat-template problems where the model ignores the latest user prompt
     // and starts generating model-card or dataset boilerplate.
+    let history_limit = if is_code_workspace_system_prompt(system) { 24 } else { 10 };
     let mut messages: Vec<super::ChatMessage> = if request.messages.is_empty() {
-        vec![super::ChatMessage { role: "user".to_string(), content: request.prompt.trim().to_string() }]
+        vec![super::ChatMessage { role: "user".to_string(), content: request.prompt.trim().to_string(), ..Default::default() }]
     } else {
         request.messages
             .iter()
             .filter(|m| (m.role == "user" || m.role == "assistant") && !m.content.trim().is_empty())
             .rev()
-            .take(10)
+            .take(history_limit)
             .cloned()
             .collect::<Vec<_>>()
             .into_iter()
@@ -367,7 +472,30 @@ fn build_manual_prompt(request: &GenerationRequest, system: &str) -> String {
     };
 
     if messages.is_empty() {
-        messages.push(super::ChatMessage { role: "user".to_string(), content: request.prompt.trim().to_string() });
+        messages.push(super::ChatMessage { role: "user".to_string(), content: request.prompt.trim().to_string(), ..Default::default() });
+    }
+
+    // Code Workspace tool loop needs full multi-turn history in the chat template.
+    if is_code_workspace_system_prompt(system) {
+        return match model_family_from_path(&request.model_path) {
+            "llama3" => build_llama3_multiturn(system, &messages),
+            "phi" => build_phi_multiturn(system, &messages),
+            "mistral" => {
+                let history = plain_history(&messages);
+                let latest = latest_user_message(&messages, &request.prompt);
+                format!(
+                    "<s>[INST] {system}\n\nConversation:\n{history}\n\nLatest:\n{latest}\n\nReply with ONLY one tool JSON object. [/INST]"
+                )
+            }
+            "gemma" => {
+                let history = plain_history(&messages);
+                let latest = latest_user_message(&messages, &request.prompt);
+                format!(
+                    "<start_of_turn>user\n{system}\n\nConversation:\n{history}\n\nLatest:\n{latest}\n\nReply with ONLY one tool JSON object.<end_of_turn>\n<start_of_turn>model\n"
+                )
+            }
+            _ => build_chatml_multiturn(system, &messages),
+        };
     }
 
     let latest = latest_user_message(&messages, &request.prompt);
@@ -537,9 +665,11 @@ impl InferenceBackend for LlamaCppBackend {
                             let mut loaded = self.model_loaded.lock().await;
                             let mut loaded_path = self.loaded_model_path.lock().await;
                             let mut loaded_signature = self.loaded_runtime_signature.lock().await;
+                            let mut loaded_mmproj = self.loaded_mmproj.lock().await;
                             *loaded = true;
                             *loaded_path = Some(path.to_string());
                             *loaded_signature = Some(requested_signature.clone());
+                            *loaded_mmproj = find_mmproj_for_model(path);
                             // Record GPU usage so Knowledge Chat embeddings can avoid
                             // competing for the same VRAM (0 when this plan is CPU-only).
                             let active = if plan.runtime.force_cpu || plan.gpu_layers == 0 { 0 } else { plan.gpu_layers };
@@ -575,7 +705,7 @@ impl InferenceBackend for LlamaCppBackend {
         let base_system = "You are PocketMind Hybrid AI, a helpful offline desktop assistant. Answer the latest user message directly and stop. Do not invent follow-up questions, fake user messages, future prompts, quizzes, or examples the user did not ask for. Do not ask and answer your own questions. Ignore older chat history when it conflicts with the latest user request. Do not write documentation about Mistral, workflow engines, Kubernetes, or model cards unless the user specifically asks for that topic. Do not repeat words, phrases, paragraphs, or the user prompt. Use plain, clean Markdown for headings, lists, and code when helpful. Put headings, bullet points, numbered points, and fenced code blocks on separate lines. Use inline code for single keywords or short phrases such as `def`, `class`, `return`, `params`, `lambda functions`, file names, and variable names. Use fenced code blocks only for complete runnable multi-line code examples, not for single words, labels, or fragments. Never put `def`, `class`, `return`, `params`, or `lambda functions` in a fenced code block by themselves. Do not output LaTeX, TikZ, PGF, Asymptote, tabular, graph, or diagram source unless the user explicitly asks for that exact format. Never use placeholders like [object Object].";
         let system = match &request.system_prompt {
             Some(sys) if !sys.trim().is_empty()
-                && (is_soc_system_prompt(sys) || is_knowledge_system_prompt(sys)) =>
+                && (is_soc_system_prompt(sys) || is_knowledge_system_prompt(sys) || is_code_workspace_system_prompt(sys)) =>
             {
                 sys.trim().to_string()
             }
@@ -583,23 +713,8 @@ impl InferenceBackend for LlamaCppBackend {
             _ => base_system.to_string(),
         };
 
-        let mut messages = vec![serde_json::json!({"role": "system", "content": system})];
-
-        if request.messages.is_empty() {
-            messages.push(serde_json::json!({"role": "user", "content": request.prompt.trim()}));
-        } else {
-            for m in request.messages.iter().take(24) {
-                let role = match m.role.as_str() {
-                    "assistant" => "assistant",
-                    "system" => "system",
-                    _ => "user",
-                };
-                let content = m.content.trim();
-                if !content.is_empty() {
-                    messages.push(serde_json::json!({"role": role, "content": content}));
-                }
-            }
-        }
+        let mmproj_ready = self.loaded_mmproj.lock().await.is_some();
+        let use_multimodal = mmproj_ready && !request.images.is_empty();
 
         let temperature = request.params.temperature.clamp(0.05, 0.75);
         let top_p = request.params.top_p.clamp(0.10, 0.85);
@@ -610,31 +725,86 @@ impl InferenceBackend for LlamaCppBackend {
             request.params.max_tokens.clamp(32, 1024)
         };
 
-        let prompt = build_manual_prompt(&request, &system);
-
-        let body = serde_json::json!({
-            "prompt": prompt,
-            "stream": true,
-            "temperature": temperature,
-            "top_k": request.params.top_k,
-            "top_p": top_p,
-            "min_p": 0.08,
-            "repeat_penalty": repeat_penalty,
-            "repeat_last_n": 512,
-            "frequency_penalty": 0.45,
-            "presence_penalty": 0.0,
-            "n_predict": max_tokens,
-            "cache_prompt": false,
-            "stop": [
-                "<end_of_turn>", "</s>", "<|eot_id|>", "<|end|>", "<|im_end|>",
-                "[INST]", "[/INST]", "\nUser:", "\nuser:", "\nLatest user message:",
-                "\nQuestion:", "\nQ:", "Can you also", "Would you like me to", "Let me know if you",
-                "[asy]", "graphsize=", "\\begin{tikzpicture}", "\\end{verbatim}",
-                "\\node", "\\draw", "\\foreach", "\\begin{tabular}"
-            ]
-        });
-
-        let url = format!("http://127.0.0.1:{}/completion", self.port);
+        let (url, body) = if use_multimodal {
+            let mut messages = vec![serde_json::json!({"role": "system", "content": system})];
+            let user_text = if request.messages.is_empty() {
+                request.prompt.trim().to_string()
+            } else {
+                request
+                    .messages
+                    .iter()
+                    .rev()
+                    .find(|m| m.role == "user")
+                    .map(|m| m.content.trim().to_string())
+                    .unwrap_or_else(|| request.prompt.trim().to_string())
+            };
+            let mut parts: Vec<Value> = Vec::new();
+            if !user_text.is_empty() {
+                parts.push(serde_json::json!({"type": "text", "text": user_text}));
+            }
+            for img in &request.images {
+                let mime = if img.mime.trim().is_empty() { "image/png" } else { img.mime.trim() };
+                let url = format!("data:{mime};base64,{}", img.base64.trim());
+                parts.push(serde_json::json!({
+                    "type": "image_url",
+                    "image_url": { "url": url }
+                }));
+            }
+            messages.push(serde_json::json!({"role": "user", "content": parts}));
+            (
+                format!("http://127.0.0.1:{}/v1/chat/completions", self.port),
+                serde_json::json!({
+                    "messages": messages,
+                    "stream": true,
+                    "temperature": temperature,
+                    "top_p": top_p,
+                    "max_tokens": max_tokens,
+                }),
+            )
+        } else {
+            let mut messages = vec![serde_json::json!({"role": "system", "content": system})];
+            if request.messages.is_empty() {
+                messages.push(serde_json::json!({"role": "user", "content": request.prompt.trim()}));
+            } else {
+                for m in request.messages.iter().take(24) {
+                    let role = match m.role.as_str() {
+                        "assistant" => "assistant",
+                        "system" => "system",
+                        _ => "user",
+                    };
+                    let content = m.content.trim();
+                    if !content.is_empty() {
+                        messages.push(serde_json::json!({"role": role, "content": content}));
+                    }
+                }
+            }
+            let _ = messages;
+            let prompt = build_manual_prompt(&request, &system);
+            (
+                format!("http://127.0.0.1:{}/completion", self.port),
+                serde_json::json!({
+                    "prompt": prompt,
+                    "stream": true,
+                    "temperature": temperature,
+                    "top_k": request.params.top_k,
+                    "top_p": top_p,
+                    "min_p": 0.08,
+                    "repeat_penalty": repeat_penalty,
+                    "repeat_last_n": 512,
+                    "frequency_penalty": 0.45,
+                    "presence_penalty": 0.0,
+                    "n_predict": max_tokens,
+                    "cache_prompt": false,
+                    "stop": [
+                        "<end_of_turn>", "</s>", "<|eot_id|>", "<|end|>", "<|im_end|>",
+                        "[INST]", "[/INST]", "\nUser:", "\nuser:", "\nLatest user message:",
+                        "\nQuestion:", "\nQ:", "Can you also", "Would you like me to", "Let me know if you",
+                        "[asy]", "graphsize=", "\\begin{tikzpicture}", "\\end{verbatim}",
+                        "\\node", "\\draw", "\\foreach", "\\begin{tabular}"
+                    ]
+                }),
+            )
+        };
         let response = client
             .post(&url)
             .json(&body)
@@ -690,7 +860,8 @@ impl InferenceBackend for LlamaCppBackend {
                         finish_reason: None,
                         tokens_generated: 1,
                         tokens_per_sec: 0.0,
-                    }).await;
+                        tool_calls: None,
+}).await;
                 }
             }
         }
@@ -701,7 +872,8 @@ impl InferenceBackend for LlamaCppBackend {
                 if let Some(piece) = json.get("content").and_then(|v| v.as_str()).or_else(|| json.get("response").and_then(|v| v.as_str())) {
                     if let Some(cleaned_piece) = ingest_stream_piece(&mut full_text, piece) {
                         tokens_generated = tokens_generated.saturating_add(1);
-                        let _ = tx.send(GenerationChunk { text: cleaned_piece, finish_reason: None, tokens_generated: 1, tokens_per_sec: 0.0 }).await;
+                        let _ = tx.send(GenerationChunk { text: cleaned_piece, finish_reason: None, tokens_generated: 1, tokens_per_sec: 0.0, tool_calls: None,
+}).await;
                     }
                 }
             }
@@ -718,21 +890,24 @@ impl InferenceBackend for LlamaCppBackend {
                 finish_reason: Some("stop".to_string()),
                 tokens_generated,
                 tokens_per_sec: 0.0,
-            }).await;
+                tool_calls: None,
+}).await;
         } else if normalize_stream_compare(&final_text) != normalize_stream_compare(&full_text) {
             let _ = tx.send(GenerationChunk {
                 text: final_text,
                 finish_reason: Some("stop".to_string()),
                 tokens_generated,
                 tokens_per_sec: 0.0,
-            }).await;
+                tool_calls: None,
+}).await;
         } else {
             let _ = tx.send(GenerationChunk {
                 text: "".to_string(),
                 finish_reason: Some("stop".to_string()),
                 tokens_generated,
                 tokens_per_sec: 0.0,
-            }).await;
+                tool_calls: None,
+}).await;
         }
 
         Ok(())
@@ -750,6 +925,7 @@ impl InferenceBackend for LlamaCppBackend {
         *loaded = false;
         *loaded_path = None;
         *loaded_signature = None;
+        *self.loaded_mmproj.lock().await = None;
         runtime_discovery::set_chat_gpu_layers_active(0);
         Ok(())
     }

@@ -1,23 +1,30 @@
 //! Cursor-technique local Code Workspace tools.
 //!
-//! All process tools use **only** bundled binaries from
-//! `crate::tooling::{rg_path, python_path, node_path}` — never system shell.
+//! Process tools use allowlisted runners (bundled python/node/rg preferred,
+//! then host PATH for languages/frameworks). Never a freeform system shell.
 
 use crate::error::{AppError, AppResult};
+use crate::sandbox_runners;
 use crate::tooling;
 use serde::{Deserialize, Serialize};
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::process::Command;
 use walkdir::WalkDir;
 
 const GREP_TIMEOUT_SECS: u64 = 20;
 const GREP_MAX_OUTPUT_BYTES: usize = 200 * 1024;
-const READ_MAX_BYTES: usize = 256 * 1024;
+pub const READ_MAX_BYTES: usize = 2 * 1024 * 1024;
 const GLOB_MAX_RESULTS: usize = 500;
-const SANDBOX_TIMEOUT_SECS: u64 = 30;
-const SANDBOX_MAX_STREAM_BYTES: usize = 200 * 1024;
+/// Default lines when the agent omits limit or passes 0 (never "whole file").
+pub const READ_DEFAULT_LINES: usize = 120;
+/// Hard cap on lines returned by a single agent read_file call.
+pub const READ_MAX_LINES: usize = 400;
+/// Cap for UI preview reads (editor pane), not for the agent tool loop.
+pub const READ_UI_MAX_LINES: usize = 4_000;
+
+pub use sandbox_runners::{RunnerInfo, RunnersStatus, SandboxRunResult};
 
 const SKIP_DIR_NAMES: &[&str] = &[".git", "node_modules", "target"];
 
@@ -43,30 +50,10 @@ const LARGE_ONLINE_IDS: &[&str] = &[
     "glm-5.2",
     "glm-5",
     "z-ai/glm",
-];
-
-const SENSITIVE_ENV_KEYS: &[&str] = &[
-    "OPENAI_API_KEY",
-    "ANTHROPIC_API_KEY",
-    "GEMINI_API_KEY",
-    "GOOGLE_API_KEY",
-    "GOOGLE_APPLICATION_CREDENTIALS",
-    "GROQ_API_KEY",
-    "OPENROUTER_API_KEY",
-    "DEEPSEEK_API_KEY",
-    "HF_TOKEN",
-    "HUGGING_FACE_HUB_TOKEN",
-    "AWS_ACCESS_KEY_ID",
-    "AWS_SECRET_ACCESS_KEY",
-    "AWS_SESSION_TOKEN",
-    "AZURE_OPENAI_API_KEY",
-    "AZURE_API_KEY",
-    "API_KEY",
-    "API_TOKEN",
-    "AUTH_TOKEN",
-    "ACCESS_TOKEN",
-    "SECRET_KEY",
-    "PRIVATE_KEY",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+    "gemini-2.0-flash",
+    "pixtral",
 ];
 
 // ── Public result types ─────────────────────────────────────────────────────
@@ -82,17 +69,6 @@ pub struct DirEntryInfo {
 pub struct EditPreview {
     pub original: String,
     pub modified: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SandboxRunResult {
-    pub ok: bool,
-    pub language: String,
-    pub exit_code: Option<i32>,
-    pub stdout: String,
-    pub stderr: String,
-    pub timed_out: bool,
-    pub duration_ms: u64,
 }
 
 // ── Path safety ─────────────────────────────────────────────────────────────
@@ -494,12 +470,15 @@ pub async fn grep(
     )))
 }
 
-/// Read file with line `offset` (0-based) and `limit` lines. Cap 256KB.
+/// Read file with line `offset` (0-based) and `limit` lines.
+/// `limit == 0` means default window ([`READ_DEFAULT_LINES`]), never the whole file.
+/// Hard-capped at `line_cap` (default [`READ_MAX_LINES`]) and [`READ_MAX_BYTES`] bytes.
 pub fn read_file(
     workspace_root: &Path,
     path: &str,
     offset: usize,
     limit: usize,
+    line_cap: Option<usize>,
 ) -> AppResult<String> {
     let file = resolve_under_root(workspace_root, path)?;
     if !file.is_file() {
@@ -508,36 +487,72 @@ pub fn read_file(
             to_rel_display(workspace_root, &file)
         )));
     }
-    let meta = std::fs::metadata(&file)
-        .map_err(|e| AppError::Unknown(format!("Cannot stat file: {e}")))?;
-    if meta.len() as usize > READ_MAX_BYTES * 4 {
-        // Allow large files but only return a window; still cap bytes read.
-    }
-    let raw = std::fs::read(&file)
-        .map_err(|e| AppError::Unknown(format!("Cannot read file: {e}")))?;
-    if raw.len() > READ_MAX_BYTES && offset == 0 && limit == 0 {
-        let mut s = String::from_utf8_lossy(&raw[..READ_MAX_BYTES]).to_string();
-        s.push_str("\n…[truncated at 256KB]");
-        return Ok(s);
+
+    let hard_cap = line_cap
+        .unwrap_or(READ_MAX_LINES)
+        .clamp(READ_DEFAULT_LINES, READ_UI_MAX_LINES);
+    let want = if limit == 0 {
+        READ_DEFAULT_LINES.min(hard_cap)
+    } else {
+        limit.min(hard_cap)
+    };
+    let start = offset;
+
+    // Stream lines so multi‑MB files are not fully loaded for a small window.
+    use std::io::{BufRead, BufReader};
+    let fh = std::fs::File::open(&file)
+        .map_err(|e| AppError::Unknown(format!("Cannot open file: {e}")))?;
+    let reader = BufReader::new(fh);
+    let mut collected: Vec<String> = Vec::with_capacity(want.min(256));
+    let mut line_no = 0usize;
+    let mut total_bytes = 0usize;
+    let mut truncated_bytes = false;
+    let mut more_after = false;
+
+    for line_res in reader.lines() {
+        let line = line_res.map_err(|e| AppError::Unknown(format!("Cannot read file: {e}")))?;
+        if line_no < start {
+            line_no += 1;
+            continue;
+        }
+        if collected.len() >= want {
+            more_after = true;
+            break;
+        }
+        let add = line.len() + 1;
+        if total_bytes + add > READ_MAX_BYTES {
+            truncated_bytes = true;
+            break;
+        }
+        total_bytes += add;
+        collected.push(line);
+        line_no += 1;
     }
 
-    let text = String::from_utf8_lossy(&raw);
-    let lines: Vec<&str> = text.lines().collect();
-    let start = offset.min(lines.len());
-    let end = if limit == 0 {
-        lines.len()
+    let end_excl = start + collected.len();
+    let end_inclusive = if collected.is_empty() {
+        start
     } else {
-        (start + limit).min(lines.len())
+        end_excl.saturating_sub(1)
     };
-    let mut out = lines[start..end].join("\n");
-    if out.len() > READ_MAX_BYTES {
-        out.truncate(READ_MAX_BYTES);
-        out.push_str("\n…[truncated at 256KB]");
+    let header = format!(
+        "// PocketCode read: lines {start}-{end_inclusive} (offset={start}, window={want})\n",
+    );
+    let mut out = format!("{header}{}", collected.join("\n"));
+    if truncated_bytes {
+        out.push_str("\n…[truncated at byte cap — use a smaller window or offset]");
+    } else if more_after {
+        out.push_str(&format!(
+            "\n…[more lines after {end_inclusive} — call read_file with offset={end_excl}]"
+        ));
     }
     Ok(out)
 }
 
-/// Preview a unique search-replace edit. `old_string` must match exactly once.
+/// Preview a unique search-replace edit, or create a new file when it does not exist.
+///
+/// New file: path missing + `old_string` empty → preview shows empty → full `new_string`.
+/// Existing file: `old_string` must match exactly once.
 pub fn apply_edit_preview(
     workspace_root: &Path,
     path: &str,
@@ -545,6 +560,23 @@ pub fn apply_edit_preview(
     new_string: &str,
 ) -> AppResult<EditPreview> {
     let file = resolve_under_root(workspace_root, path)?;
+    if !file.exists() {
+        if !old_string.is_empty() {
+            return Err(AppError::Unknown(format!(
+                "File does not exist: {}. To create it, use apply_edit with empty old_string and the full file in new_string.",
+                to_rel_display(workspace_root, &file)
+            )));
+        }
+        if new_string.is_empty() {
+            return Err(AppError::Unknown(
+                "Cannot create an empty file; put file contents in new_string.".to_string(),
+            ));
+        }
+        return Ok(EditPreview {
+            original: String::new(),
+            modified: new_string.to_string(),
+        });
+    }
     if !file.is_file() {
         return Err(AppError::MissingFile(format!(
             "Not a file: {}",
@@ -553,14 +585,14 @@ pub fn apply_edit_preview(
     }
     let original = std::fs::read_to_string(&file)
         .map_err(|e| AppError::Unknown(format!("Cannot read file for edit: {e}")))?;
-    if original.len() > READ_MAX_BYTES * 8 {
+    if original.len() > READ_MAX_BYTES * 4 {
         return Err(AppError::Unknown(
-            "File too large to edit via apply_edit.".to_string(),
+            "File too large to edit via apply_edit (~8MB cap).".to_string(),
         ));
     }
     if old_string.is_empty() {
         return Err(AppError::Unknown(
-            "old_string must not be empty.".to_string(),
+            "old_string must not be empty when editing an existing file (use a unique snippet to replace).".to_string(),
         ));
     }
     let matches: Vec<_> = original.match_indices(old_string).collect();
@@ -579,7 +611,7 @@ pub fn apply_edit_preview(
     Ok(EditPreview { original, modified })
 }
 
-/// Write full file contents (after DiffViewer accept). Creates parent dirs as needed.
+/// Write full file contents. Creates parent dirs as needed.
 pub fn apply_edit_write(workspace_root: &Path, path: &str, content: &str) -> AppResult<()> {
     let file = resolve_under_root(workspace_root, path)?;
     if let Some(parent) = file.parent() {
@@ -602,186 +634,86 @@ pub fn apply_edit_write(workspace_root: &Path, path: &str, content: &str) -> App
     Ok(())
 }
 
-fn scrub_sandbox_env(cmd: &mut Command) {
-    for key in SENSITIVE_ENV_KEYS {
-        cmd.env_remove(key);
-    }
-    // Also clear any env whose name looks like a secret.
-    let keys: Vec<String> = std::env::vars()
-        .map(|(k, _)| k)
-        .filter(|k| {
-            let u = k.to_ascii_uppercase();
-            u.contains("API_KEY")
-                || u.contains("SECRET")
-                || u.contains("TOKEN")
-                || u.contains("PASSWORD")
-                || u.contains("CREDENTIAL")
-        })
-        .collect();
-    for k in keys {
-        cmd.env_remove(k);
-    }
-    cmd.env("PYTHONNOUSERSITE", "1");
-    cmd.env("PYTHONDONTWRITEBYTECODE", "1");
+fn is_protected_delete_path(rel: &str) -> bool {
+    let n = rel.replace('\\', "/").to_ascii_lowercase();
+    n == ".git"
+        || n.starts_with(".git/")
+        || n == ".pocketmind-checkpoints"
+        || n.starts_with(".pocketmind-checkpoints/")
+        || n == ".pocketmind-sandbox"
+        || n.starts_with(".pocketmind-sandbox/")
 }
 
-fn reject_shell_metacharacters(s: &str) -> AppResult<()> {
-    const BAD: &[char] = &['|', '&', ';', '`', '\n', '\r', '<', '>', '(', ')', '$'];
-    if s.chars().any(|c| BAD.contains(&c)) {
+/// Delete a single file under the workspace root (not directories). Protected paths refused.
+pub fn delete_file(workspace_root: &Path, path: &str) -> AppResult<()> {
+    let rel = standardize(path);
+    if is_protected_delete_path(&rel) {
         return Err(AppError::Unknown(
-            "Shell metacharacters are not allowed in sandbox language/path.".to_string(),
+            "Refusing to delete protected path (.git / checkpoints / sandbox).".to_string(),
         ));
     }
+    let file = resolve_under_root(workspace_root, &rel)?;
+    if !file.exists() {
+        return Err(AppError::MissingFile(format!(
+            "File not found: {}",
+            to_rel_display(workspace_root, &file)
+        )));
+    }
+    if file.is_dir() {
+        return Err(AppError::Unknown(
+            "delete_file only removes files, not directories.".to_string(),
+        ));
+    }
+    std::fs::remove_file(&file)
+        .map_err(|e| AppError::Unknown(format!("Cannot delete file: {e}")))?;
     Ok(())
 }
 
-fn truncate_stream(s: String) -> String {
-    if s.len() <= SANDBOX_MAX_STREAM_BYTES {
-        s
-    } else {
-        let mut t = s;
-        t.truncate(SANDBOX_MAX_STREAM_BYTES);
-        t.push_str("\n…[truncated]");
-        t
-    }
-}
-
-/// Run Python or JavaScript in `workspace/.pocketmind-sandbox/<uuid>/` via bundled tooling only.
+/// Allowlisted script and/or CLI run (no freeform shell).
 pub async fn run_sandbox(
     workspace_root: &Path,
     language: &str,
     code: String,
     args: Option<Vec<String>>,
 ) -> AppResult<SandboxRunResult> {
-    let root_canon = canonicalize_root(workspace_root)?;
-    let lang = language.trim().to_ascii_lowercase();
-    reject_shell_metacharacters(&lang)?;
-
-    let (bin, script_name) = match lang.as_str() {
-        "python" => {
-            let p = tooling::python_path().ok_or_else(|| {
-                AppError::Unknown(
-                    "Bundled Python not found. Run Repair tooling / scripts/fetch-tooling."
-                        .to_string(),
-                )
-            })?;
-            (p, "script.py")
-        }
-        "javascript" | "js" => {
-            let p = tooling::node_path().ok_or_else(|| {
-                AppError::Unknown(
-                    "Bundled Node not found. Run Repair tooling / scripts/fetch-tooling."
-                        .to_string(),
-                )
-            })?;
-            (p, "script.js")
-        }
-        _ => {
-            return Err(AppError::Unknown(
-                "language must be python or javascript.".to_string(),
-            ));
-        }
-    };
-
-    let run_id = uuid::Uuid::new_v4();
-    let work = root_canon
-        .join(".pocketmind-sandbox")
-        .join(run_id.to_string());
-    std::fs::create_dir_all(&work)
-        .map_err(|e| AppError::Unknown(format!("Cannot create sandbox dir: {e}")))?;
-
-    // Ensure sandbox stays under root.
-    let work_canon = strip_verbatim_prefix(work.canonicalize().map_err(|e| {
-        AppError::Unknown(format!("Cannot canonicalize sandbox dir: {e}"))
-    })?);
-    if !path_is_under(&root_canon, &work_canon) {
-        return Err(AppError::Unknown(
-            "Sandbox path escaped workspace root.".to_string(),
-        ));
-    }
-
-    let script_path = work_canon.join(script_name);
-    std::fs::write(&script_path, &code)
-        .map_err(|e| AppError::Unknown(format!("Cannot write sandbox script: {e}")))?;
-
-    let started = Instant::now();
-    let mut cmd = Command::new(&bin);
-    // argv only: [bin, script, ...args] — no shell
-    cmd.arg(&script_path);
-    if let Some(extra) = args {
-        for arg in extra {
-            reject_shell_metacharacters(&arg)?;
-            cmd.arg(arg);
-        }
-    }
-    cmd.current_dir(&work_canon);
-    cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
-    cmd.kill_on_drop(true);
-    scrub_sandbox_env(&mut cmd);
-
-    let language_label = if lang == "js" {
-        "javascript".to_string()
-    } else {
-        lang.clone()
-    };
-
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            return Ok(SandboxRunResult {
-                ok: false,
-                language: language_label,
-                exit_code: None,
-                stdout: String::new(),
-                stderr: format!("Failed to spawn sandbox process: {e}"),
-                timed_out: false,
-                duration_ms: started.elapsed().as_millis() as u64,
-            });
-        }
-    };
-
-    let timed = tokio::time::timeout(
-        Duration::from_secs(SANDBOX_TIMEOUT_SECS),
-        child.wait_with_output(),
+    sandbox_runners::run(
+        workspace_root,
+        Some(language),
+        Some(code),
+        args,
+        None,
     )
-    .await;
+    .await
+}
 
-    let duration_ms = started.elapsed().as_millis() as u64;
+/// Allowlisted argv CLI run under the workspace root.
+pub async fn run_sandbox_cli(
+    workspace_root: &Path,
+    argv: Vec<String>,
+) -> AppResult<SandboxRunResult> {
+    sandbox_runners::run(workspace_root, None, None, None, Some(argv)).await
+}
 
-    match timed {
-        Err(_) => Ok(SandboxRunResult {
-            ok: false,
-            language: language_label,
-            exit_code: None,
-            stdout: String::new(),
-            stderr: "Sandbox timed out after 30s (process killed).".to_string(),
-            timed_out: true,
-            duration_ms,
-        }),
-        Ok(Err(e)) => Ok(SandboxRunResult {
-            ok: false,
-            language: language_label,
-            exit_code: None,
-            stdout: String::new(),
-            stderr: format!("Sandbox process error: {e}"),
-            timed_out: false,
-            duration_ms,
-        }),
-        Ok(Ok(output)) => {
-            let code = output.status.code();
-            let stdout = truncate_stream(String::from_utf8_lossy(&output.stdout).to_string());
-            let stderr = truncate_stream(String::from_utf8_lossy(&output.stderr).to_string());
-            Ok(SandboxRunResult {
-                ok: output.status.success(),
-                language: language_label,
-                exit_code: code,
-                stdout,
-                stderr,
-                timed_out: false,
-                duration_ms,
-            })
-        }
-    }
+/// Unified sandbox entry used by the Tauri command.
+pub async fn run_sandbox_request(
+    workspace_root: &Path,
+    language: Option<String>,
+    script: Option<String>,
+    args: Option<Vec<String>>,
+    argv: Option<Vec<String>>,
+) -> AppResult<SandboxRunResult> {
+    sandbox_runners::run(
+        workspace_root,
+        language.as_deref(),
+        script,
+        args,
+        argv,
+    )
+    .await
+}
+
+pub fn list_runners() -> RunnersStatus {
+    sandbox_runners::list_runners()
 }
 
 // ── Model capability gate (mirrors src/modelCapability.ts) ──────────────────
@@ -868,39 +800,102 @@ fn is_large_online_model(model_path: &str) -> bool {
     LARGE_ONLINE_IDS.iter().any(|id| lower.contains(id))
 }
 
-/// Gate Code Workspace write/run tools to ≥70B local or known large online models.
+/// Minimum local model size (billions of parameters) for PocketCode write/run tools.
+pub const POCKETCODE_MIN_LOCAL_B: f32 = 30.0;
+
+/// Gate PocketCode write/run tools to ≥30B local, large online, or any org enterprise model.
 pub fn can_use_code_workspace(model_path: &str, params: Option<f32>) -> (bool, String) {
     let model_path = model_path.trim();
     if model_path.is_empty() {
         return (
             false,
-            "Select a model of 70B+ parameters (or a large online model) for Code Workspace."
+            "Select a model of 30B+ parameters, an online model, or an org server model for PocketCode."
                 .to_string(),
         );
     }
-    if model_path.starts_with("remote:") || model_path.starts_with("enterprise:") {
-        if is_large_online_model(model_path) {
-            return (true, "Large online / org model".to_string());
-        }
+    // Org-hosted models run on enterprise hardware — always allowed for PocketCode.
+    if model_path.starts_with("enterprise:") {
+        return (true, "Organization server model".to_string());
+    }
+    if model_path.starts_with("remote:") {
+        // User-selected online models are always allowed (Gemini 2.5 Flash, etc.).
         return (
-            false,
-            "This online model is not tagged as large enough for Code Workspace edit/run tools. Use Folder Q&A / Codebase Explorer instead, or pick a 70B-class / frontier model.".to_string(),
+            true,
+            if is_large_online_model(model_path) {
+                "Online model".to_string()
+            } else {
+                "Online model (user selected)".to_string()
+            },
         );
     }
     let params = params.or_else(|| parse_params_billions(model_path));
     if let Some(p) = params {
-        if p >= 70.0 {
+        if p >= POCKETCODE_MIN_LOCAL_B {
             return (true, format!("Local model ≈ {p}B"));
         }
         return (
             false,
             format!(
-                "Local model ≈ {p}B is below the 70B Code Workspace gate. Use Knowledge Chat Codebase Explorer (read-only) or switch to a 70B+ GGUF."
+                "Local model ≈ {p}B is below the 30B PocketCode gate. Use Knowledge Chat Codebase Explorer (read-only) or switch to a 30B+ GGUF / org server."
             ),
         );
     }
     (
         false,
-        "Could not determine model size. Code Workspace requires an explicit ≥70B local GGUF or a known large online model.".to_string(),
+        "Could not determine model size. PocketCode requires an explicit ≥30B local GGUF, an online model, or an org server model.".to_string(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+
+    fn make_temp_workspace(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!("pm_cw_test_{name}_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
+
+    #[test]
+    fn read_file_limit_zero_is_default_window_not_whole_file() {
+        let dir = make_temp_workspace("limit0");
+        let path = dir.join("big.rs");
+        let mut f = std::fs::File::create(&path).unwrap();
+        for i in 0..500 {
+            writeln!(f, "line_{i}").unwrap();
+        }
+        // limit=0 must not return all 500 lines
+        let out = read_file(&dir, "big.rs", 0, 0, Some(READ_MAX_LINES)).unwrap();
+        let body_lines = out
+            .lines()
+            .filter(|l| !l.starts_with("// PocketCode read"))
+            .filter(|l| !l.starts_with('…'))
+            .count();
+        assert!(
+            body_lines <= READ_DEFAULT_LINES + 1,
+            "expected ~{READ_DEFAULT_LINES} lines, got {body_lines}"
+        );
+        assert!(out.contains("more lines after") || body_lines == READ_DEFAULT_LINES);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_file_caps_at_max_lines() {
+        let dir = make_temp_workspace("cap");
+        let path = dir.join("big.rs");
+        let mut f = std::fs::File::create(&path).unwrap();
+        for i in 0..1000 {
+            writeln!(f, "line_{i}").unwrap();
+        }
+        let out = read_file(&dir, "big.rs", 0, 9000, Some(READ_MAX_LINES)).unwrap();
+        let body_lines = out
+            .lines()
+            .filter(|l| !l.starts_with("// PocketCode read"))
+            .filter(|l| !l.starts_with('…'))
+            .count();
+        assert!(body_lines <= READ_MAX_LINES + 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }

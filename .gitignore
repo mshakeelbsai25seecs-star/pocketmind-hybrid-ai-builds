@@ -11,8 +11,15 @@ Thumbs.db
 !.env.example
 
 # Editor / local tooling
-.cursor/
+.cursor/**
+!.cursor/mcp.json
 .vscode/
+
+# PocketCode agent scratch / checkpoints (per-project; also ignored when under cwd)
+.pocketmind-checkpoints/
+.pocketmind-sandbox/
+.pocketmind-index/
+.pocketmind-plans/
 *.swp
 *.swo
 
@@ -59,6 +66,9 @@ company-data/
 
 # Local scratch / build logs
 tmp_rerank*
+tsc-errors.txt
+RAG_DOCUMENT_ASSISTANCE_UPGRADE_REPORT.txt
+.llama_runtime_tmp/
 android/compile-log*.txt
 android/release-log*.txt
 _research/
@@ -70,6 +80,7 @@ _research/
 
 # Android
 android/.gradle/
+android/.kotlin/
 android/build/
 android/app/build/
 android/local.properties

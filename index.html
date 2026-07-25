@@ -6,8 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PocketMind Hybrid AI</title>
     <style>
-      html, body, #root { width: 100%; height: 100%; margin: 0; background: #f8fafc; }
-      html.dark, html.dark body, html.dark #root { background: #020617; }
+      /* Conductor shell — never leave a slate/blue void while React boots */
+      html, body, #root { width: 100%; height: 100%; margin: 0; background: #fafafa; color: #0a0a0a; }
+      html.dark, html.dark body, html.dark #root { background: #000000; color: #fafafa; }
     </style>
     <script>
       (function () {
@@ -21,7 +22,7 @@
           var dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
           if (dark) document.documentElement.classList.add('dark');
           document.documentElement.style.colorScheme = dark ? 'dark' : 'light';
-          document.documentElement.style.backgroundColor = dark ? '#020617' : '#f8fafc';
+          document.documentElement.style.backgroundColor = dark ? '#000000' : '#fafafa';
         } catch (e) {}
       })();
     </script>

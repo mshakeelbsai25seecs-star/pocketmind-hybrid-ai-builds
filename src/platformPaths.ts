@@ -52,9 +52,20 @@ export function pathPlaceholder(config: DeploymentConfig | null | undefined, kin
   const root = deploymentRoot(config, kind);
   if (root) return root;
   if (isWindowsPlatform()) {
-    return kind === 'models'
-      ? 'D:\\nexus-ai-deep-fixed\\runtime-data\\models'
-      : 'D:\\nexus-ai-deep-fixed\\runtime-data\\company-data';
+    // Portable default (matches Rust preferred_data_root for new installs).
+    const base = '%LOCALAPPDATA%\\PocketMind';
+    switch (kind) {
+      case 'models':
+      case 'embeddings':
+        return `${base}\\models`;
+      case 'soc':
+      case 'intake':
+        return `${base}\\company-data`;
+      case 'export':
+        return `${base}\\exports`;
+      default:
+        return base;
+    }
   }
   return kind === 'models'
     ? '/var/lib/pocketmind/models'

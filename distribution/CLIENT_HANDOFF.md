@@ -1,5 +1,7 @@
 # Client handoff — what to ship
 
+For the full product story (features, security, architecture, and positioning), give clients [`../PRODUCT_GUIDE.md`](../PRODUCT_GUIDE.md) or a PDF export of that guide. This file is only the **packaging** handoff.
+
 **Never ship the git repository.** Do not zip the whole workspace (`.git`, `src/`, `src-tauri/`, `node_modules/`, build caches).
 
 ## Ship only

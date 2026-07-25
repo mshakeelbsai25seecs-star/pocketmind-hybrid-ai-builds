@@ -37,9 +37,59 @@ impl Default for GenerationParams {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallFunction {
+    pub name: String,
+    /// JSON-encoded arguments object (OpenAI shape).
+    #[serde(default)]
+    pub arguments: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    #[serde(rename = "type", default = "default_tool_call_type")]
+    pub kind: String,
+    pub function: ToolCallFunction,
+}
+
+fn default_tool_call_type() -> String {
+    "function".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenAiFunctionDef {
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    #[serde(default)]
+    pub parameters: serde_json::Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenAiTool {
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub function: OpenAiFunctionDef,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ChatMessage {
     pub role: String,
+    #[serde(default)]
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+/// Optional image for multimodal (org/online vision) chat completions.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct GenerationImage {
+    pub mime: String,
+    pub base64: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +105,15 @@ pub struct GenerationRequest {
     /// real chat messages instead of one flattened transcript.
     #[serde(default)]
     pub messages: Vec<ChatMessage>,
+    /// Images attached to the *first user* turn for vision-capable backends.
+    #[serde(default)]
+    pub images: Vec<GenerationImage>,
+    /// Native function-calling tools (OpenAI-compat, Anthropic, Gemini).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tools: Vec<OpenAiTool>,
+    /// e.g. "auto" | "none" | {"type":"function","function":{"name":"..."}}
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_choice: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -63,6 +122,21 @@ pub struct GenerationChunk {
     pub finish_reason: Option<String>,
     pub tokens_generated: u32,
     pub tokens_per_sec: f32,
+    /// Assembled tool calls (typically on the final chunk when finish_reason is tool_calls).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_calls: Option<Vec<ToolCall>>,
+}
+
+impl Default for GenerationChunk {
+    fn default() -> Self {
+        Self {
+            text: String::new(),
+            finish_reason: None,
+            tokens_generated: 0,
+            tokens_per_sec: 0.0,
+            tool_calls: None,
+        }
+    }
 }
 
 #[async_trait]

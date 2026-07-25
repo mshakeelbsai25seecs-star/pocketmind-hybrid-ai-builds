@@ -1,4 +1,4 @@
-/** Product capability flags for data-safety + Code Workspace. */
+/** Product capability flags for data-safety + PocketCode. */
 export const FEATURE_FLAGS = {
   encryptedBackup: true,
   scheduledBackup: true,

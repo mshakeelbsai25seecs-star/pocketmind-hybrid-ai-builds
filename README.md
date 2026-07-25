@@ -1,19 +1,30 @@
-# PocketMind Hybrid AI (macOS)
+# PocketMind Hybrid AI
 
-Offline-first desktop AI workspace for **Apple Silicon and Intel Macs**.
+Offline-first **hybrid** desktop AI workspace for **Windows** (primary ship target), **macOS**, and **Linux**.
 
-Built with **Tauri 1**, **Rust**, and **React**. Run local GGUF chat, index any folder for grounded Knowledge Chat (RAG), manage llama.cpp runtimes automatically, and optionally connect to an enterprise OpenAI-compatible server.
+Built with **Tauri 1**, **Rust**, and **React**. Run local GGUF chat, index any folder for grounded Knowledge Chat (RAG), use PocketCode (agent + MCP), run Fortinet SOC Copilot workflows, manage llama.cpp runtimes (CPU / CUDA / Vulkan / Metal), and optionally connect online providers or an enterprise OpenAI-compatible server.
+
+**Full product guide (features, architecture, ops, GTM, investor narrative):** [`PRODUCT_GUIDE.md`](PRODUCT_GUIDE.md)
+
+**Version:** `1.0.0` · Release QA: [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) · Client packages: [`distribution/`](distribution/README.md)
+
+### Quick start (Windows)
 
 ```bash
-git clone https://github.com/noumanshakeel555-lang/nexus-ai-mac.git
-cd nexus-ai-mac
+npm install
+npm run setup:windows-runtimes
+npm run tauri:dev:low-mem
 ```
 
-> Private repository — clone with a GitHub account that has access.
+Release packaging: `npm run tauri build` then `npm run dist:stage:windows`. Never ship the git tree — see [`distribution/CLIENT_HANDOFF.md`](distribution/CLIENT_HANDOFF.md).
+
+### Quick start (macOS / Linux)
+
+See platform sections below, or `MAC_BUILD_GUIDE.md` / `LINUX_BUILD_GUIDE.md`.
 
 ---
 
-## Why this Mac build exists
+## Why the Mac build exists
 
 PocketMind Hybrid AI must work on **every Mac architecture**:
 

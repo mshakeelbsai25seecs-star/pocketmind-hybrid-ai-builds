@@ -3,8 +3,9 @@ import { invoke } from '@tauri-apps/api/tauri';
 import { AlertTriangle, CheckCircle, ClipboardCopy, Cpu, HardDrive, RefreshCcw, ShieldAlert, ShieldCheck, Terminal, Wrench, XCircle, Hammer } from 'lucide-react';
 import { useAppStore } from '../store';
 import { RuntimeDiagnostics } from '../types';
+import { cwListRunners } from '../api/codeWorkspace';
 import { getToolingStatus, repairTooling } from '../api/powerFeatures';
-import type { ToolingStatus } from '../codeWorkspace/types';
+import type { RunnersStatus, ToolingStatus } from '../codeWorkspace/types';
 
 function fmtBytes(bytes?: number | null) {
   if (!bytes || bytes <= 0) return 'Unknown';
@@ -17,6 +18,7 @@ export default function DiagnosticsPanel() {
   const store = useAppStore();
   const [diag, setDiag] = useState<RuntimeDiagnostics | null>(null);
   const [tooling, setTooling] = useState<ToolingStatus | null>(null);
+  const [runners, setRunners] = useState<RunnersStatus | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
 
@@ -37,6 +39,11 @@ export default function DiagnosticsPanel() {
       setTooling(await getToolingStatus());
     } catch {
       setTooling(null);
+    }
+    try {
+      setRunners(await cwListRunners());
+    } catch {
+      setRunners(null);
     }
   };
 
@@ -159,7 +166,7 @@ export default function DiagnosticsPanel() {
 
         <div className="glass-panel rounded-2xl p-5 space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 className="font-bold text-xl flex items-center gap-2"><Hammer className="w-5 h-5 text-primary-500" /> Code Workspace tooling</h2>
+            <h2 className="font-bold text-xl flex items-center gap-2"><Hammer className="w-5 h-5 text-primary-500" /> PocketCode tooling</h2>
             <div className="flex gap-2">
               <button onClick={() => void loadTooling()} className="btn-secondary text-sm" disabled={busy}>Refresh</button>
               <button onClick={() => void repairBundledTooling()} className="btn-primary text-sm" disabled={busy}>Repair tooling</button>
@@ -175,6 +182,39 @@ export default function DiagnosticsPanel() {
             <p className="text-sm text-surface-500">Tooling status unavailable. Run Repair tooling after `scripts/fetch-tooling`.</p>
           )}
           {tooling?.message && <p className="text-xs text-surface-500">{tooling.message}</p>}
+          <div className="text-xs text-surface-500 space-y-0.5 pt-1">
+            <p>
+              PocketCode backend:{' '}
+              {store.currentModel?.startsWith('enterprise:')
+                ? 'org server (chat completions)'
+                : store.currentModel?.startsWith('remote:')
+                  ? 'online'
+                  : store.currentModel
+                    ? 'local'
+                    : 'none'}
+            </p>
+            {store.generationError && (
+              <p className="text-amber-700 dark:text-amber-300">Last generation error: {store.generationError}</p>
+            )}
+          </div>
+          {runners && (
+            <div className="space-y-2 pt-2 border-t border-surface-200 dark:border-surface-800">
+              <p className="text-sm font-semibold">Allowlisted runners</p>
+              <p className="text-xs text-surface-500">{runners.message}</p>
+              <div className="max-h-48 overflow-y-auto grid sm:grid-cols-2 gap-1 text-xs font-mono">
+                {runners.runners.map(r => (
+                  <div
+                    key={r.id}
+                    className={r.available ? 'text-primary-700 dark:text-primary-300' : 'text-surface-400'}
+                    title={r.binary || r.note}
+                  >
+                    {r.available ? '✓' : '·'} {r.id}
+                    <span className="text-surface-500"> ({r.kind})</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="glass-panel rounded-2xl overflow-hidden">
