@@ -1,0 +1,27 @@
+PocketMind llama.cpp server package
+===================================
+
+What this zip contains
+----------------------
+- Admin UI (port 8090): catalog of all app offline models, MB/GB progress,
+  resumable downloads, select model, start/stop, logs
+- Chat API via Docker llama.cpp (port 8000) — CUDA + CPU compose files
+- Optional embeddings compose files
+- Windows launchers: START_ADMIN.cmd, START_SERVER.cmd, PREFLIGHT.cmd, SMOKE_TEST.cmd
+- Empty models\ folder (download GGUFs here or via UI)
+
+What is NOT in this zip
+-----------------------
+- GGUF model weights (download via Admin UI catalog)
+- Docker images (pulled on first start)
+- PocketMind desktop client / GPU runtimes (separate Windows-Full package)
+
+First run on the GPU PC
+-----------------------
+1. Unzip to e.g. C:\PocketMindServer\llama-cpp
+2. Install Docker Desktop + NVIDIA driver + Python 3
+3. Double-click START_ADMIN.cmd
+4. Paste token → App catalog → Download → Select → Start
+5. Org URL: http://127.0.0.1:8000/v1
+
+See START_HERE.txt and SETUP_WINDOWS.md.

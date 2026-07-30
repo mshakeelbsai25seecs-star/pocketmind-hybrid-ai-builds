@@ -22,6 +22,7 @@ pub enum OcrEngine {
     Auto,
     Legacy,
     Docling,
+    Unlimited,
 }
 
 impl OcrEngine {
@@ -30,6 +31,7 @@ impl OcrEngine {
             OcrEngine::Auto => "auto",
             OcrEngine::Legacy => "legacy",
             OcrEngine::Docling => "docling",
+            OcrEngine::Unlimited => "unlimited",
         }
     }
 
@@ -37,6 +39,7 @@ impl OcrEngine {
         match value.trim().to_ascii_lowercase().as_str() {
             "legacy" => OcrEngine::Legacy,
             "docling" => OcrEngine::Docling,
+            "unlimited" | "unlimited-ocr" | "unlimited_ocr" => OcrEngine::Unlimited,
             _ => OcrEngine::Auto,
         }
     }
@@ -81,6 +84,9 @@ pub struct OcrCapabilities {
     pub legacy_ocr_script_available: bool,
     pub docling_importable: bool,
     pub opencv_available: bool,
+    pub unlimited_ocr_available: bool,
+    pub unlimited_ocr_model_ready: bool,
+    pub unlimited_ocr_cuda: bool,
     pub image_rag_configured: bool,
     pub active_engine_hint: String,
     pub warnings: Vec<String>,
@@ -217,6 +223,17 @@ pub fn probe_ocr_capabilities(config: &OcrImageRagConfig) -> OcrCapabilities {
         .unwrap_or(false);
     let opencv = std::panic::catch_unwind(crate::knowledge_chat::pdf_ocr::opencv_available)
         .unwrap_or(false);
+    let unlimited_probe = std::panic::catch_unwind(crate::unlimited_ocr::probe_unlimited_ocr).ok();
+    let unlimited_available = unlimited_probe
+        .as_ref()
+        .map(|p| p.available)
+        .unwrap_or(false);
+    let unlimited_model = unlimited_probe
+        .as_ref()
+        .map(|p| p.model_ready)
+        .unwrap_or(false);
+    let unlimited_cuda = unlimited_probe.as_ref().map(|p| p.cuda).unwrap_or(false);
+
     let mut warnings = Vec::new();
     if !python {
         warnings.push("Python not found on PATH; PDF OCR unavailable.".to_string());
@@ -226,6 +243,19 @@ pub fn probe_ocr_capabilities(config: &OcrImageRagConfig) -> OcrCapabilities {
     if matches!(OcrEngine::parse(&config.ocr_engine), OcrEngine::Docling) && !docling {
         warnings.push("Docling requested but not importable; will fall back to legacy.".to_string());
     }
+    if matches!(OcrEngine::parse(&config.ocr_engine), OcrEngine::Unlimited) && !unlimited_available {
+        warnings.push(
+            "Unlimited-OCR requested but not ready (needs CUDA + torch + downloaded weights)."
+                .to_string(),
+        );
+    }
+    if let Some(p) = &unlimited_probe {
+        if let Some(w) = &p.warning {
+            if !w.is_empty() && matches!(OcrEngine::parse(&config.ocr_engine), OcrEngine::Unlimited | OcrEngine::Auto) {
+                warnings.push(format!("Unlimited-OCR: {w}"));
+            }
+        }
+    }
     if config.ocr_preprocess && !opencv {
         warnings.push("OpenCV not installed; preprocess will be skipped.".to_string());
     }
@@ -234,6 +264,9 @@ pub fn probe_ocr_capabilities(config: &OcrImageRagConfig) -> OcrCapabilities {
         OcrEngine::Legacy => "legacy".to_string(),
         OcrEngine::Docling if docling => "docling".to_string(),
         OcrEngine::Docling => "legacy (docling unavailable)".to_string(),
+        OcrEngine::Unlimited if unlimited_available => "unlimited-ocr".to_string(),
+        OcrEngine::Unlimited => "legacy (unlimited unavailable)".to_string(),
+        OcrEngine::Auto if unlimited_available => "auto→unlimited-ocr".to_string(),
         OcrEngine::Auto if docling => "auto→docling".to_string(),
         OcrEngine::Auto => "auto→legacy".to_string(),
     };
@@ -248,6 +281,9 @@ pub fn probe_ocr_capabilities(config: &OcrImageRagConfig) -> OcrCapabilities {
         legacy_ocr_script_available: legacy,
         docling_importable: docling,
         opencv_available: opencv,
+        unlimited_ocr_available: unlimited_available,
+        unlimited_ocr_model_ready: unlimited_model,
+        unlimited_ocr_cuda: unlimited_cuda,
         image_rag_configured,
         active_engine_hint: active,
         warnings,

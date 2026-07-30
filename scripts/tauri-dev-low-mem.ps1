@@ -48,8 +48,6 @@ if (-not $env:NEXUS_DATA_ROOT) {
   $repoRuntime = Join-Path $RepoRoot 'runtime-data'
   if (Test-Path $repoRuntime) {
     $env:NEXUS_DATA_ROOT = $repoRuntime
-  } elseif (Test-Path 'D:\nexus-ai-deep-fixed\runtime-data') {
-    $env:NEXUS_DATA_ROOT = 'D:\nexus-ai-deep-fixed\runtime-data'
   } elseif (Test-Path 'D:\NexusAI') {
     $env:NEXUS_DATA_ROOT = 'D:\NexusAI'
   } elseif (Test-Path 'D:\') {

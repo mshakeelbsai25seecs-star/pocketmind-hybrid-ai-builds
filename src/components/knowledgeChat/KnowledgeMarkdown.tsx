@@ -5,6 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import { prepareKnowledgeDisplayMarkdown, type CitationHit } from '../../knowledgeChat/formatAnswer';
+import { onOpenExternal } from '../../openExternal';
 
 const KnowledgeMarkdown = memo(function KnowledgeMarkdown({
   content,
@@ -69,8 +70,19 @@ const KnowledgeMarkdown = memo(function KnowledgeMarkdown({
               {children}
             </pre>
           ),
-          a: ({ children }) => (
-            <span className="nexus-kc-p">{children}</span>
+          a: ({ children, href }) => (
+            href
+              ? (
+                <button
+                  type="button"
+                  className="nexus-md-link bg-transparent border-0 p-0 cursor-pointer underline text-left"
+                  onClick={onOpenExternal(href)}
+                  title={href}
+                >
+                  {children}
+                </button>
+              )
+              : <span className="nexus-kc-p">{children}</span>
           ),
         }}
       >

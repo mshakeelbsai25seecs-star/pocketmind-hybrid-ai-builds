@@ -373,7 +373,7 @@ function extractFileHint(question: string): string | null {
   return null;
 }
 
-/** True for `ChatView.tsx` / `config_loader.py`, false for sentence tails like `name.` */
+/** True for `UserPanel.tsx` / `config_loader.py`, false for sentence tails like `name.` */
 function looksLikeFilename(name: string): boolean {
   const dot = name.lastIndexOf('.');
   if (dot <= 0 || dot >= name.length - 1) return false;

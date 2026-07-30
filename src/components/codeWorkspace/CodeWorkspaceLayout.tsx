@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ClipboardEvent } from 'react';
 import { open } from '@tauri-apps/api/dialog';
 import { invoke } from '@tauri-apps/api/tauri';
 import {
-  FolderOpen, Square, ChevronRight, ChevronDown, ChevronLeft, File, Folder,
+  FolderOpen, Square, ChevronRight, ChevronDown, File, Folder,
   RefreshCw, AlertCircle, Plus, RotateCcw, ArrowUp, ImagePlus, X, Mic, PanelLeftOpen,
 } from 'lucide-react';
 import { useAppStore } from '../../store';
@@ -11,12 +11,15 @@ import {
   cwApplyEditWrite,
   cwCanUse,
   cwEnsureSymbolIndex,
+  cwCheckpointManifest,
   cwListCheckpoints,
   cwListDir,
   cwPlanUpdateMarkdown,
   cwPlanUpdateStatus,
+  cwImageBase64,
   cwReadFile,
   cwRestoreCheckpoint,
+  cwSaveTempImage,
   type CheckpointSummary,
 } from '../../api/codeWorkspace';
 import type { AgentStep, DirEntryInfo, PocketCodeImageAttach, PocketCodePlan } from '../../codeWorkspace/types';
@@ -33,8 +36,11 @@ import {
   prepareAttachmentsForModel,
 } from '../../attachments/prepareAttachments';
 import AgentTranscript from './AgentTranscript';
+import FilePreviewPane from './FilePreviewPane';
 import SandboxPanel from './SandboxPanel';
+import TerminalPanel from './TerminalPanel';
 import ComposerModelBar from './ComposerModelBar';
+import { useAutoResizeTextarea } from '../../hooks/useAutoResizeTextarea';
 import PaneResizeHandle from './PaneResizeHandle';
 import PlanReviewPanel from './PlanReviewPanel';
 import ServerBackendStrip, { preflightEnterprise } from './ServerBackendStrip';
@@ -49,6 +55,28 @@ import {
   transcribeWithWhisper,
 } from '../../voice/dictate';
 import { refreshLocalVisionCapability } from '../../codeWorkspace/visionCapability';
+import {
+  isThinClient,
+  loadRuntimeProfile,
+  usesRemoteWorkspace,
+  type PocketCodeRuntimeProfile,
+} from '../../codeWorkspace/runtimeProfile';
+import { remoteWorkspaceRootToken } from '../../api/codeWorkspace';
+import RuntimeProfileBar from './RuntimeProfileBar';
+import { formatInvokeError } from './agentLoop';
+
+function normPath(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase();
+}
+
+/** Match relative vs absolute / slash-style paths after agent deletes. */
+function pathsReferToSameFile(a: string | null | undefined, b: string | null | undefined): boolean {
+  if (!a || !b) return false;
+  const na = normPath(a);
+  const nb = normPath(b);
+  if (na === nb) return true;
+  return na.endsWith(`/${nb}`) || nb.endsWith(`/${na}`);
+}
 
 function TreeNode({
   workspaceRoot,
@@ -56,12 +84,15 @@ function TreeNode({
   depth,
   selectedPath,
   onSelect,
+  treeEpoch,
 }: {
   workspaceRoot: string;
   entry: DirEntryInfo;
   depth: number;
   selectedPath: string | null;
   onSelect: (path: string, isDir: boolean) => void;
+  /** Bumped after agent create/edit/delete so expanded folders reload. */
+  treeEpoch: number;
 }) {
   const [openDir, setOpenDir] = useState(depth < 2);
   const [children, setChildren] = useState<DirEntryInfo[]>([]);
@@ -81,8 +112,8 @@ function TreeNode({
   }, [entry.is_dir, entry.path, workspaceRoot]);
 
   useEffect(() => {
-    if (openDir && entry.is_dir && children.length === 0) void loadChildren();
-  }, [openDir, entry.is_dir, children.length, loadChildren]);
+    if (openDir && entry.is_dir) void loadChildren();
+  }, [openDir, entry.is_dir, loadChildren, treeEpoch]);
 
   const active = selectedPath === entry.path;
 
@@ -109,7 +140,7 @@ function TreeNode({
         style={{ paddingLeft: `${depth * 12 + 4}px` }}
       >
         {openDir ? <ChevronDown className="w-3.5 h-3.5 shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 shrink-0" />}
-        <Folder className="w-3.5 h-3.5 shrink-0 text-amber-500" />
+        <Folder className="w-3.5 h-3.5 shrink-0 text-primary-300" />
         <span className="truncate font-medium">{entry.name}</span>
         {loading && <RefreshCw className="w-3 h-3 ml-auto animate-spin opacity-50" />}
       </button>
@@ -121,17 +152,138 @@ function TreeNode({
           depth={depth + 1}
           selectedPath={selectedPath}
           onSelect={onSelect}
+          treeEpoch={treeEpoch}
         />
       ))}
     </div>
   );
 }
 
-function stepsToTranscriptText(steps: AgentStep[]): string {
-  return steps.map(s => {
-    if (s.kind === 'tool') return `[tool ${s.tool}] ${s.toolResult || s.content}`;
-    return `[${s.kind}] ${s.content}`;
-  }).join('\n\n');
+/**
+ * Cursor-style turn header: the prompt pins to the top of the chat scroll area while its reply is
+ * on screen, and the next turn's prompt pushes it away — so you always see which question the
+ * visible answer belongs to.
+ */
+function StickyTurnPrompt({
+  content,
+  index,
+  total,
+}: {
+  content: string;
+  index: number;
+  total: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const preview = content.replace(/\s+/g, ' ').trim();
+  const isLong = preview.length > 120 || content.includes('\n');
+
+  return (
+    <div className="sticky top-0 z-20 -mx-2.5 px-2.5 pt-1.5 pb-1.5 bg-white/95 dark:bg-surface-950/95 backdrop-blur-sm border-b border-surface-200 dark:border-surface-800">
+      <div className="flex items-start gap-1.5">
+        <span className="text-[10px] font-semibold uppercase tracking-wide text-surface-400 mt-0.5 shrink-0">
+          You
+        </span>
+        {expanded ? (
+          <p className="flex-1 min-w-0 text-[13px] leading-relaxed whitespace-pre-wrap break-words text-surface-800 dark:text-surface-100 max-h-56 overflow-y-auto">
+            {content}
+          </p>
+        ) : (
+          <p className="flex-1 min-w-0 text-[13px] leading-snug line-clamp-2 break-words text-surface-800 dark:text-surface-100">
+            {preview}
+          </p>
+        )}
+        <span className="text-[10px] text-surface-400 tabular-nums shrink-0 mt-0.5">
+          {index + 1}/{total}
+        </span>
+        {isLong && (
+          <button
+            type="button"
+            onClick={() => setExpanded(v => !v)}
+            title={expanded ? 'Collapse message' : 'Show full message'}
+            className="shrink-0 p-0.5 rounded text-surface-400 hover:text-surface-700 dark:hover:text-surface-200"
+          >
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${expanded ? '' : '-rotate-90'}`} />
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Persist structured steps (Cursor-style cards), not a raw transcript dump. */
+function stepsForPersist(steps: AgentStep[]): AgentStep[] {
+  return steps
+    .filter(s => s.kind === 'tool' || s.kind === 'done' || s.kind === 'error')
+    .map((s, i) => ({
+      step: s.step || i + 1,
+      kind: s.kind,
+      content: s.content || '',
+      tool: s.tool,
+      toolResult: s.toolResult && s.toolResult.length > 4_000
+        ? `${s.toolResult.slice(0, 4_000)}\n…[truncated]`
+        : s.toolResult,
+    }));
+}
+
+function encodePocketCodeMetadata(steps: AgentStep[]): string {
+  return JSON.stringify({ v: 1, pocketcodeSteps: stepsForPersist(steps) });
+}
+
+function parseStepsFromMetadata(metadata?: string | null): AgentStep[] | null {
+  if (!metadata?.trim()) return null;
+  try {
+    const raw = JSON.parse(metadata) as { pocketcodeSteps?: unknown };
+    if (!Array.isArray(raw.pocketcodeSteps)) return null;
+    return raw.pocketcodeSteps.filter((s): s is AgentStep => (
+      !!s && typeof s === 'object' && typeof (s as AgentStep).kind === 'string'
+    ));
+  } catch {
+    return null;
+  }
+}
+
+/** Best-effort recovery for older messages that stored a text transcript block. */
+function parseStepsFromLegacyTranscript(transcript: string): AgentStep[] {
+  if (!transcript.trim()) return [];
+  const blocks = transcript.split(/\n\n+/);
+  const steps: AgentStep[] = [];
+  let n = 0;
+  for (const block of blocks) {
+    const toolMatch = /^\[tool\s+([^\]]+)\]\s*([\s\S]*)$/.exec(block.trim());
+    if (toolMatch) {
+      n += 1;
+      steps.push({
+        step: n,
+        kind: 'tool',
+        content: `Tool ${toolMatch[1]}`,
+        tool: toolMatch[1],
+        toolResult: (toolMatch[2] || '').trim(),
+      });
+      continue;
+    }
+    const kindMatch = /^\[(done|error|assistant)\]\s*([\s\S]*)$/.exec(block.trim());
+    if (kindMatch && kindMatch[1] !== 'assistant') {
+      n += 1;
+      // Keep the full block body (including paragraphs after the first line).
+      steps.push({
+        step: n,
+        kind: kindMatch[1] as 'done' | 'error',
+        content: (kindMatch[2] || '').trim(),
+      });
+    }
+  }
+  return steps;
+}
+
+function assistantDisplayParts(m: Message): { summary: string; steps: AgentStep[] } {
+  const fromMeta = parseStepsFromMetadata(m.metadata);
+  const parts = m.content.split(/\n---\nAgent transcript\n/);
+  const summary = (parts[0] || '').trim();
+  if (fromMeta && fromMeta.length > 0) {
+    return { summary, steps: fromMeta };
+  }
+  const legacy = parseStepsFromLegacyTranscript(parts.slice(1).join('\n---\nAgent transcript\n').trim());
+  return { summary, steps: legacy };
 }
 
 function mimeFromPath(path: string): string {
@@ -158,18 +310,30 @@ export default function CodeWorkspaceLayout() {
   const rememberConversationForMode = useAppStore(s => s.rememberConversationForMode);
   const setActiveView = useAppStore(s => s.setActiveView);
   const lastPocketId = useAppStore(s => s.lastConversationIdByMode.pocketcode);
+  const pocketcodeNewSessionNonce = useAppStore(s => s.pocketcodeNewSessionNonce);
+  const requestNewPocketcodeSession = useAppStore(s => s.requestNewPocketcodeSession);
+  /** When true, do not auto-reopen the last PocketCode thread (user clicked New). */
+  const skipThreadAutoRestoreRef = useRef(false);
   const allMessages = useAppStore(s => s.messages);
   const sidebarOpen = useAppStore(s => s.sidebarOpen);
   const setSidebarOpen = useAppStore(s => s.setSidebarOpen);
   const session = useAgentSession();
 
   const [workspaceRoot, setWorkspaceRoot] = useState('');
+  const [runtimeProfile, setRuntimeProfile] = useState<PocketCodeRuntimeProfile | null>(null);
   const [tree, setTree] = useState<DirEntryInfo[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [openFilePath, setOpenFilePath] = useState<string | null>(null);
   const [editorContent, setEditorContent] = useState('');
   const [editorError, setEditorError] = useState<string | null>(null);
+  /** Forces expanded folder nodes to re-list after agent mutations. */
+  const [treeEpoch, setTreeEpoch] = useState(0);
+  const openFilePathRef = useRef<string | null>(null);
+  const selectedPathRef = useRef<string | null>(null);
+  openFilePathRef.current = openFilePath;
+  selectedPathRef.current = selectedPath;
   const [task, setTask] = useState('');
+  const taskInputRef = useAutoResizeTextarea(task);
   const [gateReason, setGateReason] = useState<string | null>(null);
   const [gateAllowed, setGateAllowed] = useState(false);
   const [localStatus, setLocalStatus] = useState<string | null>(null);
@@ -185,10 +349,10 @@ export default function CodeWorkspaceLayout() {
   const [voiceRecording, setVoiceRecording] = useState(false);
   const [voiceEngineLabel, setVoiceEngineLabel] = useState('');
   const voiceSessionRef = useRef<{ stop: () => Promise<unknown> } | null>(null);
-  /** Prompt for the in-flight / just-finished live agent run (shown in top bar). */
+  /** Prompt for the in-flight live agent run (shown while running). */
   const [liveQuery, setLiveQuery] = useState<string | null>(null);
-  /** Which historical turn is focused when not in a live run (-1 = latest). */
-  const [activeTurnIndex, setActiveTurnIndex] = useState(-1);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const chatEndRef = useRef<HTMLDivElement | null>(null);
   const [leftPanePx, setLeftPanePx] = useState(220);
   const [rightPanePx, setRightPanePx] = useState(380);
   const [wideLayout, setWideLayout] = useState(() =>
@@ -226,7 +390,6 @@ export default function CodeWorkspaceLayout() {
   }, [workspaceRoot]);
 
   useEffect(() => {
-    void getSetting('cw.workspace_root').then(v => { if (v) setWorkspaceRoot(v); });
     void getSetting('cw.agent_mode').then(v => setAgentMode(parseAgentMode(v)));
     void getSetting('cw.pane_left_px').then(v => {
       const n = Number(v);
@@ -236,7 +399,20 @@ export default function CodeWorkspaceLayout() {
       const n = Number(v);
       if (Number.isFinite(n) && n >= 280 && n <= 720) setRightPanePx(n);
     });
+    void (async () => {
+      const profile = await loadRuntimeProfile();
+      setRuntimeProfile(profile);
+      if (usesRemoteWorkspace(profile) && profile.remote?.workspaceId) {
+        setWorkspaceRoot(remoteWorkspaceRootToken(profile.remote.workspaceId));
+      } else {
+        const v = await getSetting('cw.workspace_root');
+        if (v) setWorkspaceRoot(v);
+      }
+    })();
   }, []);
+
+  const thinClient = Boolean(runtimeProfile && isThinClient(runtimeProfile));
+  const remoteWorkspace = Boolean(runtimeProfile && usesRemoteWorkspace(runtimeProfile));
 
   const persistPaneWidths = useCallback((left: number, right: number) => {
     if (panePersistTimer.current) clearTimeout(panePersistTimer.current);
@@ -272,7 +448,27 @@ export default function CodeWorkspaceLayout() {
   }, []);
 
   useEffect(() => {
-    void refreshLocalVisionCapability(currentModel);
+    let cancelled = false;
+    (async () => {
+      const visionReady = await refreshLocalVisionCapability(currentModel);
+      const g = await cwCanUse(currentModel);
+      if (cancelled) return;
+      // Prefer Rust gate (includes mmproj-on-disk). Vision probe keeps UI chips in sync.
+      setGateAllowed(g.allowed || visionReady);
+      setGateReason(
+        g.allowed
+          ? g.reason
+          : visionReady
+            ? 'Local vision model (mmproj ready)'
+            : g.reason,
+      );
+    })().catch(() => {
+      if (!cancelled) {
+        setGateAllowed(false);
+        setGateReason('Could not verify model for PocketCode.');
+      }
+    });
+    return () => { cancelled = true; };
   }, [currentModel]);
 
   const toggleVoice = async () => {
@@ -329,13 +525,6 @@ export default function CodeWorkspaceLayout() {
   };
 
   useEffect(() => {
-    void cwCanUse(currentModel).then(g => {
-      setGateAllowed(g.allowed);
-      setGateReason(g.reason);
-    });
-  }, [currentModel]);
-
-  useEffect(() => {
     if (session.lastPlan) setReviewPlan(session.lastPlan);
   }, [session.lastPlan]);
 
@@ -349,14 +538,15 @@ export default function CodeWorkspaceLayout() {
     await setSetting('cw.agent_mode', next);
   }, [agentMode, session.running]);
 
-  const refreshTree = useCallback(async (root?: string) => {
+  const refreshTree = useCallback(async (root?: string, opts?: { bustCache?: boolean }) => {
     const r = root ?? workspaceRoot;
     if (!r) return;
     try {
       const entries = await cwListDir(r, '.');
       setTree(entries.sort((a, b) => Number(b.is_dir) - Number(a.is_dir) || a.name.localeCompare(b.name)));
+      if (opts?.bustCache !== false) setTreeEpoch(v => v + 1);
     } catch (err) {
-      setLocalStatus(String(err));
+      setLocalStatus(formatInvokeError(err));
     }
   }, [workspaceRoot]);
 
@@ -374,6 +564,7 @@ export default function CodeWorkspaceLayout() {
 
   useEffect(() => {
     if (threadId) return;
+    if (skipThreadAutoRestoreRef.current) return;
     if (lastPocketId && pocketThreads.some(t => t.id === lastPocketId)) {
       setThreadId(lastPocketId);
       const t = pocketThreads.find(x => x.id === lastPocketId);
@@ -381,7 +572,27 @@ export default function CodeWorkspaceLayout() {
     }
   }, [lastPocketId, pocketThreads, threadId]);
 
+  useEffect(() => {
+    if (!pocketcodeNewSessionNonce) return;
+    skipThreadAutoRestoreRef.current = true;
+    setThreadId(null);
+    setThreadTitle('New agent chat');
+    setLiveQuery(null);
+    agentSession.stop();
+    setLocalStatus(null);
+    setReviewPlan(null);
+    agentSession.setLastPlan(null);
+  }, [pocketcodeNewSessionNonce]);
+
   const pickFolder = async () => {
+    if (thinClient || remoteWorkspace) {
+      setLocalStatus(
+        thinClient
+          ? 'Thin client cannot open a local folder. Provision or select a remote workspace.'
+          : 'Remote tools profile active — use the runtime profile bar to select/provision a server workspace.',
+      );
+      return;
+    }
     const selected = await open({ directory: true, multiple: false });
     if (typeof selected !== 'string' || !selected) return;
     setWorkspaceRoot(selected);
@@ -402,9 +613,21 @@ export default function CodeWorkspaceLayout() {
       setEditorContent(text);
     } catch (err) {
       setEditorContent('');
-      setEditorError(String(err));
+      setEditorError(formatInvokeError(err));
     }
   };
+
+  const closePreviewIfPath = useCallback((path: string) => {
+    if (
+      pathsReferToSameFile(openFilePathRef.current, path)
+      || pathsReferToSameFile(selectedPathRef.current, path)
+    ) {
+      setOpenFilePath(null);
+      setSelectedPath(null);
+      setEditorContent('');
+      setEditorError(null);
+    }
+  }, []);
 
   const ensureThread = async (firstTask: string): Promise<string> => {
     if (threadId) return threadId;
@@ -430,6 +653,14 @@ export default function CodeWorkspaceLayout() {
     summary: string,
     steps: AgentStep[],
   ) => {
+    const assistantBody = summary.trim() || 'Done.';
+    // Ensure the done step carries the full reply (model done.args can be a short teaser).
+    const stepsToStore = steps.map(s => (
+      s.kind === 'done' && assistantBody.length > (s.content || '').length
+        ? { ...s, content: assistantBody }
+        : s
+    ));
+    const metadata = encodePocketCodeMetadata(stepsToStore);
     const userMsg: Message = {
       id: `${Date.now()}-u`,
       conversation_id: convId,
@@ -437,18 +668,12 @@ export default function CodeWorkspaceLayout() {
       content: userText,
       created_at: Math.floor(Date.now() / 1000),
     };
-    const assistantBody = [
-      summary,
-      '',
-      '---',
-      'Agent transcript',
-      stepsToTranscriptText(steps),
-    ].join('\n');
     const asstMsg: Message = {
       id: `${Date.now()}-a`,
       conversation_id: convId,
       role: 'assistant',
       content: assistantBody,
+      metadata,
       created_at: Math.floor(Date.now() / 1000),
     };
     const userMsgId = await invoke<string>('add_message', {
@@ -461,13 +686,13 @@ export default function CodeWorkspaceLayout() {
       conversationId: convId,
       role: 'assistant',
       content: assistantBody,
-      metadata: null,
+      metadata,
     });
     const existing = useAppStore.getState().messages[convId] || [];
     setMessages(convId, [
       ...existing,
       { ...userMsg, id: userMsgId },
-      { ...asstMsg, id: assistantMsgId },
+      { ...asstMsg, id: assistantMsgId, metadata },
     ]);
     await refreshConversations();
   };
@@ -480,17 +705,36 @@ export default function CodeWorkspaceLayout() {
         kind: chip.kind,
         understand: chip.understand,
         notice: chip.notice,
+        // Keep existing thumbnail when model changes.
+        previewDataUrl: f.previewDataUrl,
       };
     }));
   }, [currentModel]);
 
-  const attachFiles = async () => {
-    const selected = await open({
-      multiple: true,
-      filters: ATTACH_FILE_FILTERS,
-    });
-    if (!selected) return;
-    const paths = Array.isArray(selected) ? selected : [selected];
+  const ensureImagePreviews = useCallback(async (paths: string[]) => {
+    for (const path of paths) {
+      const mime = mimeFromPath(path);
+      if (!mime.startsWith('image/')) continue;
+      try {
+        const [resolvedMime, base64] = await cwImageBase64(path);
+        const previewDataUrl = `data:${resolvedMime || mime};base64,${base64}`;
+        setAttachments(prev => prev.map(a => (
+          a.path === path && !a.previewDataUrl ? { ...a, previewDataUrl } : a
+        )));
+      } catch {
+        /* preview optional */
+      }
+    }
+  }, []);
+
+  const pushAttachments = useCallback((items: PocketCodeImageAttach[]) => {
+    if (!items.length) return;
+    setAttachments(prev => [...prev, ...items].slice(0, 6));
+    void ensureImagePreviews(items.filter(i => !i.previewDataUrl).map(i => i.path));
+  }, [ensureImagePreviews]);
+
+  const pushAttachmentPaths = useCallback((paths: string[]) => {
+    if (!paths.length) return;
     const next: PocketCodeImageAttach[] = paths.map(path => {
       const chip = chipForPath(path, currentModel);
       return {
@@ -502,8 +746,77 @@ export default function CodeWorkspaceLayout() {
         notice: chip.notice,
       };
     });
-    setAttachments(prev => [...prev, ...next].slice(0, 6));
+    pushAttachments(next);
+  }, [currentModel, pushAttachments]);
+
+  const attachFiles = async () => {
+    const selected = await open({
+      multiple: true,
+      filters: ATTACH_FILE_FILTERS,
+    });
+    if (!selected) return;
+    const paths = Array.isArray(selected) ? selected : [selected];
+    pushAttachmentPaths(paths);
   };
+
+  const fileToDataUrl = (file: Blob): Promise<string> => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('Failed to read clipboard image'));
+    reader.readAsDataURL(file);
+  });
+
+  /** Ctrl+V / Cmd+V screenshots from clipboard → attachment chips (Cursor-style). */
+  const pasteClipboardImages = useCallback(async (e: ClipboardEvent) => {
+    const dt = e.clipboardData;
+    if (!dt) return;
+
+    const files: File[] = [];
+    if (dt.items?.length) {
+      for (const item of Array.from(dt.items)) {
+        if (item.kind === 'file' && item.type.startsWith('image/')) {
+          const f = item.getAsFile();
+          if (f) files.push(f);
+        }
+      }
+    }
+    if (!files.length && dt.files?.length) {
+      for (const f of Array.from(dt.files)) {
+        if (f.type.startsWith('image/')) files.push(f);
+      }
+    }
+    if (!files.length) return;
+
+    e.preventDefault();
+    try {
+      const next: PocketCodeImageAttach[] = [];
+      for (const file of files.slice(0, 6)) {
+        const dataUrl = await fileToDataUrl(file);
+        const comma = dataUrl.indexOf(',');
+        const b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+        const mime = file.type || 'image/png';
+        const path = await cwSaveTempImage(b64, mime);
+        const chip = chipForPath(path, currentModel);
+        next.push({
+          path,
+          name: chip.name.startsWith('paste-') ? 'Screenshot' : chip.name,
+          mime,
+          kind: chip.kind,
+          understand: chip.understand,
+          notice: chip.notice,
+          previewDataUrl: dataUrl,
+        });
+      }
+      pushAttachments(next);
+      setLocalStatus(
+        next.length === 1
+          ? 'Screenshot pasted from clipboard.'
+          : `${next.length} images pasted from clipboard.`,
+      );
+    } catch (err) {
+      setLocalStatus(formatInvokeError(err));
+    }
+  }, [currentModel, pushAttachments]);
 
   const runAgent = async (override?: {
     prompt?: string;
@@ -528,6 +841,8 @@ export default function CodeWorkspaceLayout() {
       return;
     }
 
+    // Ensure mmproj disk probe is fresh before vision attach decisions.
+    await refreshLocalVisionCapability(currentModel);
     const prepared = await prepareAttachmentsForModel(
       attachments.map(a => a.path),
       currentModel,
@@ -539,7 +854,6 @@ export default function CodeWorkspaceLayout() {
     const images = prepared.images;
     const convId = await ensureThread(fullPrompt);
     setLiveQuery(fullPrompt);
-    setActiveTurnIndex(-1);
     if (override?.clearTask !== false) {
       setTask('');
       setAttachments([]);
@@ -555,10 +869,15 @@ export default function CodeWorkspaceLayout() {
       images: images.length > 0 ? images : undefined,
       onApplyWrite: async (path, content) => {
         await cwApplyEditWrite(workspaceRoot, path, content);
-        await refreshTree();
-        if (openFilePath === path) {
+        await refreshTree(undefined, { bustCache: true });
+        if (pathsReferToSameFile(openFilePathRef.current, path)) {
           setEditorContent(content);
+          setEditorError(null);
         }
+      },
+      onFileDeleted: async (path) => {
+        closePreviewIfPath(path);
+        await refreshTree(undefined, { bustCache: true });
       },
       onAfterDone: async (summary, steps) => {
         try {
@@ -566,6 +885,7 @@ export default function CodeWorkspaceLayout() {
         } catch (err) {
           console.warn('Failed to persist PocketCode thread:', err);
         }
+        setLiveQuery(null);
         await refreshCheckpoints();
         if (mode === 'plan' && agentSession.getSnapshot().lastPlan) {
           setReviewPlan(agentSession.getSnapshot().lastPlan);
@@ -609,10 +929,11 @@ export default function CodeWorkspaceLayout() {
   };
 
   const newAgentChat = () => {
+    skipThreadAutoRestoreRef.current = true;
+    requestNewPocketcodeSession();
     setThreadId(null);
     setThreadTitle('New agent chat');
     setLiveQuery(null);
-    setActiveTurnIndex(-1);
     agentSession.stop();
     setLocalStatus(null);
     setReviewPlan(null);
@@ -620,10 +941,10 @@ export default function CodeWorkspaceLayout() {
   };
 
   const selectThread = async (conv: Conversation) => {
+    skipThreadAutoRestoreRef.current = false;
     setThreadId(conv.id);
     setThreadTitle(conv.title || 'Agent chat');
     setLiveQuery(null);
-    setActiveTurnIndex(-1);
     rememberConversationForMode('pocketcode', conv.id);
     setActiveConversation(conv.id);
     try {
@@ -638,12 +959,30 @@ export default function CodeWorkspaceLayout() {
     if (!workspaceRoot) return;
     if (!confirm(`Restore all files from checkpoint ${runId}?`)) return;
     try {
+      let fileCount = 0;
+      try {
+        const manifest = await cwCheckpointManifest(workspaceRoot, runId);
+        fileCount = manifest.files?.length ?? 0;
+      } catch {
+        /* ignore — restore may still work */
+      }
+      if (fileCount === 0) {
+        setLocalStatus(
+          'Nothing to restore — this run did not change any project files (for example the model failed before any edit).',
+        );
+        return;
+      }
       const n = await cwRestoreCheckpoint(workspaceRoot, runId);
-      setLocalStatus(`Restored ${n} file(s) from checkpoint ${runId}.`);
+      setLocalStatus(
+        n > 0
+          ? `Restored ${n} file(s) from checkpoint ${runId}.`
+          : 'Restore finished, but no files were written back.',
+      );
       await refreshTree();
+      await refreshCheckpoints();
       if (openFilePath) await openFile(openFilePath);
     } catch (err) {
-      setLocalStatus(String(err));
+      setLocalStatus(`Restore failed: ${String(err)}`);
     }
   };
 
@@ -652,7 +991,8 @@ export default function CodeWorkspaceLayout() {
     const parts = workspaceRoot.replace(/[\\/]+$/, '').split(/[/\\]/);
     return parts[parts.length - 1] || workspaceRoot;
   }, [workspaceRoot]);
-  const status = session.status ?? localStatus;
+  // Prefer localStatus so restore / mic / attach feedback is not hidden by the last agent summary.
+  const status = localStatus ?? session.status;
   const busy = session.running;
   const showInlineSandbox =
     FEATURE_FLAGS.codeWorkspaceSandbox
@@ -676,26 +1016,20 @@ export default function CodeWorkspaceLayout() {
     return out;
   }, [storedMessages]);
 
-  /** Explicit history focus; -1 means latest / live run. */
-  const viewingHistoryTurn = !busy && activeTurnIndex >= 0 && activeTurnIndex < turns.length;
-  const latestTurnIndex = Math.max(0, turns.length - 1);
-  const focusedTurnIndex = viewingHistoryTurn ? activeTurnIndex : latestTurnIndex;
-  const focusedTurn = turns.length > 0 ? turns[focusedTurnIndex] : null;
-  const headerQuery = (
-    viewingHistoryTurn
-      ? focusedTurn?.user.content
-      : (liveQuery || focusedTurn?.user.content || null)
-  ) || (threadId ? threadTitle : 'New agent chat');
-  const showLiveSteps = !viewingHistoryTurn && session.steps.length > 0;
-  const canPrevTurn = turns.length > 1 && focusedTurnIndex > 0 && !busy;
-  const canNextTurn = turns.length > 1 && viewingHistoryTurn && focusedTurnIndex < latestTurnIndex && !busy;
+  const headerTitle = threadId ? threadTitle : 'New agent chat';
+  /** Live run panel while the agent is working (history stays scrollable above). */
+  const showLiveRun = busy || (session.running && session.steps.length > 0);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+  }, [turns.length, session.steps.length, showLiveRun, liveQuery, status]);
 
   return (
-    <div className="flex-1 flex flex-col h-full min-w-0 bg-white dark:bg-surface-950">
+    <div className="flex-1 flex flex-col h-full min-w-0 bg-white dark:bg-black">
       {!gateAllowed && (
         <div className="mx-3 mt-2 rounded-xl border border-amber-300/60 bg-amber-50 dark:bg-amber-950/20 p-2.5 text-xs text-amber-800 dark:text-amber-200 flex gap-2">
           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-          {gateReason || 'Select a ≥30B local model, an online model, or an org server model for PocketCode.'}
+          {gateReason || 'Select a ≥20B local model, an online model, or an org server model for PocketCode.'}
         </div>
       )}
 
@@ -705,14 +1039,37 @@ export default function CodeWorkspaceLayout() {
         onRetry={lastFailedPrompt ? () => void runAgent({ prompt: lastFailedPrompt, clearTask: false }) : undefined}
       />
 
+      <RuntimeProfileBar
+        thinClient={thinClient}
+        onWorkspaceRootChange={(root) => {
+          if (root) {
+            setWorkspaceRoot(root);
+            setSelectedPath(null);
+            setOpenFilePath(null);
+            setEditorContent('');
+          }
+          void loadRuntimeProfile().then(async (p) => {
+            setRuntimeProfile(p);
+            if (usesRemoteWorkspace(p) && p.remote?.workspaceId) {
+              setWorkspaceRoot(remoteWorkspaceRootToken(p.remote.workspaceId));
+            } else if (!usesRemoteWorkspace(p) && !root) {
+              const local = await getSetting('cw.workspace_root');
+              if (local) setWorkspaceRoot(local);
+            }
+          });
+        }}
+      />
+
       <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
         <aside
-          className="overflow-y-auto p-1.5 bg-surface-50/80 dark:bg-surface-950/40 min-h-[10rem] lg:min-h-0 lg:h-full shrink-0 border-b lg:border-b-0 border-surface-200 dark:border-surface-800"
+          className="overflow-y-auto p-1.5 bg-surface-50/80 dark:bg-black min-h-[10rem] lg:min-h-0 lg:h-full shrink-0 border-b lg:border-b-0 border-surface-200 dark:border-white/5"
           style={wideLayout ? { width: leftPanePx } : { width: '100%' }}
         >
-          <div className="flex items-center gap-0.5 px-1 py-0.5 mb-0.5 sticky top-0 z-10 bg-surface-50/95 dark:bg-surface-950/90 backdrop-blur-sm">
+          <div className="flex items-center gap-0.5 px-1 py-0.5 mb-0.5 sticky top-0 z-10 bg-surface-50/95 dark:bg-black">
             <div className="min-w-0 flex-1 px-1">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-surface-500">Files</p>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-surface-500">
+                {remoteWorkspace ? 'Remote files' : 'Files'}
+              </p>
               <p className="text-[11px] text-surface-700 dark:text-surface-300 truncate" title={workspaceRoot || undefined}>
                 {folderLabel}
               </p>
@@ -727,14 +1084,16 @@ export default function CodeWorkspaceLayout() {
                 <PanelLeftOpen className="w-3.5 h-3.5" />
               </button>
             )}
-            <button
-              type="button"
-              onClick={() => void pickFolder()}
-              className="p-1 rounded-md text-surface-500 hover:bg-surface-200/80 dark:hover:bg-surface-800"
-              title="Open folder"
-            >
-              <FolderOpen className="w-3.5 h-3.5" />
-            </button>
+            {!remoteWorkspace && !thinClient && (
+              <button
+                type="button"
+                onClick={() => void pickFolder()}
+                className="p-1 rounded-md text-surface-500 hover:bg-surface-200/80 dark:hover:bg-surface-800"
+                title="Open folder"
+              >
+                <FolderOpen className="w-3.5 h-3.5" />
+              </button>
+            )}
             <button
               type="button"
               disabled={!workspaceRoot}
@@ -746,7 +1105,11 @@ export default function CodeWorkspaceLayout() {
             </button>
           </div>
           {!workspaceRoot && (
-            <p className="text-xs text-surface-500 px-2">Open a project folder to browse files.</p>
+            <p className="text-xs text-surface-500 px-2">
+              {remoteWorkspace
+                ? 'Select or provision a remote workspace in the profile bar.'
+                : 'Open a project folder to browse files.'}
+            </p>
           )}
           {tree.map(entry => (
             <TreeNode
@@ -755,6 +1118,7 @@ export default function CodeWorkspaceLayout() {
               entry={entry}
               depth={0}
               selectedPath={selectedPath}
+              treeEpoch={treeEpoch}
               onSelect={(path, isDir) => {
                 if (!isDir) void openFile(path);
                 else setSelectedPath(path);
@@ -766,22 +1130,15 @@ export default function CodeWorkspaceLayout() {
         <PaneResizeHandle onDrag={onResizeLeft} title="Resize files pane" />
 
         <section className="flex flex-col min-h-0 min-w-0 flex-1">
-          <div className="px-2.5 py-1.5 border-b border-surface-200 dark:border-surface-800 text-[11px] text-surface-500 truncate flex-shrink-0">
-            {openFilePath || 'No file open'}
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <FilePreviewPane
+              workspaceRoot={workspaceRoot}
+              filePath={openFilePath}
+              content={editorContent}
+              error={editorError}
+            />
           </div>
-          <div className="flex-1 min-h-0 overflow-auto">
-            {editorError ? (
-              <p className="p-4 text-sm text-red-600">{editorError}</p>
-            ) : openFilePath ? (
-              <pre className="p-4 text-xs font-mono whitespace-pre-wrap break-words text-surface-800 dark:text-surface-200 leading-relaxed">
-                {editorContent}
-              </pre>
-            ) : (
-              <div className="h-full flex items-center justify-center text-sm text-surface-400 p-6 text-center">
-                Select a file to preview it here. The agent edits files automatically; use checkpoints to undo a run.
-              </div>
-            )}
-          </div>
+          <TerminalPanel />
           {checkpoints.length > 0 && (
             <div className="border-t border-surface-200 dark:border-surface-800 flex-shrink-0">
               <button
@@ -829,39 +1186,15 @@ export default function CodeWorkspaceLayout() {
             >
               {historyOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
             </button>
-            <button
-              type="button"
-              disabled={!canPrevTurn}
-              onClick={() => setActiveTurnIndex(focusedTurnIndex - 1)}
-              className="p-1 rounded-md text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-800 disabled:opacity-25 shrink-0"
-              title="Previous query"
-            >
-              <ChevronLeft className="w-3.5 h-3.5" />
-            </button>
             <p
               className="flex-1 min-w-0 text-[12px] font-medium text-surface-800 dark:text-surface-100 truncate px-1"
-              title={headerQuery}
+              title={headerTitle}
             >
-              {headerQuery}
+              {headerTitle}
             </p>
-            <button
-              type="button"
-              disabled={!canNextTurn}
-              onClick={() => {
-                if (focusedTurnIndex + 1 >= latestTurnIndex) {
-                  setActiveTurnIndex(-1);
-                } else {
-                  setActiveTurnIndex(focusedTurnIndex + 1);
-                }
-              }}
-              className="p-1 rounded-md text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-800 disabled:opacity-25 shrink-0"
-              title="Next query"
-            >
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-            {turns.length > 1 && (
+            {turns.length > 0 && (
               <span className="text-[10px] text-surface-400 tabular-nums shrink-0 pr-0.5">
-                {focusedTurnIndex + 1}/{turns.length}
+                {turns.length} msg{turns.length === 1 ? '' : 's'}
               </span>
             )}
             <button
@@ -907,8 +1240,8 @@ export default function CodeWorkspaceLayout() {
             </div>
           )}
 
-          {session.followupQuestion && !viewingHistoryTurn && (
-            <div className="mx-2 mb-1 rounded-md border border-sky-200 dark:border-sky-900 bg-sky-50/50 dark:bg-sky-950/20 px-2 py-1.5 text-[11px]">
+          {session.followupQuestion && (
+            <div className="mx-2 mb-1 rounded-md border border-sky-200 dark:border-sky-900 bg-sky-50/50 dark:bg-sky-950/20 px-2 py-1.5 text-[11px] flex-shrink-0">
               <p className="font-semibold text-sky-800 dark:text-sky-200 mb-0.5">Follow-up</p>
               <p className="text-surface-700 dark:text-surface-200">{session.followupQuestion}</p>
               <button
@@ -924,8 +1257,8 @@ export default function CodeWorkspaceLayout() {
             </div>
           )}
 
-          <div className="flex-1 min-h-0 overflow-y-auto px-2.5 space-y-2 pb-2">
-            {reviewPlan && !viewingHistoryTurn && (agentMode === 'plan' || reviewPlan.status === 'draft' || reviewPlan.status === 'approved') && (
+          <div ref={chatScrollRef} className="flex-1 min-h-0 overflow-y-auto px-2.5 space-y-4 pb-3">
+            {reviewPlan && (agentMode === 'plan' || reviewPlan.status === 'draft' || reviewPlan.status === 'approved') && (
               <PlanReviewPanel
                 plan={reviewPlan}
                 busy={busy}
@@ -958,7 +1291,7 @@ export default function CodeWorkspaceLayout() {
                 }}
               />
             )}
-            {showInlineSandbox && !viewingHistoryTurn && (
+            {showInlineSandbox && (
               <SandboxPanel
                 pending={session.sandboxPending}
                 lastResult={session.sandboxResult}
@@ -967,18 +1300,51 @@ export default function CodeWorkspaceLayout() {
                 onCancel={() => agentSession.cancelSandbox()}
               />
             )}
-            {showLiveSteps ? (
-              <>
-                <AgentTranscript steps={session.steps} />
-                {session.lastSummary
-                  && session.steps.some(s => s.kind === 'done')
-                  && !session.steps.some(s => s.kind === 'done' && s.content === session.lastSummary)
-                  && (
-                  <p className="text-[13px] leading-relaxed whitespace-pre-wrap break-words text-surface-800 dark:text-surface-100 px-0.5">
-                    {session.lastSummary}
-                  </p>
+
+            {turns.length === 0 && !showLiveRun && (
+              <p className="text-surface-400 pt-8 text-center text-[13px] px-4">
+                Ask PocketCode to explore or edit this folder. The full conversation scrolls here.
+              </p>
+            )}
+
+            {turns.map((turn, turnIdx) => (
+              <div key={turn.user.id || `turn-${turnIdx}`} className="space-y-2">
+                <StickyTurnPrompt
+                  content={turn.user.content}
+                  index={turnIdx}
+                  total={turns.length}
+                />
+                {turn.assistants.length === 0 ? (
+                  <p className="text-[12px] text-surface-400 px-1">No response for this message.</p>
+                ) : (
+                  turn.assistants.map(m => {
+                    const { summary, steps } = assistantDisplayParts(m);
+                    return (
+                      <div key={m.id} className="space-y-2 px-0.5">
+                        <p className="text-[10px] font-semibold uppercase tracking-wide text-surface-400">Assistant</p>
+                        <AgentTranscript steps={steps} answer={summary} />
+                      </div>
+                    );
+                  })
                 )}
-                {session.checkpointRunId && session.steps.some(s => s.kind === 'done') && (
+              </div>
+            ))}
+
+            {showLiveRun && (
+              <div className="space-y-2 border-t border-dashed border-surface-200 dark:border-surface-800 pt-3">
+                {liveQuery && (
+                  <div className="rounded-xl bg-primary-50 dark:bg-primary-950/30 border border-primary-200 dark:border-primary-900 px-3 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-primary-600 dark:text-primary-300 mb-1">You</p>
+                    <p className="text-[13px] leading-relaxed whitespace-pre-wrap break-words text-surface-800 dark:text-surface-100">
+                      {liveQuery}
+                    </p>
+                  </div>
+                )}
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-surface-400 px-0.5">Assistant</p>
+                <AgentTranscript steps={session.steps} answer={session.lastSummary} />
+                {session.checkpointRunId
+                  && session.steps.some(s => s.kind === 'tool' && (s.tool === 'apply_edit' || s.tool === 'delete_file'))
+                  && (
                   <button
                     type="button"
                     className="text-[11px] text-primary-700 dark:text-primary-300 underline px-0.5"
@@ -987,42 +1353,17 @@ export default function CodeWorkspaceLayout() {
                     Restore this run
                   </button>
                 )}
-              </>
-            ) : focusedTurn ? (
-              <div className="space-y-3">
-                {focusedTurn.assistants.length === 0 && (
-                  <p className="text-surface-400 pt-4 text-center text-[13px]">No response for this query yet.</p>
-                )}
-                {focusedTurn.assistants.map(m => {
-                  const parts = m.content.split(/\n---\nAgent transcript\n/);
-                  const summary = (parts[0] || '').trim();
-                  const transcript = parts.slice(1).join('\n---\nAgent transcript\n').trim();
-                  return (
-                    <div key={m.id} className="space-y-2">
-                      {summary && (
-                        <p className="text-[13px] leading-relaxed whitespace-pre-wrap break-words text-surface-800 dark:text-surface-100 px-0.5">
-                          {summary}
-                        </p>
-                      )}
-                      {transcript && (
-                        <details className="rounded-md border border-surface-200 dark:border-surface-800">
-                          <summary className="cursor-pointer px-2 py-1.5 text-[11px] text-surface-500 hover:bg-surface-50 dark:hover:bg-surface-900">
-                            Agent transcript
-                          </summary>
-                          <pre className="px-2.5 pb-2 text-[11px] font-mono whitespace-pre-wrap break-words text-surface-600 dark:text-surface-300 max-h-56 overflow-auto border-t border-surface-100 dark:border-surface-800 pt-2">
-                            {transcript}
-                          </pre>
-                        </details>
-                      )}
-                    </div>
-                  );
-                })}
               </div>
-            ) : null}
+            )}
+            <div ref={chatEndRef} />
           </div>
 
           <div
             className="border-t border-surface-200 dark:border-surface-800 px-2 pt-2 pb-2 flex-shrink-0 space-y-1.5"
+            onPaste={e => {
+              // Single handler on the composer shell (do not also bind textarea — that doubles attaches).
+              void pasteClipboardImages(e);
+            }}
             onKeyDown={e => {
               if (e.key === 'Tab' && e.shiftKey) {
                 e.preventDefault();
@@ -1031,27 +1372,42 @@ export default function CodeWorkspaceLayout() {
             }}
           >
             {attachments.length > 0 && (
-              <div className="flex flex-wrap gap-1">
+              <div className="flex flex-wrap gap-1.5">
                 {attachments.map(a => (
                   <span
                     key={a.path}
-                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-surface-100 dark:bg-surface-800 text-[10px]"
-                    title={a.notice}
+                    className="inline-flex items-center gap-1.5 pl-0.5 pr-1.5 py-0.5 rounded-lg bg-surface-100 dark:bg-surface-800 border border-surface-200/80 dark:border-surface-700 text-[10px] max-w-[11rem]"
+                    title={a.notice || a.name}
                   >
-                    <span className={`font-semibold uppercase ${
-                      a.understand === 'vision' ? 'text-emerald-600'
-                        : a.understand === 'doc-text' ? 'text-sky-600'
-                          : 'text-amber-600'
-                    }`}
-                    >
-                      {a.understand === 'doc-text' ? 'doc' : a.understand}
+                    {a.previewDataUrl || (a.kind === 'image' && a.mime.startsWith('image/')) ? (
+                      a.previewDataUrl ? (
+                        <img
+                          src={a.previewDataUrl}
+                          alt=""
+                          className="w-9 h-9 rounded-md object-cover shrink-0 bg-black/40"
+                        />
+                      ) : (
+                        <span className="w-9 h-9 rounded-md shrink-0 bg-surface-200 dark:bg-surface-700 animate-pulse" />
+                      )
+                    ) : null}
+                    <span className="min-w-0 flex flex-col leading-tight">
+                      <span className={`font-semibold uppercase ${
+                        a.understand === 'vision' ? 'text-emerald-600 dark:text-emerald-400'
+                          : a.understand === 'doc-text' ? 'text-sky-600 dark:text-sky-400'
+                            : a.understand === 'ocr' ? 'text-violet-600 dark:text-violet-400'
+                              : 'text-amber-600 dark:text-amber-400'
+                      }`}
+                      >
+                        {a.understand === 'doc-text' ? 'doc' : a.understand}
+                      </span>
+                      <span className="truncate text-surface-600 dark:text-surface-300">{a.name}</span>
                     </span>
-                    <span className="truncate max-w-[6rem]">{a.name}</span>
                     <button
                       type="button"
                       disabled={busy}
                       onClick={() => setAttachments(prev => prev.filter(x => x.path !== a.path))}
-                      className="opacity-60 hover:opacity-100"
+                      className="opacity-60 hover:opacity-100 shrink-0 self-start mt-0.5"
+                      title="Remove"
                     >
                       <X className="w-3 h-3" />
                     </button>
@@ -1059,26 +1415,29 @@ export default function CodeWorkspaceLayout() {
                 ))}
               </div>
             )}
-            <textarea
-              value={task}
-              onChange={e => setTask(e.target.value)}
-              rows={2}
-              placeholder={MODE_PLACEHOLDERS[agentMode]}
-              className="w-full bg-transparent border-0 focus:outline-none focus:ring-0 text-[13px] resize-none text-surface-900 dark:text-surface-100 placeholder:text-surface-400 px-0.5 py-0.5 min-h-[2.5rem] max-h-28"
-              disabled={busy || voiceBusy}
-              onKeyDown={e => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
-                  if (!busy) void runAgent();
-                }
-              }}
-            />
-            <div className="flex items-center gap-1 min-w-0">
+            <div className="composer-shell flex flex-col gap-2 p-2.5 sm:p-3">
+              <textarea
+                ref={taskInputRef}
+                value={task}
+                onChange={e => setTask(e.target.value)}
+                rows={1}
+                placeholder={MODE_PLACEHOLDERS[agentMode]}
+                className="composer-textarea w-full bg-transparent border-0 focus:outline-none focus:ring-0 text-[13px] leading-relaxed resize-none text-surface-900 dark:text-surface-100 placeholder:text-surface-400 px-1 py-1.5 min-h-[2.5rem] max-h-[min(40vh,20rem)]"
+                disabled={busy || voiceBusy}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    if (!busy) void runAgent();
+                  }
+                }}
+              />
+              <div className="flex items-center gap-1 min-w-0 pt-1 border-t border-surface-200/70 dark:border-surface-800/80">
               <ComposerModelBar
                 mode={agentMode}
                 disabled={busy}
                 onModeChange={m => void changeMode(m)}
                 workspaceRoot={workspaceRoot}
+                thinClient={thinClient}
               />
               <button
                 type="button"
@@ -1096,7 +1455,7 @@ export default function CodeWorkspaceLayout() {
                 disabled={busy}
                 onClick={() => void attachFiles()}
                 className="h-7 w-7 shrink-0 rounded-md flex items-center justify-center text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-800 disabled:opacity-40"
-                title="Attach file"
+                title="Attach file (or Ctrl+V a screenshot)"
               >
                 <ImagePlus className="w-3.5 h-3.5" />
               </button>
@@ -1120,6 +1479,7 @@ export default function CodeWorkspaceLayout() {
                   <ArrowUp className="w-3.5 h-3.5 stroke-[2.5]" />
                 </button>
               )}
+            </div>
             </div>
           </div>
         </aside>

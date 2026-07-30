@@ -125,6 +125,9 @@ pub struct GenerationChunk {
     /// Assembled tool calls (typically on the final chunk when finish_reason is tool_calls).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_calls: Option<Vec<ToolCall>>,
+    /// DeepSeek / reasoner thinking delta (separate from answer `text`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning: Option<String>,
 }
 
 impl Default for GenerationChunk {
@@ -135,6 +138,7 @@ impl Default for GenerationChunk {
             tokens_generated: 0,
             tokens_per_sec: 0.0,
             tool_calls: None,
+            reasoning: None,
         }
     }
 }

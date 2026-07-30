@@ -67,7 +67,7 @@ export interface AnswerStage {
 
 /**
  * Cross-file / flow questions that warrant the Codebase Explorer LLM rather than a
- * single-symbol extractive answer (e.g. "how does a message get from ChatView to the
+ * single-symbol extractive answer (e.g. "how does a message get from UserPanel to the
  * backend?", "where is hybrid search used?").
  */
 export function isMultiFileQuestion(question: string): boolean {

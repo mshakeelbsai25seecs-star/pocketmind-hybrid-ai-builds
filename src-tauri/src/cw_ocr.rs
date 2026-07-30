@@ -25,7 +25,37 @@ fn truncate(s: String) -> String {
     out
 }
 
-/// OCR an image file. Tries tesseract, then Windows PowerShell OCR helper.
+fn preferred_ocr_engine() -> crate::ocr_settings::OcrEngine {
+    if let Ok(engine) = std::env::var("NEXUS_OCR_ENGINE") {
+        return crate::ocr_settings::OcrEngine::parse(&engine);
+    }
+    if let Ok(db) = crate::database::Database::new() {
+        let cfg = crate::ocr_settings::load_ocr_image_rag_config(&db, false);
+        return crate::ocr_settings::OcrEngine::parse(&cfg.ocr_engine);
+    }
+    crate::ocr_settings::OcrEngine::Auto
+}
+
+async fn try_unlimited_ocr(path: &Path) -> Option<OcrResult> {
+    let path_buf = path.to_path_buf();
+    let result = tokio::task::spawn_blocking(move || {
+        crate::unlimited_ocr::ocr_with_unlimited(&path_buf)
+    })
+    .await
+    .ok()?
+    .ok()?;
+    if !result.ok || result.text.trim().is_empty() {
+        return None;
+    }
+    Some(OcrResult {
+        text: truncate(result.text),
+        engine: result.engine,
+        ok: true,
+        message: result.message,
+    })
+}
+
+/// OCR an image file. Optional Unlimited-OCR → Tesseract → Windows OCR.
 pub async fn ocr_image(path: &str) -> AppResult<OcrResult> {
     let p = Path::new(path.trim());
     if !p.is_file() {
@@ -50,18 +80,40 @@ pub async fn ocr_image(path: &str) -> AppResult<OcrResult> {
         });
     }
 
-    if let Some(r) = try_tesseract(p).await {
-        return Ok(r);
+    let engine = preferred_ocr_engine();
+    let try_unlimited = matches!(
+        engine,
+        crate::ocr_settings::OcrEngine::Unlimited | crate::ocr_settings::OcrEngine::Auto
+    ) && (matches!(engine, crate::ocr_settings::OcrEngine::Unlimited)
+        || crate::unlimited_ocr::unlimited_model_on_disk());
+
+    if try_unlimited {
+        if let Some(r) = try_unlimited_ocr(p).await {
+            return Ok(r);
+        }
+        if matches!(engine, crate::ocr_settings::OcrEngine::Unlimited) {
+            // Fall through to legacy with a clear label path below.
+        }
     }
-    if let Some(r) = try_windows_ocr(p).await {
-        return Ok(r);
+
+    if !matches!(engine, crate::ocr_settings::OcrEngine::Unlimited) || try_unlimited {
+        if let Some(r) = try_tesseract(p).await {
+            return Ok(r);
+        }
+        if let Some(r) = try_windows_ocr(p).await {
+            return Ok(r);
+        }
     }
 
     Ok(OcrResult {
         text: String::new(),
         engine: "none".to_string(),
         ok: false,
-        message: "No local OCR engine found. Install Tesseract OCR and ensure `tesseract` is on PATH, or use an org/online vision model.".to_string(),
+        message: if matches!(engine, crate::ocr_settings::OcrEngine::Unlimited) {
+            "Unlimited-OCR failed or unavailable. Install CUDA + weights (Settings → Scanned PDFs), or switch OCR engine to Auto/Legacy.".to_string()
+        } else {
+            "No local OCR engine found. Install Tesseract OCR and ensure `tesseract` is on PATH, or use an org/online vision model.".to_string()
+        },
     })
 }
 

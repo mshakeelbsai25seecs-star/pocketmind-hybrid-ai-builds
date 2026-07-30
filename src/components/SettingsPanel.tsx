@@ -8,6 +8,9 @@ import { Key, Shield, Cpu, Palette, Globe, Database, ExternalLink, Trash2, Check
 import { useAppStore } from '../store';
 import { CHAT_API_PROVIDERS } from '../apiProviders';
 import { validateApiKey, type ApiKeyValidation } from '../apiKeyValidation';
+import { onOpenExternal, openExternal } from '../openExternal';
+import { fetchDeploymentConfig } from '../deploymentConfig';
+import type { RuntimeDiagnostics, SystemInfo } from '../types';
 
 type SettingsTab = 'general' | 'providers' | 'mcp' | 'deployment' | 'security' | 'audit' | 'advanced';
 
@@ -19,6 +22,9 @@ export default function SettingsPanel() {
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
   const [validating, setValidating] = useState<Record<string, boolean>>({});
   const [validation, setValidation] = useState<Record<string, ApiKeyValidation | null>>({});
+  const [appVersion, setAppVersion] = useState('…');
+  const [advancedBusy, setAdvancedBusy] = useState(false);
+  const [advancedMessage, setAdvancedMessage] = useState('');
 
   useEffect(() => {
     try {
@@ -32,6 +38,61 @@ export default function SettingsPanel() {
       /* ignore */
     }
   }, []);
+
+  useEffect(() => {
+    if (activeTab !== 'advanced') return;
+    invoke<SystemInfo>('get_system_info')
+      .then(info => setAppVersion(info.app_version || '1.0.0'))
+      .catch(() => setAppVersion('1.0.0'));
+  }, [activeTab]);
+
+  const openDataFolder = async () => {
+    setAdvancedBusy(true);
+    setAdvancedMessage('');
+    try {
+      const config = await fetchDeploymentConfig();
+      const root = (config.dataRoot || '').trim();
+      if (!root) throw new Error('Data root is not configured. Check Settings → Deployment.');
+      await openExternal(root);
+      setAdvancedMessage(`Opened: ${root}`);
+    } catch (err) {
+      setAdvancedMessage(String(err));
+    } finally {
+      setAdvancedBusy(false);
+    }
+  };
+
+  const generateDebugReport = async () => {
+    setAdvancedBusy(true);
+    setAdvancedMessage('');
+    try {
+      const diag = await invoke<RuntimeDiagnostics>('get_runtime_diagnostics', {
+        selectedModelPath: store.currentModel || null,
+        modelsDir: store.modelsDir,
+      });
+      const report = [
+        'PocketMind Hybrid AI Debug Report',
+        `App version: ${diag.app_version}`,
+        `Current dir: ${diag.current_dir}`,
+        `Executable dir: ${diag.executable_dir}`,
+        `llama-server found: ${diag.llama_server_found}`,
+        `Runtime path: ${diag.llama_server_path || 'missing'}`,
+        `Selected model: ${diag.selected_model_path || 'none'}`,
+        `Models folder exists: ${diag.models_dir_exists}`,
+        `CPU: ${diag.cpu_brand || 'unknown'}`,
+        `GPUs: ${diag.gpu_summary.join(', ') || 'none detected'}`,
+        '',
+        ...diag.checks.map(c => `[${c.status.toUpperCase()}] ${c.label}: ${c.message}`),
+      ].join('\n');
+      await navigator.clipboard.writeText(report);
+      setAppVersion(diag.app_version || appVersion);
+      setAdvancedMessage('Debug report copied to clipboard.');
+    } catch (err) {
+      setAdvancedMessage(String(err));
+    } finally {
+      setAdvancedBusy(false);
+    }
+  };
 
   const runValidate = async (provider: string, key?: string) => {
     setValidating(prev => ({ ...prev, [provider]: true }));
@@ -103,7 +164,7 @@ export default function SettingsPanel() {
                 <div>
                   <label className="block text-sm font-medium mb-2">Accent Color</label>
                   <div className="flex gap-2">
-                    {['#22c55e', '#16a34a', '#a3a3a3', '#f5f5f5', '#0a0a0a'].map(color => (
+                    {['#4ade80', '#86efac', '#22c55e', '#a3a3a3', '#f5f5f5', '#0a0a0a'].map(color => (
                       <button key={color} onClick={() => setAccentColor(color)} className={`w-8 h-8 rounded-full transition-all ${accentColor === color ? 'ring-2 ring-offset-2 ring-surface-400 scale-110' : ''}`} style={{ backgroundColor: color }} />
                     ))}
                   </div>
@@ -150,7 +211,13 @@ export default function SettingsPanel() {
                           {provider.freeModels && <span className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1"><CheckCircle className="w-3 h-3" />Free-tier models available</span>}
                         </div>
                       </div>
-                      <a href={provider.url} target="_blank" rel="noopener noreferrer" className="text-xs text-primary-600 dark:text-primary-400 flex items-center gap-1 hover:underline">Get key <ExternalLink className="w-3 h-3" /></a>
+                      <button
+                        type="button"
+                        onClick={onOpenExternal(provider.url)}
+                        className="text-xs text-primary-600 dark:text-primary-400 flex items-center gap-1 hover:underline"
+                      >
+                        Get key <ExternalLink className="w-3 h-3" />
+                      </button>
                     </div>
                     <div className="flex gap-2">
                       <input
@@ -215,23 +282,31 @@ export default function SettingsPanel() {
             <div className="glass-panel rounded-xl p-6 space-y-4">
               <h3 className="font-semibold flex items-center gap-2"><Database className="w-5 h-5 text-primary-500" />Local Data</h3>
               <div className="space-y-3">
-                <div className="flex items-center justify-between p-3 rounded-lg bg-surface-50 dark:bg-surface-900">
-                  <div><p className="font-medium text-sm">Database</p><p className="text-xs text-surface-500">SQLite with WAL mode</p></div>
-                  <button className="btn-secondary text-sm">Open Folder</button>
+                <div className="flex items-center justify-between p-3 rounded-lg bg-surface-50 dark:bg-surface-900 gap-3">
+                  <div><p className="font-medium text-sm">Database</p><p className="text-xs text-surface-500">SQLite with WAL mode — opens the configured data root</p></div>
+                  <button type="button" onClick={() => void openDataFolder()} disabled={advancedBusy} className="btn-secondary text-sm disabled:opacity-50">Open Folder</button>
                 </div>
-                <div className="flex items-center justify-between p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800">
-                  <div><p className="font-medium text-sm text-red-700 dark:text-red-300">Reset Application</p><p className="text-xs text-red-600 dark:text-red-400">Clear all data</p></div>
-                  <button className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm transition-colors">Reset</button>
+                <div className="flex items-center justify-between p-3 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 gap-3">
+                  <div><p className="font-medium text-sm text-red-700 dark:text-red-300">Reset Application</p><p className="text-xs text-red-600 dark:text-red-400">Factory wipe is not shipped — delete/relocate the data root manually after Backup</p></div>
+                  <button
+                    type="button"
+                    className="px-3 py-1.5 rounded-lg bg-red-600/50 text-white text-sm cursor-not-allowed"
+                    title="Factory reset is not implemented in 1.0.0"
+                    onClick={() => window.alert('Factory reset is not implemented. Export a backup first, then remove or relocate your data root folder (see Settings → Deployment).')}
+                  >
+                    Reset
+                  </button>
                 </div>
               </div>
             </div>
             <div className="glass-panel rounded-xl p-6">
               <h3 className="font-semibold flex items-center gap-2 mb-4"><AlertTriangle className="w-5 h-5 text-yellow-500" />Diagnostics</h3>
               <div className="space-y-2 text-sm text-surface-500">
-                <p>App Version: 0.1.0</p>
+                <p>App Version: {appVersion}</p>
                 <p>Database: SQLite (encrypted at rest)</p>
                 <p>Telemetry: Disabled (privacy-first)</p>
-                <button className="btn-secondary text-sm mt-2">Generate Debug Report</button>
+                <button type="button" onClick={() => void generateDebugReport()} disabled={advancedBusy} className="btn-secondary text-sm mt-2 disabled:opacity-50">Generate Debug Report</button>
+                {advancedMessage && <p className="text-xs text-surface-600 dark:text-surface-300 mt-2 break-words">{advancedMessage}</p>}
               </div>
             </div>
           </div>

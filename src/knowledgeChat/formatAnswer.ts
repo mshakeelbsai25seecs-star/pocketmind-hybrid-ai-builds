@@ -277,7 +277,7 @@ function stripMultiSourceNoise(text: string): string {
 
 function stripProseSourceArtifacts(text: string): string {
   // Never run empty-paren / punctuation cleanup inside ``` fences — that shreds
-  // real code like `ChatView()`, `async () =>`, and `input.trim()`.
+  // real code like `UserPanel()`, `async () =>`, and `input.trim()`.
   const out = transformOutsideFencedCode(text, segment => segment
     .replace(/\bAccording to\s+Source\s+\d+[^[\n.]*/gi, '')
     .replace(/\bAccording to\s+Source\s+\d+\s*[-–—][^[\]]+(?=\[Source:|\s*$)/gi, '')

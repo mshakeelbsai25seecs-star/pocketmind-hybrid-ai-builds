@@ -22,6 +22,7 @@ const props = (properties: Record<string, unknown>, required: string[] = []) => 
 
 const str = (description: string) => ({ type: 'string', description });
 const int = (description: string) => ({ type: 'integer', description });
+const bool = (description: string) => ({ type: 'boolean', description });
 const arrStr = (description: string) => ({
   type: 'array',
   items: { type: 'string' },
@@ -55,6 +56,18 @@ const BUILTIN_SCHEMAS: Record<CodeWorkspaceToolName, OpenAiFunctionTool> = {
         path: str('Relative path to search under'),
         glob: str('Optional file glob filter'),
       }, ['pattern']),
+    },
+  },
+  codebase_search: {
+    type: 'function',
+    function: {
+      name: 'codebase_search',
+      description:
+        'Find where something lives using a natural-language question (e.g. "where is the rule severity set?"). Returns ranked files with matching line numbers. Best first step when you do not know which file to open.',
+      parameters: props({
+        query: str('Natural-language question or several keywords'),
+        glob: str('Optional file glob filter, e.g. *.xml'),
+      }, ['query']),
     },
   },
   repo_map: {
@@ -121,13 +134,36 @@ const BUILTIN_SCHEMAS: Record<CodeWorkspaceToolName, OpenAiFunctionTool> = {
     type: 'function',
     function: {
       name: 'run_command',
-      description: 'Run an allowlisted sandbox command (argv) or a short script.',
+      description:
+        'Run an allowlisted command (argv) or a short script in the workspace, and read its output. '
+        + 'Use this to verify your work: tests, builds, type checks, and read-only git inspection. '
+        + 'Set background true for processes that do not exit on their own (dev servers, watchers).',
       parameters: props({
         argv: arrStr('Argv-only command, e.g. ["cargo","test"]'),
         language: str('Script language when using code mode'),
         code: str('Script source when using code mode'),
         args: arrStr('Extra args for script mode'),
+        background: bool('Leave the process running and return immediately'),
       }),
+    },
+  },
+  read_terminal: {
+    type: 'function',
+    function: {
+      name: 'read_terminal',
+      description: 'Read newer output from a background terminal started by run_command.',
+      parameters: props({
+        id: str('Terminal id returned by run_command'),
+        lines: int('How many trailing lines to return (default 120)'),
+      }, ['id']),
+    },
+  },
+  kill_terminal: {
+    type: 'function',
+    function: {
+      name: 'kill_terminal',
+      description: 'Stop a background terminal started by run_command.',
+      parameters: props({ id: str('Terminal id') }, ['id']),
     },
   },
   ask_followup: {

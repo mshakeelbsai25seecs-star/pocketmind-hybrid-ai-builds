@@ -15,6 +15,7 @@ import StorageManager from './StorageManager';
 import BackupRestore from './BackupRestore';
 import HelpCenter from './HelpCenter';
 import ImageStudio from './ImageStudio';
+import DocumentStudio from './DocumentStudio';
 import EnterpriseServer from './EnterpriseServer';
 import SocWorkspace from './SocWorkspace';
 import KnowledgeChatWorkspace from './knowledgeChat/KnowledgeChatWorkspace';
@@ -52,7 +53,7 @@ export default function Layout() {
   // start briefly sees setupCompleted=false and traps the user on the wizard.
   useEffect(() => {
     if (!hydrated) return;
-    if (!setupCompleted && activeView === 'chat') {
+    if (!setupCompleted && (activeView === 'chat' || activeView === 'home')) {
       setActiveView('setup');
     }
   }, [hydrated, setupCompleted, activeView, setActiveView]);
@@ -82,6 +83,7 @@ export default function Layout() {
         {activeView === 'models' && <ModelManager />}
         {activeView === 'enterprise-server' && <EnterpriseServer />}
         {activeView === 'image-studio' && <ImageStudio />}
+        {activeView === 'document-studio' && <DocumentStudio />}
         {activeView === 'diagnostics' && <DiagnosticsPanel />}
         {activeView === 'characters' && <CharacterEditor />}
         {activeView === 'settings' && <SettingsPanel />}

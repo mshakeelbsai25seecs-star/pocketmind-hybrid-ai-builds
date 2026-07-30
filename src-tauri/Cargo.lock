@@ -2649,6 +2649,7 @@ dependencies = [
  "nvml-wrapper",
  "ort",
  "pdf-extract",
+ "pocketcode-workspace",
  "rand 0.8.6",
  "rayon",
  "reqwest",
@@ -3229,6 +3230,21 @@ dependencies = [
  "fdeflate",
  "flate2",
  "miniz_oxide",
+]
+
+[[package]]
+name = "pocketcode-workspace"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "hex",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
+ "uuid",
+ "walkdir",
 ]
 
 [[package]]

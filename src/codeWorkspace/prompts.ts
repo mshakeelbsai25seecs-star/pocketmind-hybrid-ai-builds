@@ -8,25 +8,70 @@ const SHARED_FORMAT_JSON = `CRITICAL OUTPUT FORMAT:
 
 const SHARED_FORMAT_NATIVE = `TOOL USE:
 - Use the provided function tools via the API (native tool calling).
-- You may call multiple tools in one turn when helpful; results will be returned before you continue.
+- Batch independent calls in the SAME turn (e.g. two reads, or grep + read) instead of one call per turn.
+- Never describe a tool call in prose instead of actually calling it.
 - When finished, call the done tool with a clear summary for the user.
 - Do not invent file paths or code you did not receive in a tool result.`;
 
-const READ_TOOLS_DOC = `{"tool":"repo_map","args":{}}
-{"tool":"find_symbol","args":{"query":"handleSend"}}
-{"tool":"read_symbol","args":{"path":"src/ChatView.tsx","name":"handleSend"}}
+const READ_TOOLS_DOC = `{"tool":"codebase_search","args":{"query":"where is user authentication handled","glob":"*.ts"}}
+{"tool":"repo_map","args":{}}
+{"tool":"find_symbol","args":{"query":"fetchUser"}}
+{"tool":"read_symbol","args":{"path":"src/api/auth.ts","name":"fetchUser"}}
 {"tool":"list_dir","args":{"path":"."}}
 {"tool":"glob_file_search","args":{"pattern":"**/*.ts"}}
 {"tool":"grep","args":{"pattern":"TODO","path":".","glob":"*.rs"}}
 {"tool":"read_file","args":{"path":"src/main.rs","offset":0,"limit":120}}
 {"tool":"done","args":{"summary":"what you finished"}}`;
 
-const CONTEXT_RULES = `Context rules:
+const SEARCH_POLICY = `SEARCH POLICY — always pick the cheapest tool that can answer, in this order:
+1. Use the WORKSPACE BRIEF in this prompt first. It already lists folders and file types — do not rediscover them.
+2. User named a symbol / function / class → find_symbol, then read_symbol.
+3. User named a file → read_file that path directly. Never list_dir(".") just to locate a name you already know.
+4. You know WHAT you want but not WHERE it is → one codebase_search with the user's own wording; it returns ranked files with line numbers. Then read_file those windows.
+5. You know the exact literal (error string, key, tag name) → one grep from the workspace root, with a glob to narrow file types.
+6. list_dir / glob_file_search only when you still do not know what exists.
+7. Data/doc workspaces (xml, md, json, csv, txt) have few or no code symbols — use codebase_search / grep + read_file instead of repo_map/find_symbol.`;
+
+const NO_REPEAT_POLICY = `NO REPEATED WORK — hard rules, not suggestions:
+- Every tool result you already received is still in this conversation. Calling a tool again with the same arguments returns identical bytes, wastes your budget, and is flagged as a duplicate.
+- Never read the same file window twice. Need more of a file? Change offset — do not repeat the same offset.
+- Never repeat a grep pattern, and never walk folder-by-folder with the same pattern: grep once from the root.
+- A grep with no matches means the pattern is wrong. Change the pattern or switch tools; do not retry it.
+- Two or three well-aimed calls beat ten broad ones. If you notice yourself still exploring, stop and answer.`;
+
+const CONTEXT_RULES = `CONTEXT RULES:
 - NEVER dump a whole large file. Default read_file window is 120 lines; max useful limit is 400. Page with offset.
-- Prefer find_symbol / repo_map / grep / glob_file_search before broad reads.
-- Never invent file paths or code you did not receive in a tool result.`;
+- Never read_file images/binaries; screenshot OCR/attachment text is already in the user message when provided.
+- Never invent file paths, symbol names, or code you did not receive in a tool result.`;
+
+const FINISH_POLICY = `FINISHING — the summary you pass to done IS what the user reads:
+- The moment your tool results can answer the question, stop searching and finish.
+- Write that summary for a human: clean Markdown, a short bold lead or heading, concrete evidence (file path, line, exact value) taken from tool results.
+- No tool JSON, no raw file dumps, and no "I grepped then read the file" narration in the summary.
+- If evidence is incomplete, say what you found and exactly what is missing — then finish anyway.
+- Fenced code blocks only for real code/config; inline backticks for single identifiers.
+- Your tool budget is about 20 turns. Duplicate calls burn it for nothing.`;
+
+const EFFICIENCY_RULES = `EDIT EFFICIENCY:
+- Prefer one turn: locate → read_file → apply_edit (batching tools in one turn is good).
+- Do not re-read_file after a successful apply_edit unless the next edit needs fresh context.
+- After the edit that satisfies the request, finish immediately.
+- On old_string not found: re-read that file window once, then retry once — do not use run_command/sandbox to work around line endings.`;
+
+const TERMINAL_POLICY = `TERMINAL & VERIFICATION — you are expected to check your own work:
+- run_command executes one allowlisted binary with argv (["cargo","test"]) or a short script; it is not a shell, so no pipes, &&, or redirection. Chain work by calling run_command again.
+- After edits that could break something, run the project's own check: the PROJECT COMMANDS block lists the real ones. Prefer the cheapest useful check (type check or the focused test) over a full build.
+- Read the output before you claim success. If it failed, fix the cause and re-run that same command once; if it still fails, report the exact error instead of guessing further.
+- Processes that never exit (dev servers, watchers) MUST use background true. Then read_terminal {"id":...} for output, and kill_terminal when you are done with it. Never run a server in the foreground — it will hit the timeout.
+- git is available read-only for verification (status, diff, log, show, ls-files). Committing, pushing, resetting and branch changes belong to the user; never attempt them.
+- Say what you ran and what it returned in your final summary — "tests pass" without the command is not evidence.`;
 
 const MCP_TOOL_DOC = `{"tool":"mcp__server-id__tool_name","args":{}}`;
+
+const TERMINAL_TOOLS_DOC = `{"tool":"run_command","args":{"argv":["npm","run","test"]}}
+{"tool":"run_command","args":{"argv":["npm","run","dev"],"background":true}}
+{"tool":"read_terminal","args":{"id":"<terminal id from run_command>"}}
+{"tool":"kill_terminal","args":{"id":"<terminal id>"}}`;
 
 export function systemPromptForMode(
   mode: PocketCodeAgentMode,
@@ -34,11 +79,26 @@ export function systemPromptForMode(
     skillsMarkdown?: string;
     mcpCatalog?: string;
     toolProtocol?: ToolProtocol;
+    /** Folder/file inventory gathered once per run so the model never re-discovers it. */
+    workspaceBrief?: string;
+    /** Optional project instructions from app-side rules storage. */
+    projectRules?: string;
+    /** Detected test/build/typecheck commands so verification uses the project's own tooling. */
+    projectCommands?: string;
   },
 ): string {
   const protocol: ToolProtocol = extras?.toolProtocol || 'json';
   const skillsBlock = extras?.skillsMarkdown?.trim()
     ? `\n${extras.skillsMarkdown.trim()}\n`
+    : '';
+  const briefBlock = extras?.workspaceBrief?.trim()
+    ? `\nWORKSPACE BRIEF (already gathered for you — do not re-discover this):\n${extras.workspaceBrief.trim()}\n`
+    : '';
+  const rulesBlock = extras?.projectRules?.trim()
+    ? `\nPROJECT RULES (app-side rules for this workspace — follow these):\n${extras.projectRules.trim()}\n`
+    : '';
+  const commandsBlock = extras?.projectCommands?.trim()
+    ? `\n${extras.projectCommands.trim()}\n`
     : '';
   const mcpBlock = extras?.mcpCatalog?.trim()
     ? `\n${extras.mcpCatalog.trim()}\n`
@@ -65,9 +125,16 @@ ${format}
 
 ${toolsSection}
 ${protocol === 'json' ? `{"tool":"ask_followup","args":{"question":"clarifying question for the user"}}${mcpLine}` : 'Use ask_followup when you need clarification.'}
-${mcpBlock}${skillsBlock}
-Rules:
+${briefBlock}${rulesBlock}${mcpBlock}${skillsBlock}
+${SEARCH_POLICY}
+
+${NO_REPEAT_POLICY}
+
 ${CONTEXT_RULES}
+
+${FINISH_POLICY}
+
+Mode rules:
 - Read-only only. If the user asks you to change code, explain what you would do and suggest switching to Agent or Plan mode.
 - MCP tools still require user confirmation. Prefer read-only MCP tools in Ask mode.
 ${finishRule}
@@ -82,9 +149,16 @@ ${toolsSection}
 ${protocol === 'json' ? `{"tool":"ask_followup","args":{"question":"clarifying question"}}
 {"tool":"create_plan","args":{"title":"Short title","markdown":"# Plan\\n...","todos":["step 1","step 2"]}}
 {"tool":"update_plan","args":{"id":"plan-id","markdown":"...","todos":["..."]}}${mcpLine}` : 'Use create_plan / update_plan / ask_followup as needed.'}
-${mcpBlock}${skillsBlock}
-Rules:
+${briefBlock}${rulesBlock}${mcpBlock}${skillsBlock}
+${SEARCH_POLICY}
+
+${NO_REPEAT_POLICY}
+
 ${CONTEXT_RULES}
+
+${FINISH_POLICY}
+
+Mode rules:
 - Research with read tools first. Ask clarifying questions if requirements are unclear.
 - When ready, call create_plan with markdown (goals, files to touch, steps, risks) and a todos array.
 - Do not apply_edit or run_command. After create_plan succeeds, ${protocol === 'native' ? 'call done' : 'emit done'}.
@@ -100,13 +174,24 @@ ${protocol === 'json' ? `{"tool":"ask_followup","args":{"question":"clarifying q
 {"tool":"apply_edit","args":{"path":"src/main.rs","old_string":"...","new_string":"..."}}
 {"tool":"delete_file","args":{"path":"obsolete.txt"}}
 {"tool":"run_command","args":{"language":"python","code":"print(1)"}}
-{"tool":"run_command","args":{"argv":["cargo","test"]}}${mcpLine}` : 'Use apply_edit / delete_file / run_command / ask_followup as allowed.'}
-${mcpBlock}${skillsBlock}
-Rules:
+${TERMINAL_TOOLS_DOC}${mcpLine}` : 'Use apply_edit / delete_file / run_command / read_terminal / kill_terminal / ask_followup as allowed.'}
+${briefBlock}${rulesBlock}${commandsBlock}${mcpBlock}${skillsBlock}
+${SEARCH_POLICY}
+
+${NO_REPEAT_POLICY}
+
 ${CONTEXT_RULES}
-- Prefer evidence first: attached screenshot/OCR text, logs, grep errors, allowlisted sandbox — before large edits.
+
+${EFFICIENCY_RULES}
+
+${TERMINAL_POLICY}
+
+${FINISH_POLICY}
+
+Mode rules:
+- Prefer evidence first: attached screenshot/OCR text, logs, grep errors, a command you actually ran — before large edits.
 - apply_edit old_string MUST be copied from a tool result. delete_file requires user confirmation.
-- run_command is allowlisted argv-only. When fixed, verify then ${protocol === 'native' ? 'call done' : 'emit done JSON'}.
+- Reproduce the failure with a command when you can, fix it, then re-run that command to prove the fix before ${protocol === 'native' ? 'calling done' : 'emitting done JSON'}.
 `;
 
     case 'agent':
@@ -120,16 +205,26 @@ ${protocol === 'json' ? `{"tool":"apply_edit","args":{"path":"src/main.rs","old_
 {"tool":"apply_edit","args":{"path":"add.py","old_string":"","new_string":"print(1+2)\\n"}}
 {"tool":"delete_file","args":{"path":"obsolete.txt"}}
 {"tool":"run_command","args":{"language":"python","code":"print(1)"}}
-{"tool":"run_command","args":{"argv":["cargo","test"]}}${mcpLine}` : 'Use apply_edit / delete_file / run_command and MCP tools as allowed.'}
-${mcpBlock}${skillsBlock}
-Rules:
+${TERMINAL_TOOLS_DOC}${mcpLine}` : 'Use apply_edit / delete_file / run_command / read_terminal / kill_terminal and MCP tools as allowed.'}
+${briefBlock}${rulesBlock}${commandsBlock}${mcpBlock}${skillsBlock}
+${SEARCH_POLICY}
+
+${NO_REPEAT_POLICY}
+
 ${CONTEXT_RULES}
+
+${EFFICIENCY_RULES}
+
+${TERMINAL_POLICY}
+
+${FINISH_POLICY}
+
+Mode rules:
 - CREATE or OVERWRITE project files ONLY with apply_edit (auto-applied; checkpoints allow undo).
 - New file: apply_edit with old_string "" and new_string = full contents.
 - Default new-file path is the workspace root (e.g. "add.py", "README.md"). Do NOT invent a subdirectory (e.g. "new_folder/...") unless the user asks for one or an existing project layout clearly requires it (e.g. "src/main.rs" in a Rust/Node tree).
 - apply_edit old_string MUST be copied from a tool result (unique match).
 - delete_file requires user confirmation.
-- run_command is allowlisted argv-only (not a freeform shell).
 - MCP: call enabled tools by name (mcp__server__tool); user must confirm each tool (or always-allow for the session).
 ${finishRule}
 `;
@@ -150,6 +245,9 @@ const TOOL_NAMES = new Set([
   'apply_edit',
   'delete_file',
   'run_command',
+  'read_terminal',
+  'kill_terminal',
+  'codebase_search',
   'ask_followup',
   'create_plan',
   'update_plan',

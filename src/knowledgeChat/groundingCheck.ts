@@ -24,7 +24,7 @@ function sourceCorpus(
 /**
  * Token overlap between an LLM draft and the attached symbol body.
  * Symbol-name presence alone is NOT enough — Phi-3 often invents behavior
- * while still mentioning `handleSend`.
+ * while still mentioning `submitForm`.
  */
 export function symbolBodyGroundingScore(answer: string, sourceText: string, symbols: string[]): number {
   if (!answer.trim() || !sourceText.trim()) return 0;

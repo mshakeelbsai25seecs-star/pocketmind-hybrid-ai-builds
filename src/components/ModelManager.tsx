@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/api/dialog';
-import { Download, FolderSearch, HardDrive, Link as LinkIcon, RefreshCcw, Search, Trash2, CheckCircle, AlertTriangle, FlaskConical, Globe2, KeyRound, Crown, Zap, Tags, Power } from 'lucide-react';
+import { Download, FolderSearch, HardDrive, Link as LinkIcon, RefreshCcw, Search, Trash2, CheckCircle, AlertTriangle, FlaskConical, Globe2, KeyRound, Crown, Zap, Tags, Power, Square } from 'lucide-react';
 import { useAppStore } from '../store';
 import { LocalModelRecord, OnlineChatModel, ModelCategoryId, Conversation } from '../types';
 import { MODEL_CATEGORIES, OFFLINE_CHAT_CATALOG, ONLINE_CHAT_MODELS } from '../modelCatalog';
@@ -10,6 +10,8 @@ import { CHAT_API_PROVIDERS } from '../apiProviders';
 import { validateApiKey, type ApiKeyValidation } from '../apiKeyValidation';
 import { pathPlaceholder } from '../platformPaths';
 import { answerModelLabel, remoteModelPath } from '../answerModel';
+import { onOpenExternal } from '../openExternal';
+import { filterChatSelectableLocalModels, isChatSelectableLocalModel } from '../localModels';
 
 interface DownloadProgress {
   id: string;
@@ -84,6 +86,7 @@ export default function ModelManager() {
   const [error, setError] = useState<string>('');
   const [progress, setProgress] = useState<DownloadProgress | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  const [stoppingDownload, setStoppingDownload] = useState(false);
   const [healthBusy, setHealthBusy] = useState(false);
   const [healthResult, setHealthResult] = useState<string>('');
   const [unloadBusy, setUnloadBusy] = useState(false);
@@ -137,8 +140,14 @@ export default function ModelManager() {
   }, [localModels]);
 
   const catalogQuantGroups = useMemo(() => {
-    const map = new Map<string, DownloadableModel[]>();
+    const byId = new Map<string, DownloadableModel>();
     for (const model of OFFLINE_CHAT_CATALOG) {
+      const prev = byId.get(model.id);
+      // Prefer the entry that has a download URL when catalog IDs collide.
+      if (!prev || (!prev.url && model.url)) byId.set(model.id, model);
+    }
+    const map = new Map<string, DownloadableModel[]>();
+    for (const model of byId.values()) {
       const key = quantFamilyKey(model.name);
       const list = map.get(key) || [];
       list.push(model);
@@ -152,7 +161,7 @@ export default function ModelManager() {
 
   const refreshModels = async () => {
     const models = await invoke<LocalModelRecord[]>('get_local_models');
-    setLocalModels(models);
+    setLocalModels(filterChatSelectableLocalModels(models));
   };
 
   const refreshProviders = async () => {
@@ -263,7 +272,21 @@ export default function ModelManager() {
     }
   };
 
-  const selectLocalAnswerModel = (model: LocalModelRecord) => {
+  const selectLocalAnswerModel = async (model: LocalModelRecord) => {
+    if (!isChatSelectableLocalModel(model)) {
+      announce('Select the primary GGUF (*-00001-of-*.gguf), not a secondary shard or mmproj.', true);
+      return;
+    }
+    try {
+      const exists = await invoke<boolean>('path_exists', { path: model.path });
+      if (!exists) {
+        announce('That GGUF file is missing on disk. Scan/Import again after placing the file.', true);
+        await refreshModels();
+        return;
+      }
+    } catch {
+      /* path_exists optional */
+    }
     activateAnswerModel(model.path, model.name);
   };
 
@@ -277,8 +300,9 @@ export default function ModelManager() {
     announce('Scanning selected folder for .gguf models...');
     try {
       const models = await invoke<LocalModelRecord[]>('scan_model_folder', { folderPath: modelsDir });
-      setLocalModels(models);
-      announce(`Scan complete. ${models.length} local model(s) are now in the library.`);
+      const selectable = filterChatSelectableLocalModels(models);
+      setLocalModels(selectable);
+      announce(`Scan complete. ${selectable.length} selectable local model(s) in the library (extra shards / mmproj hidden).`);
     } catch (err) {
       announce(String(err), true);
     }
@@ -298,6 +322,27 @@ export default function ModelManager() {
     }
   };
 
+  /** Copy a projector next to the GGUF so offline vision / VL pairing works. */
+  const linkMmprojBeside = async (model: LocalModelRecord) => {
+    setError('');
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: 'mmproj GGUF', extensions: ['gguf'] }],
+        title: 'Select mmproj projector for this model',
+      });
+      if (typeof selected !== 'string') return;
+      const dest = await invoke<string>('link_mmproj_beside_model', {
+        modelPath: model.path,
+        mmprojPath: selected,
+      });
+      announce(`Linked mmproj beside ${model.name}: ${dest}`);
+      await refreshModels();
+    } catch (err) {
+      announce(String(err), true);
+    }
+  };
+
   const startDownload = async (model: DownloadableModel | null) => {
     const url = model?.url || directUrl.trim();
     if (!url) {
@@ -305,9 +350,14 @@ export default function ModelManager() {
       return;
     }
     setError('');
-    announce(model?.mmprojUrl
-      ? 'Starting GGUF download, then mmproj for offline vision…'
-      : 'Starting download. Progress will stay visible in the status panel below.');
+    const shardCount = model?.shardUrls?.length ?? 0;
+    announce(
+      model?.mmprojUrl
+        ? shardCount > 0
+          ? `Starting multi-shard GGUF download (${1 + shardCount} parts), then mmproj for offline vision…`
+          : 'Starting GGUF download, then mmproj for offline vision…'
+        : 'Starting download. Progress will stay visible in the status panel below.',
+    );
     setProgress({
       id: model?.id || 'direct',
       file_name: fileNameFromUrl(url),
@@ -320,31 +370,83 @@ export default function ModelManager() {
       elapsed_secs: 0,
     });
     setDownloadingId(model?.id || 'direct');
+
+    // Always keep the Hugging Face basename (includes quant + mmproj markers).
+    // Renaming to a friendly catalog title breaks mmproj auto-pairing.
+    const mmprojBase = fileNameFromUrl(url)
+      .replace(/\.gguf$/i, '')
+      .replace(/-split-\d+-of-\d+$/i, '')
+      .replace(/-\d{5}-of-\d{5}$/i, '');
+    const mmprojLeaf = model?.mmprojUrl ? fileNameFromUrl(model.mmprojUrl) : '';
+    const mmprojName = model?.mmprojUrl
+      ? (/^mmproj[-_.]?(f16|bf16|f32|q8_0)?\.gguf$/i.test(mmprojLeaf)
+        ? `mmproj-${mmprojBase}-f16.gguf`
+        : mmprojLeaf)
+      : null;
+
+    const jobFiles = [
+      fileNameFromUrl(url),
+      ...(model?.shardUrls || []).map(fileNameFromUrl),
+      ...(mmprojName ? [mmprojName] : []),
+    ];
+
     try {
+      await invoke('begin_model_download_job', { destDir: modelsDir, files: jobFiles });
       const record = await invoke<LocalModelRecord>('download_model', {
         url,
         destDir: modelsDir,
-        name: model?.name || null,
+        name: null,
       });
+      if (model?.shardUrls?.length) {
+        for (let i = 0; i < model.shardUrls.length; i++) {
+          announce(`Downloading shard ${i + 2} of ${1 + model.shardUrls.length}…`);
+          await invoke<LocalModelRecord>('download_model', {
+            url: model.shardUrls[i],
+            destDir: modelsDir,
+            name: null,
+          });
+        }
+      }
       if (model?.mmprojUrl) {
         announce('GGUF ready. Downloading mmproj projector for vision…');
         await invoke<LocalModelRecord>('download_model', {
           url: model.mmprojUrl,
           destDir: modelsDir,
-          name: `${model.name} mmproj`,
+          name: mmprojName,
         });
       }
       await refreshModels();
       await startFreshChatForModel(record.path, record.name);
       announce(
         model?.visionCapable || model?.mmprojUrl
-          ? `Download complete (vision-ready if mmproj is beside the GGUF). Fresh chat created for ${record.name}.`
+          ? `Download complete (vision-ready if mmproj is beside the GGUF). Select the primary shard (${record.name}) in PocketCode.`
           : `Download complete. A fresh chat has been created for ${record.name}.`,
       );
     } catch (err) {
-      announce(String(err), true);
+      const msg = String(err);
+      if (/stopped by user|partial files were deleted/i.test(msg)) {
+        setProgress(null);
+        announce('Download stopped. All files for this download were removed from disk.');
+      } else {
+        announce(msg, true);
+      }
     } finally {
       setDownloadingId(null);
+      setStoppingDownload(false);
+    }
+  };
+
+  const stopDownload = async () => {
+    if (!downloadingId || stoppingDownload) return;
+    setStoppingDownload(true);
+    announce('Stopping download and clearing files…');
+    try {
+      const msg = await invoke<string>('cancel_model_download');
+      announce(msg || 'Download stopped. Files cleared.');
+      setProgress(null);
+    } catch (err) {
+      announce(String(err), true);
+      setStoppingDownload(false);
     }
   };
 
@@ -364,9 +466,6 @@ export default function ModelManager() {
         'unload_chat_model',
         { releaseKnowledgeEngines: false },
       );
-      // #region agent log
-      fetch('http://127.0.0.1:7414/ingest/28bf2132-0f52-40ef-96b9-4e681c1d7653',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d5a77'},body:JSON.stringify({sessionId:'7d5a77',runId:'unload-feature',hypothesisId:'B',location:'ModelManager.tsx:unload',message:'fe_unload_chat_model',data:{chatUnloaded:result.chat_unloaded,knowledgeReleased:result.knowledge_engines_released},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       announce(result.message || 'Model unloaded from memory.');
     } catch (err) {
       announce(String(err), true);
@@ -555,7 +654,21 @@ export default function ModelManager() {
                   <div className="space-y-3">
                     <div className="flex items-center justify-between gap-3">
                       <span className="truncate text-sm text-surface-500">{progress.file_name}</span>
-                      <span className="text-sm font-semibold">{percent.toFixed(1)}%</span>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-sm font-semibold">{percent.toFixed(1)}%</span>
+                        {downloadingId && (
+                          <button
+                            type="button"
+                            onClick={stopDownload}
+                            disabled={stoppingDownload}
+                            className="btn-secondary flex items-center gap-1.5 text-red-600 dark:text-red-400 border-red-300/50 disabled:opacity-50"
+                            title="Stop download and delete all partial/completed files for this job"
+                          >
+                            <Square className="w-3.5 h-3.5 fill-current" />
+                            {stoppingDownload ? 'Stopping…' : 'Stop & clear'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <div className="rounded-xl border border-primary-300/40 bg-primary-50/80 dark:bg-primary-950/30 px-4 py-3 flex items-end justify-between gap-3">
                       <div>
@@ -686,7 +799,7 @@ export default function ModelManager() {
                       >
                         Save key
                       </button>
-                      <button type="button" onClick={() => window.open(provider.url, '_blank')} className="btn-secondary text-xs">Get key</button>
+                      <button type="button" onClick={onOpenExternal(provider.url)} className="btn-secondary text-xs">Get key</button>
                     </div>
                     {keyValidation[provider.id] && (
                       <p className={`text-[11px] ${keyValidation[provider.id]!.ok ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'}`}>
@@ -773,7 +886,7 @@ export default function ModelManager() {
                     {group.siblings.map(sibling => (
                       <button
                         key={sibling.id}
-                        onClick={() => selectLocalAnswerModel(sibling)}
+                        onClick={() => void selectLocalAnswerModel(sibling)}
                         className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${
                           currentModel === sibling.path
                             ? 'bg-green-600 text-white'
@@ -803,8 +916,9 @@ export default function ModelManager() {
                       onClick={() => void startDownload(item)}
                       className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary-600 hover:bg-primary-500 text-white"
                       disabled={!!downloadingId || !item.url}
+                      title={item.url ? `${item.name} (${item.size})` : 'No direct URL available'}
                     >
-                      Download {item.quant}
+                      Download {item.quant}{item.params ? ` · ${item.params}` : ''}
                     </button>
                   ))}
                 </div>
@@ -814,11 +928,16 @@ export default function ModelManager() {
         </div>
 
         <div className="glass-panel rounded-xl overflow-hidden">
-          <div className="p-4 border-b border-surface-200 dark:border-surface-800 flex items-center justify-between">
+          <div className="p-4 border-b border-surface-200 dark:border-surface-800 flex items-center justify-between gap-3">
             <div>
               <h2 className="font-semibold">Local Model Library</h2>
-              <p className="text-sm text-surface-500">Models imported or found on this computer.</p>
+              <p className="text-sm text-surface-500">
+                Import or scan .gguf files on this PC, then click <span className="font-medium">Use in Chat</span>.
+                For multi-part models, select the <code className="text-xs">*-00001-of-*.gguf</code> file only (other shards stay in the same folder).
+                Text chat does not need mmproj. For offline image/PDF vision, put a matching <code className="text-xs">*mmproj*.gguf</code> in the same folder (or use Link mmproj).
+              </p>
             </div>
+            <button type="button" onClick={() => void refreshModels()} className="btn-secondary text-xs shrink-0">Refresh</button>
           </div>
           {localModels.length === 0 ? (
             <div className="p-6 text-center text-surface-500">No local models yet. Import a .gguf file or scan your model folder.</div>
@@ -841,8 +960,9 @@ export default function ModelManager() {
                     <td className="px-4 py-4 text-sm">{formatBytes(model.size_bytes)}</td>
                     <td className="px-4 py-4 text-xs text-surface-500 max-w-sm truncate" title={model.path}>{model.path}</td>
                     <td className="px-4 py-4 text-right space-x-2">
-                      <button onClick={() => selectLocalAnswerModel(model)} className={`px-3 py-1.5 rounded-lg text-sm ${currentModel === model.path ? 'bg-green-600 text-white' : 'bg-primary-600 hover:bg-primary-500 text-white'}`}>{currentModel === model.path ? 'Selected' : 'Use'}</button>
+                      <button onClick={() => void selectLocalAnswerModel(model)} className={`px-3 py-1.5 rounded-lg text-sm ${currentModel === model.path ? 'bg-green-600 text-white' : 'bg-primary-600 hover:bg-primary-500 text-white'}`}>{currentModel === model.path ? 'Selected' : 'Use in Chat'}</button>
                       <button onClick={() => void startFreshChatForModel(model.path, model.name)} className="px-3 py-1.5 rounded-lg text-sm btn-secondary">Open Chat</button>
+                      <button onClick={() => void linkMmprojBeside(model)} className="px-3 py-1.5 rounded-lg text-sm btn-secondary" title="Copy an mmproj projector into this model folder for offline vision">Link mmproj</button>
                       <button onClick={() => handleDelete(model.id)} className="p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 text-red-600 transition-colors"><Trash2 className="w-4 h-4" /></button>
                     </td>
                   </tr>
@@ -855,7 +975,10 @@ export default function ModelManager() {
         <div className="glass-panel rounded-xl overflow-hidden">
           <div className="p-4 border-b border-surface-200 dark:border-surface-800">
             <h2 className="font-semibold">Recommended Downloads</h2>
-            <p className="text-sm text-surface-500">Start with TinyLlama, Phi-3 Mini, or Qwen small models before downloading larger models.</p>
+            <p className="text-sm text-surface-500">
+              Frontier: Kimi K3 (online until weights drop), GLM-5.2, DeepSeek V4 Pro/Flash, Qwen3 Coder 480B, Llama 4 Maverick, DeepSeek V3, MiniMax M3, Qwen3.5 397B, Kimi K2.6.
+              Filter Vision / Large. Offline shards often need 160–500GB+ RAM. Tiny models are smoke tests only.
+            </p>
           </div>
           <div className="relative flex-1 p-4">
             <Search className="absolute left-7 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-400" />
@@ -880,6 +1003,14 @@ export default function ModelManager() {
                       {model.name}
                       {(model.visionCapable || model.categories.includes('vision')) && (
                         <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-sky-100 text-sky-800 dark:bg-sky-950/40 dark:text-sky-200">Vision</span>
+                      )}
+                      {parseFloat((model.params.match(/(\d+(?:\.\d+)?)/) || [])[1] || '0') >= 100 && (
+                        <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">100B+</span>
+                      )}
+                      {(model.shardUrls?.length ?? 0) > 0 && (
+                        <span className="text-[10px] uppercase px-1.5 py-0.5 rounded bg-violet-100 text-violet-900 dark:bg-violet-950/40 dark:text-violet-200">
+                          {1 + (model.shardUrls?.length ?? 0)} shards
+                        </span>
                       )}
                     </p>
                     <p className="text-xs text-surface-500">{model.params} parameters • {model.recommendedUse}</p>

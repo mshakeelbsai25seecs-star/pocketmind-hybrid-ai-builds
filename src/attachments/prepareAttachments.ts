@@ -76,7 +76,7 @@ export function chipForPath(path: string, modelPath: string | null | undefined):
       understand: vision ? 'vision' : 'unavailable',
       notice: vision
         ? 'Model will see this image'
-        : 'Selected model cannot see images — switch to a vision online/org model',
+        : 'Selected model cannot see images — use a vision online/org model, or a local VL GGUF with an mmproj file in the same folder (Models → Link mmproj). Text chat still works without mmproj.',
     };
   }
   if (isPdfPath(path)) {

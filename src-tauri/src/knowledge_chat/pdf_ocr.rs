@@ -188,6 +188,25 @@ pub fn ocr_pdf_to_markdown_sync(pdf_path: &str) -> AppResult<String> {
 
     let _slot = OcrSlot::acquire()?;
 
+    let engine_parsed = OcrEngine::parse(&engine);
+    let try_unlimited = matches!(engine_parsed, OcrEngine::Unlimited | OcrEngine::Auto)
+        && (matches!(engine_parsed, OcrEngine::Unlimited)
+            || crate::unlimited_ocr::unlimited_model_on_disk());
+
+    if try_unlimited {
+        match crate::unlimited_ocr::ocr_with_unlimited(&pdf) {
+            Ok(r) if r.ok && r.text.trim().len() >= 48 => {
+                let _ = std::fs::write(&cache_path, &r.text);
+                let raw_path = cache_path.with_extension("raw.md");
+                let _ = std::fs::write(&raw_path, &r.text);
+                return Ok(r.text);
+            }
+            Ok(_) | Err(_) => {
+                // Fall through to Docling/legacy; Unlimited stay preferred but not hard-fail.
+            }
+        }
+    }
+
     let script = resolve_pdf_ocr_script().ok_or_else(|| {
         AppError::Unknown(
             "Could not find scripts/soc_pdf_ocr.py. Install Python dependencies or place the script under scripts/.".to_string(),
@@ -212,7 +231,11 @@ pub fn ocr_pdf_to_markdown_sync(pdf_path: &str) -> AppResult<String> {
         .unwrap_or("document");
     let output_md = output_dir.join(format!("{stem}-kc-ocr.md"));
 
-    let engine_arg = OcrEngine::parse(&engine).as_str();
+    // After Unlimited attempt, Auto/Unlimited fall through as docling→legacy via script.
+    let engine_arg = match engine_parsed {
+        OcrEngine::Unlimited => "auto",
+        other => other.as_str(),
+    };
     let mut cmd = std::process::Command::new(&python);
     cmd.arg(&script)
         .arg(&pdf)

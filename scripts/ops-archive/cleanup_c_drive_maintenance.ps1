@@ -32,8 +32,13 @@ Write-Host "C: free before: ${freeBefore} GB"
 
 $freed = 0.0
 
+$RepoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
+$RepoCacheTmp = Join-Path $RepoRoot 'runtime-data\cache\tmp'
+$tempRoots = @($env:TEMP, "$env:LOCALAPPDATA\Temp")
+if (Test-Path -LiteralPath $RepoCacheTmp) { $tempRoots += $RepoCacheTmp }
+
 # Cursor / VS Code sandbox cargo caches (biggest regrow item when TEMP points to C:)
-foreach ($tempRoot in @($env:TEMP, "$env:LOCALAPPDATA\Temp", 'D:\nexus-ai-deep-fixed\runtime-data\cache\tmp')) {
+foreach ($tempRoot in $tempRoots) {
   if (-not $tempRoot) { continue }
   $sandbox = Join-Path $tempRoot 'cursor-sandbox-cache'
   $freed += Remove-IfExists $sandbox 'cursor-sandbox-cache'
@@ -41,7 +46,7 @@ foreach ($tempRoot in @($env:TEMP, "$env:LOCALAPPDATA\Temp", 'D:\nexus-ai-deep-f
 
 # Stale temp files (older than 2 days)
 $cutoff = (Get-Date).AddDays(-2)
-foreach ($tempRoot in @($env:TEMP, "$env:LOCALAPPDATA\Temp", 'D:\nexus-ai-deep-fixed\runtime-data\cache\tmp')) {
+foreach ($tempRoot in $tempRoots) {
   if (-not (Test-Path -LiteralPath $tempRoot)) { continue }
   Get-ChildItem -LiteralPath $tempRoot -Force -ErrorAction SilentlyContinue |
     Where-Object { $_.LastWriteTime -lt $cutoff } |

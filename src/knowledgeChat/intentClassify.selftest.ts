@@ -24,7 +24,7 @@ assert(parseIntentJson('not json') === null, 'reject garbage');
 assert(parseIntentJson('```json\n{"intent":"env_var"}\n```') === 'env_var', 'fence ok');
 
 assert(
-  vetoSearchIntent('What functions are defined in ChatView.tsx?') === 'list_symbols_in_file',
+  vetoSearchIntent('What functions are defined in UserPanel.tsx?') === 'list_symbols_in_file',
   'veto forces list',
 );
 assert(
@@ -33,23 +33,23 @@ assert(
 );
 
 assert(
-  classifyRulesSearchIntent('Explain handleSend in ChatView.tsx') === 'explain_symbol',
+  classifyRulesSearchIntent('Explain submitForm in UserPanel.tsx') === 'explain_symbol',
   'rules explain',
 );
 assert(
   classifyRulesSearchIntent(
-    'tell me what each function inside chatView.tsx is for and what it does.',
+    'tell me what each function inside userPanel.tsx is for and what it does.',
   ) === 'general',
   'each-function behavior is general not list',
 );
 assert(
   classifyRulesSearchIntent(
-    'explain what each function does in the chatView.tsx file',
+    'explain what each function does in the userPanel.tsx file',
   ) === 'general',
   'explain-each is general not list',
 );
 assert(
-  classifyRulesSearchIntent('What functions are defined in ChatView.tsx?') === 'list_symbols_in_file',
+  classifyRulesSearchIntent('What functions are defined in UserPanel.tsx?') === 'list_symbols_in_file',
   'pure inventory still list',
 );
 assert(
@@ -57,7 +57,7 @@ assert(
   'rules imports',
 );
 assert(
-  classifyRulesSearchIntent('Where is handleSend defined?') === 'locate_definition',
+  classifyRulesSearchIntent('Where is submitForm defined?') === 'locate_definition',
   'rules locate',
 );
 assert(
@@ -83,17 +83,17 @@ const hits: KcSearchHit[] = [
       id: '1',
       collection_id: 'c',
       file_id: 'f',
-      file_name: 'ChatView.tsx',
-      file_path: 'ChatView.tsx',
+      file_name: 'UserPanel.tsx',
+      file_path: 'UserPanel.tsx',
       chunk_index: 0,
-      title: 'handleSend',
+      title: 'submitForm',
       start_char: 0,
       end_char: 10,
-      text: 'const handleSend = () => {}',
+      text: 'const submitForm = () => {}',
       top_terms: [],
       has_dense: true,
       entity_kind: 'function',
-      entity_name: 'handleSend',
+      entity_name: 'submitForm',
       source_confidence: 0.9,
     } as KcSearchHit['chunk'],
     retrieval_mode: 'hybrid_dense',
@@ -110,8 +110,8 @@ const hits: KcSearchHit[] = [
       id: '2',
       collection_id: 'c',
       file_id: 'f',
-      file_name: 'ChatView.tsx',
-      file_path: 'ChatView.tsx',
+      file_name: 'UserPanel.tsx',
+      file_path: 'UserPanel.tsx',
       chunk_index: 1,
       title: 'renderMessages',
       start_char: 0,
@@ -135,7 +135,7 @@ const hits: KcSearchHit[] = [
 ];
 
 assert(
-  classifyRulesAnswerIntent('What functions are defined in ChatView.tsx?', hits) === 'list_symbols_in_file',
+  classifyRulesAnswerIntent('What functions are defined in UserPanel.tsx?', hits) === 'list_symbols_in_file',
   'stage B rules list',
 );
 assert(strategyForIntent('list_symbols_in_file') === 'extractive_list_symbols', 'strategy map');

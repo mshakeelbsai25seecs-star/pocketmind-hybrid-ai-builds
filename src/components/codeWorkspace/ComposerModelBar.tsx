@@ -30,11 +30,14 @@ export default function ComposerModelBar({
   disabled,
   onModeChange,
   workspaceRoot,
+  thinClient = false,
 }: {
   mode: PocketCodeAgentMode;
   disabled?: boolean;
   onModeChange: (mode: PocketCodeAgentMode) => void;
   workspaceRoot?: string;
+  /** thin_client: hide local GGUF picks; org/cloud only. */
+  thinClient?: boolean;
 }) {
   const currentModel = useAppStore(s => s.currentModel);
   const setCurrentModel = useAppStore(s => s.setCurrentModel);
@@ -91,9 +94,10 @@ export default function ComposerModelBar({
   );
 
   const localEligible = useMemo(() => {
-    return localModels.filter(m => canUseCodeWorkspaceAgent(m.path).allowed
-      || /\b(30|32|34|70|72|405|671)\s*b\b/i.test(m.name)
-      || parseFloat((m.name.match(/(\d+(?:\.\d+)?)\s*B/i) || [])[1] || '0') >= 30
+    return localModels.filter(m => canUseCodeWorkspaceAgent(m.path, { sizeBytes: m.size_bytes }).allowed
+      || /\b(20|22|24|27|30|32|34|70|72|405|671)\s*b\b/i.test(m.name)
+      || parseFloat((m.name.match(/(\d+(?:\.\d+)?)\s*B/i) || [])[1] || '0') >= 20
+      || (m.size_bytes || 0) >= 18 * 1024 * 1024 * 1024
       || (m.metadata || '').toLowerCase().includes('vision')
       || /\b(vl|llava|vision|mmproj)\b/i.test(m.name + m.path));
   }, [localModels]);
@@ -274,24 +278,37 @@ export default function ComposerModelBar({
                 </button>
               </>
             )}
-            <p className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-surface-400">Local</p>
-            {localEligible.length === 0 && (
-              <p className="px-3 py-1.5 text-[11px] text-surface-400">No ≥30B / VL local models. Import in Models.</p>
+            {!thinClient && (
+              <>
+                <p className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-surface-400">Local</p>
+                {localEligible.length === 0 && (
+                  <p className="px-3 py-1.5 text-[11px] text-surface-400">
+                    {localModels.length > 0
+                      ? `${localModels.length} local model(s) available for Chat — open Models → Use in Chat. PocketCode lists ≥20B / VL locals here.`
+                      : 'No ≥20B / VL local models. Import in Models.'}
+                  </p>
+                )}
+                {localEligible.map(m => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => pickLocal(m)}
+                    className={`w-full text-left px-3 py-1.5 text-xs truncate ${
+                      currentModel === m.path
+                        ? 'bg-primary-50 dark:bg-primary-950/40 font-semibold'
+                        : 'hover:bg-surface-50 dark:hover:bg-surface-900'
+                    }`}
+                  >
+                    {m.name}
+                  </button>
+                ))}
+              </>
             )}
-            {localEligible.map(m => (
-              <button
-                key={m.id}
-                type="button"
-                onClick={() => pickLocal(m)}
-                className={`w-full text-left px-3 py-1.5 text-xs truncate ${
-                  currentModel === m.path
-                    ? 'bg-primary-50 dark:bg-primary-950/40 font-semibold'
-                    : 'hover:bg-surface-50 dark:hover:bg-surface-900'
-                }`}
-              >
-                {m.name}
-              </button>
-            ))}
+            {thinClient && (
+              <p className="px-3 py-1.5 text-[11px] text-amber-700 dark:text-amber-300">
+                Thin client: local GGUF models are disabled. Use org or online models.
+              </p>
+            )}
             <p className="px-3 py-1 mt-1 text-[10px] font-bold uppercase tracking-wider text-surface-400">Online</p>
             {onlineEligible.slice(0, 40).map(m => {
               const path = remoteModelPath(m);

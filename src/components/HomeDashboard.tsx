@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/tauri';
-import { Activity, Bot, CheckCircle, Cpu, Download, FileText, HardDrive, MessageSquare, ShieldCheck } from 'lucide-react';
+import { Activity, Bot, CheckCircle, Code2, Cpu, Download, FileText, HardDrive, MessageSquare, ShieldCheck } from 'lucide-react';
 import { useAppStore } from '../store';
 import { Conversation, Message } from '../types';
 
@@ -42,6 +42,7 @@ export default function HomeDashboard() {
   };
 
   const cards = [
+    { title: 'PocketCode', desc: 'Open a project folder and run the coding agent: search, edit, terminal, checkpoints, and plans — without cluttering your repo.', icon: Code2, action: 'Open PocketCode', view: 'code-workspace' as const },
     { title: 'Fortinet Copilot', desc: 'Triage alerts, run validators, write reports, and search your company documents.', icon: ShieldCheck, action: 'Open SOC', view: 'soc' as const },
     { title: 'Knowledge Chat', desc: 'Index company folders and ask grounded questions.', icon: FileText, action: 'Open Knowledge Chat', view: 'knowledge-chat' as const },
     { title: 'Chat', desc: 'Local or online conversations.', icon: MessageSquare, action: 'Open Chat', view: 'chat' as const },
@@ -54,9 +55,9 @@ export default function HomeDashboard() {
         <section className="premium-card p-6 sm:p-7">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
             <div className="space-y-3">
-              <h1 className="text-3xl sm:text-4xl font-black tracking-tight text-surface-950 dark:text-white">PocketMind Hybrid AI Desktop</h1>
+              <h1 className="app-brand-name text-3xl sm:text-4xl font-black tracking-tight text-primary-400 dark:text-primary-300">PocketMind Hybrid AI Desktop</h1>
               <p className="max-w-xl text-surface-600 dark:text-surface-300">
-                Local AI for security analysts: Fortinet Copilot, Knowledge Chat, and on-device models.
+                Local AI for security analysts and developers: Fortinet Copilot, Knowledge Chat, PocketCode agent workspace, and on-device models.
               </p>
               <div className="flex flex-wrap gap-3">
                 <button onClick={createChat} disabled={!currentModel} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">New Chat</button>
@@ -102,8 +103,8 @@ export default function HomeDashboard() {
             <h2 className="font-bold text-lg mb-3 flex items-center gap-2"><FileText className="w-5 h-5 text-primary-500" /> Quick start</h2>
             <ol className="space-y-2 text-sm text-surface-600 dark:text-surface-300 list-decimal pl-5">
               <li>Import or download a GGUF model.</li>
-              <li>Select it for chat.</li>
-              <li>Ask your first question.</li>
+              <li>Select it for chat or PocketCode.</li>
+              <li>Open PocketCode on a folder, or start a chat.</li>
             </ol>
           </div>
         </section>

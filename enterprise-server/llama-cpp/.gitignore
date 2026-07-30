@@ -1,0 +1,11 @@
+.optimizer_plan.json
+.venv/
+admin/.venv/
+.admin_token
+.env
+models/*.gguf
+models/*.part
+models/*.tmp
+__pycache__/
+admin/__pycache__/
+*.pyc

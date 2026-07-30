@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PocketMind Chat Server Admin</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a222c;
+      --text: #e7ecf1;
+      --muted: #8b9aab;
+      --accent: #3d8bfd;
+      --ok: #3dd68c;
+      --bad: #f07178;
+      --warn: #e6b450;
+      --border: #2a3542;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: radial-gradient(1200px 600px at 10% -10%, #1b2a3d, var(--bg));
+      color: var(--text);
+      min-height: 100vh;
+    }
+    main { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+    h1 { font-size: 1.35rem; margin: 0 0 4px; font-weight: 650; }
+    .sub { color: var(--muted); font-size: 0.9rem; margin-bottom: 20px; }
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      margin-bottom: 14px;
+    }
+    .card h2 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); margin: 0 0 12px; }
+    label { display: block; font-size: 0.8rem; color: var(--muted); margin-bottom: 4px; }
+    input, select, textarea {
+      width: 100%;
+      background: #12181f;
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font: inherit;
+    }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    .row > * { flex: 1 1 auto; }
+    button {
+      background: var(--accent);
+      color: #fff;
+      border: 0;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    button.secondary { background: #2a3542; }
+    button.danger { background: #a33b44; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      font-weight: 600;
+    }
+    .pill.ok { background: rgba(61,214,140,.15); color: var(--ok); }
+    .pill.bad { background: rgba(240,113,120,.15); color: var(--bad); }
+    .pill.warn { background: rgba(230,180,80,.15); color: var(--warn); }
+    table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--border); }
+    pre {
+      background: #12181f;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px;
+      max-height: 280px;
+      overflow: auto;
+      font-size: 0.75rem;
+      white-space: pre-wrap;
+    }
+    .msg { font-size: 0.85rem; margin-top: 8px; }
+    .msg.err { color: var(--bad); }
+    .msg.ok { color: var(--ok); }
+    code { font-family: ui-monospace, Consolas, monospace; font-size: 0.85em; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>PocketMind chat server admin</h1>
+    <p class="sub">Manage GGUF models and the llama.cpp Docker service on this machine. PocketMind clients use port <strong>8000</strong>; this UI is port <strong>8090</strong>.</p>
+
+    <div class="card">
+      <h2>Admin token</h2>
+      <label for="token">X-Admin-Token (from start-admin.ps1 / .admin_token)</label>
+      <div class="row">
+        <input id="token" type="password" placeholder="Paste admin token" autocomplete="off" />
+        <button type="button" class="secondary" id="btnSaveToken" style="flex:0">Save</button>
+        <button type="button" class="secondary" id="btnRefresh" style="flex:0">Refresh</button>
+      </div>
+      <p class="msg" id="tokenMsg"></p>
+    </div>
+
+    <div class="card">
+      <h2>Status</h2>
+      <div id="statusBox">Enter token and click Refresh.</div>
+      <p class="msg" id="orgUrl"></p>
+    </div>
+
+    <div class="card">
+      <h2>Models on disk</h2>
+      <p class="sub" style="margin-top:0">GGUFs already in <code>models\</code>. Select one, then Start.</p>
+      <div id="modelsBox"><em style="color:var(--muted)">—</em></div>
+    </div>
+
+    <div class="card">
+      <h2>Import local GGUF</h2>
+      <p class="sub" style="margin-top:0">
+        Use a model you already downloaded anywhere on this PC (e.g. <code>D:\…\model.gguf</code>).
+        Files are hard-linked into <code>models\</code> when possible (no extra disk), otherwise copied. Sibling shards + mmproj are included automatically.
+      </p>
+      <label for="importPath">Full path to .gguf</label>
+      <input id="importPath" placeholder="D:\google_gemma-4-26B-A4B-it-Q6_K_L.gguf" />
+      <div class="row" style="margin-top:10px">
+        <button type="button" id="btnImport">Import &amp; select</button>
+        <button type="button" class="secondary" id="btnImportOnly" style="flex:0">Import only</button>
+      </div>
+      <label for="scanFolder" style="margin-top:14px">Or scan a folder</label>
+      <div class="row">
+        <input id="scanFolder" placeholder="D:\models" />
+        <button type="button" class="secondary" id="btnScanFolder" style="flex:0">Scan</button>
+      </div>
+      <div id="scanBox" style="margin-top:10px; max-height:220px; overflow:auto;"></div>
+      <p class="msg" id="importMsg"></p>
+    </div>
+
+    <div class="card">
+      <h2>App catalog (select &amp; download)</h2>
+      <p class="sub" style="margin-top:0">Same offline GGUF list as PocketMind Models. Crashes resume from <code>.part</code> files. <strong>Stop &amp; clear</strong> aborts and deletes that download from disk.</p>
+      <label for="catalogFilter">Filter</label>
+      <input id="catalogFilter" placeholder="e.g. phi, qwen, deepseek" />
+      <div id="catalogBox" style="margin-top:10px; max-height:320px; overflow:auto;"><em style="color:var(--muted)">—</em></div>
+      <div class="row" style="margin-top:10px">
+        <button type="button" class="danger" id="btnCancelDl">Stop &amp; clear download</button>
+      </div>
+      <div id="dlProgress" style="margin-top:10px"></div>
+      <p class="msg" id="dlMsg"></p>
+    </div>
+
+    <div class="card">
+      <h2>Manual URL download</h2>
+      <label for="dlUrl">Direct file URL (Hugging Face resolve URL ending in .gguf)</label>
+      <input id="dlUrl" placeholder="https://huggingface.co/.../resolve/main/model.gguf" />
+      <label for="dlName" style="margin-top:8px">Optional filename</label>
+      <input id="dlName" placeholder="Phi-3-mini-4k-instruct-Q4_K_M.gguf" />
+      <div class="row" style="margin-top:10px">
+        <button type="button" id="btnDownload">Start / resume URL download</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Server controls</h2>
+      <div class="row">
+        <button type="button" id="btnStart">Start (auto-optimize)</button>
+        <button type="button" class="secondary" id="btnRestart">Restart</button>
+        <button type="button" class="danger" id="btnStop">Stop</button>
+        <button type="button" class="secondary" id="btnLogs">Refresh logs</button>
+      </div>
+      <p class="msg" id="ctlMsg"></p>
+      <pre id="logs">—</pre>
+    </div>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const tokenKey = "pm.llama.admin.token";
+    let catalogCache = [];
+    let pollTimer = null;
+
+    function token() { return ($("token").value || "").trim(); }
+
+    async function api(path, opts = {}) {
+      const headers = Object.assign({ "Accept": "application/json" }, opts.headers || {});
+      const t = token();
+      if (t) headers["X-Admin-Token"] = t;
+      if (opts.body && !headers["Content-Type"]) headers["Content-Type"] = "application/json";
+      const res = await fetch(path, { ...opts, headers });
+      let data = null;
+      const text = await res.text();
+      try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+      if (!res.ok) {
+        const detail = data && (data.detail || data.error) ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : text;
+        throw new Error(detail || res.statusText);
+      }
+      return data;
+    }
+
+    function pill(ok, label) {
+      return `<span class="pill ${ok ? "ok" : "bad"}">${label}</span>`;
+    }
+
+    function renderProgress(s) {
+      if (!s) { $("dlProgress").innerHTML = ""; return; }
+      const pct = s.percent != null ? s.percent : null;
+      const bar = pct != null
+        ? `<div style="height:8px;background:#12181f;border-radius:99px;overflow:hidden;margin:6px 0"><div style="height:100%;width:${Math.min(100,pct)}%;background:var(--accent)"></div></div>`
+        : "";
+      const resumed = s.resumed_from ? ` (resumed from ${s.bytes_human || "?"})` : "";
+      $("dlProgress").innerHTML = `
+        <p style="margin:0;font-size:0.85rem">${s.message || ""} ${s.file_index ? `· file ${s.file_index}/${s.file_count || "?"}` : ""}</p>
+        <p style="margin:4px 0;font-size:0.9rem"><code>${s.filename || ""}</code>
+          ${s.bytes_human || "0 MB"}${s.total_human ? " / " + s.total_human : ""}
+          ${pct != null ? ` · ${pct}%` : ""}
+          ${s.resumed_from ? " · resumed" : ""}
+        </p>
+        ${bar}
+      `;
+    }
+
+    function startPolling() {
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(async () => {
+        try {
+          const s = await api("/api/models/download/status");
+          renderProgress(s);
+          if (s.active) {
+            $("dlMsg").className = "msg ok";
+            $("dlMsg").textContent = s.message || "Downloading…";
+          } else if (s.done) {
+            $("dlMsg").className = s.error ? "msg err" : "msg ok";
+            $("dlMsg").textContent = s.error
+              ? (String(s.error).toLowerCase().includes("stopped")
+                ? (s.message || "Download stopped and cleared from disk.")
+                : (`Failed: ${s.error} — ${s.message || "Re-run the same download to resume."}`))
+              : (s.message || "Done");
+            clearInterval(pollTimer);
+            pollTimer = null;
+            refresh();
+          }
+        } catch (e) {
+          $("dlMsg").className = "msg err";
+          $("dlMsg").textContent = e.message;
+        }
+      }, 1000);
+    }
+
+    function renderCatalog() {
+      const q = ($("catalogFilter").value || "").trim().toLowerCase();
+      const rows = catalogCache.filter(m => {
+        if (!q) return true;
+        const hay = [m.name, m.id, m.params, m.quant, (m.categories||[]).join(" ")].join(" ").toLowerCase();
+        return hay.includes(q);
+      }).map(m => `
+        <tr>
+          <td><strong>${m.name}</strong><br><span style="color:var(--muted);font-size:0.75rem">${m.id}</span></td>
+          <td>${m.params || ""} / ${m.quant || ""}<br><span style="color:var(--muted);font-size:0.75rem">${m.size || ""}</span></td>
+          <td>${m.file_count || 0} file(s)${m.has_shards ? " · shards" : ""}${m.visionCapable ? " · vision" : ""}</td>
+          <td>${m.downloadable
+            ? `<button type="button" data-cat="${m.id}">Download</button>`
+            : `<span class="pill warn">no URL</span>`}</td>
+        </tr>`).join("");
+      $("catalogBox").innerHTML = `<table><thead><tr><th>Model</th><th>Size</th><th>Files</th><th></th></tr></thead><tbody>${
+        rows || `<tr><td colspan="4" style="color:var(--muted)">No matches</td></tr>`
+      }</tbody></table>`;
+      $("catalogBox").querySelectorAll("[data-cat]").forEach(btn => {
+        btn.onclick = async () => {
+          try {
+            $("dlMsg").className = "msg";
+            $("dlMsg").textContent = "Starting catalog download (resumable)…";
+            await api("/api/models/download/catalog", {
+              method: "POST",
+              body: JSON.stringify({ id: btn.getAttribute("data-cat"), include_mmproj: true }),
+            });
+            startPolling();
+          } catch (e) {
+            $("dlMsg").className = "msg err";
+            $("dlMsg").textContent = e.message;
+          }
+        };
+      });
+    }
+
+    async function refresh() {
+      $("tokenMsg").textContent = "";
+      try {
+        const st = await api("/api/status");
+        const m = await api("/api/models");
+        const cat = await api("/api/catalog");
+        catalogCache = cat.models || [];
+        renderCatalog();
+        const insp = st.inspect || {};
+        const chat = st.chat_api || {};
+        const sel = st.selected_model || {};
+        const dl = st.download || {};
+        renderProgress(dl.active || dl.done ? dl : null);
+        const opt = st.optimizer || {};
+        const ngl = opt.applied_gpu_layers != null ? opt.applied_gpu_layers : (st.env_gpu_layers || opt.gpu_layers);
+        const nglLabel = (ngl === -1 || ngl === "-1") ? "all (-1)" : ngl;
+        const setupHints = [];
+        if (!st.docker_ok) {
+          setupHints.push(
+            `<p class="msg err">Docker is not running or not installed. Install Docker Desktop, enable WSL2 integration, and for CUDA also install the <strong>NVIDIA Container Toolkit</strong>. Then click Refresh.</p>`
+          );
+        }
+        if (!sel.valid) {
+          setupHints.push(
+            `<p class="msg warn">No valid GGUF selected. Use <strong>Import local GGUF</strong> below (paste a path like <code>D:\\models\\your-model.gguf</code>), download from the catalog, or scan a folder — then click <strong>Start (auto-optimize)</strong>.</p>`
+          );
+        }
+        $("statusBox").innerHTML = `
+          ${setupHints.join("")}
+          <p>Docker: ${pill(st.docker_ok, st.docker_ok ? "OK" : "Missing")}
+          Suggested mode: <code>${st.mode_suggested}</code>
+          Container <code>${st.container}</code>: ${pill(insp.running && !insp.restarting, insp.status || "not running")}
+          ${insp.restarting ? pill(false, "restarting") : ""}
+          ${insp.health ? `health=<code>${insp.health}</code>` : ""}</p>
+          <p>Selected model: <code>${sel.model_path_env || "?"}</code>
+          ${pill(sel.valid, sel.valid ? "valid" : "invalid")}
+          ${sel.size_human || ""} — ${sel.reason || ""}
+          ${sel.warning ? `<span class="pill warn">${sel.warning}</span>` : ""}</p>
+          <p>Auto-optimizer: <code>${opt.strategy || "?"}</code>
+          GPU layers <code>${nglLabel}</code>
+          · CTX <code>${opt.context_size || st.env_ctx_size || "?"}</code>
+          · free VRAM <code>${opt.free_vram_human || "?"}</code>
+          · model <code>${opt.model_bytes_human || "?"}</code>
+          ${st.auto_optimize === "0" ? pill(false, "AUTO_OPTIMIZE=0") : pill(true, "AUTO_OPTIMIZE=1")}</p>
+          ${(opt.notes || []).map(n => `<p class="msg" style="margin:2px 0">${n}</p>`).join("")}
+          <p>Chat API /v1/models: ${pill(chat.ok, chat.ok ? "reachable" : "down")}
+          ${chat.error ? `<span class="msg err">${chat.error}</span>` : ""}</p>
+        `;
+        $("orgUrl").innerHTML = `PocketMind Organization Server URL (this machine): <code>${st.chat_url_local}</code>
+          — from another PC use <code>http://SERVER_IP:${st.chat_url_local.split(":").pop()}</code>`;
+
+        const diskRows = []
+          .concat(m.partials || [])
+          .concat(m.models || []);
+        const rows = diskRows.map(r => `
+          <tr>
+            <td><code>${r.filename}</code></td>
+            <td>${r.size_human}</td>
+            <td>${r.partial ? pill(false, "partial") : pill(r.valid, r.valid ? "valid" : "bad")} ${r.reason || ""}</td>
+            <td>${r.valid ? `<button type="button" data-select="${r.filename}">Select</button>` : "—"}</td>
+          </tr>`).join("") || `<tr><td colspan="4" style="color:var(--muted)">No GGUF files yet. Use the catalog below.</td></tr>`;
+        $("modelsBox").innerHTML = `<table><thead><tr><th>File</th><th>Size</th><th>Check</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+        $("modelsBox").querySelectorAll("[data-select]").forEach(btn => {
+          btn.onclick = async () => {
+            try {
+              await api("/api/models/select", { method: "POST", body: JSON.stringify({ filename: btn.getAttribute("data-select") }) });
+              $("ctlMsg").className = "msg ok";
+              $("ctlMsg").textContent = "Model selected in .env";
+              refresh();
+            } catch (e) {
+              $("ctlMsg").className = "msg err";
+              $("ctlMsg").textContent = e.message;
+            }
+          };
+        });
+        if (dl.active) startPolling();
+      } catch (e) {
+        $("statusBox").innerHTML = `<span class="msg err">${e.message}</span>`;
+      }
+    }
+
+    $("btnSaveToken").onclick = () => {
+      localStorage.setItem(tokenKey, token());
+      $("tokenMsg").className = "msg ok";
+      $("tokenMsg").textContent = "Token saved in this browser.";
+      refresh();
+    };
+    $("btnRefresh").onclick = () => refresh();
+    $("catalogFilter").oninput = () => renderCatalog();
+
+    $("btnCancelDl").onclick = async () => {
+      try {
+        const data = await api("/api/models/download/cancel", { method: "POST", body: "{}" });
+        $("dlMsg").className = "msg warn";
+        $("dlMsg").textContent = data.message || "Stopping and clearing download from disk…";
+        startPolling();
+      } catch (e) {
+        $("dlMsg").className = "msg err";
+        $("dlMsg").textContent = e.message;
+      }
+    };
+
+    async function doImport(select) {
+      const path = ($("importPath").value || "").trim();
+      if (!path) {
+        $("importMsg").className = "msg err";
+        $("importMsg").textContent = "Paste a full path to a .gguf file.";
+        return;
+      }
+      $("importMsg").className = "msg";
+      $("importMsg").textContent = select
+        ? "Importing and selecting (large files may take a minute if a copy is needed)…"
+        : "Importing…";
+      try {
+        const data = await api("/api/models/import", {
+          method: "POST",
+          body: JSON.stringify({
+            path,
+            include_shards: true,
+            include_mmproj: true,
+            select: !!select,
+          }),
+        });
+        $("importMsg").className = "msg ok";
+        const methods = (data.imported || []).map(i => `${i.filename} (${i.method})`).join(", ");
+        $("importMsg").textContent = `${data.message || "Imported."} ${methods}`;
+        refresh();
+      } catch (e) {
+        $("importMsg").className = "msg err";
+        $("importMsg").textContent = e.message;
+      }
+    }
+    $("btnImport").onclick = () => doImport(true);
+    $("btnImportOnly").onclick = () => doImport(false);
+
+    $("btnScanFolder").onclick = async () => {
+      const folder = ($("scanFolder").value || "").trim();
+      if (!folder) {
+        $("importMsg").className = "msg err";
+        $("importMsg").textContent = "Enter a folder path to scan.";
+        return;
+      }
+      $("importMsg").className = "msg";
+      $("importMsg").textContent = "Scanning…";
+      try {
+        const data = await api("/api/models/scan-folder", {
+          method: "POST",
+          body: JSON.stringify({ folder }),
+        });
+        const rows = (data.models || []).map(m => `
+          <tr>
+            <td><code title="${m.path}">${m.filename}</code></td>
+            <td>${m.size_human}</td>
+            <td>${pill(m.valid, m.valid ? "valid" : "bad")}</td>
+            <td>${m.valid
+              ? `<button type="button" data-import-path="${m.path.replace(/"/g, "&quot;")}">Import &amp; select</button>`
+              : "—"}</td>
+          </tr>`).join("") || `<tr><td colspan="4" style="color:var(--muted)">No .gguf files found</td></tr>`;
+        $("scanBox").innerHTML = `<table><thead><tr><th>File</th><th>Size</th><th>Check</th><th></th></tr></thead><tbody>${rows}</tbody></table>`;
+        $("scanBox").querySelectorAll("[data-import-path]").forEach(btn => {
+          btn.onclick = () => {
+            $("importPath").value = btn.getAttribute("data-import-path") || "";
+            doImport(true);
+          };
+        });
+        $("importMsg").className = "msg ok";
+        $("importMsg").textContent = `Found ${data.count || 0} GGUF file(s).`;
+      } catch (e) {
+        $("importMsg").className = "msg err";
+        $("importMsg").textContent = e.message;
+      }
+    };
+
+    $("btnDownload").onclick = async () => {
+      $("dlMsg").textContent = "Starting…";
+      $("dlMsg").className = "msg";
+      try {
+        const body = { url: $("dlUrl").value.trim() };
+        if ($("dlName").value.trim()) body.filename = $("dlName").value.trim();
+        await api("/api/models/download", { method: "POST", body: JSON.stringify(body) });
+        $("dlMsg").className = "msg ok";
+        $("dlMsg").textContent = "Download started / resumed.";
+        startPolling();
+      } catch (e) {
+        $("dlMsg").className = "msg err";
+        $("dlMsg").textContent = e.message;
+      }
+    };
+
+    async function ctl(path) {
+      $("ctlMsg").textContent = path.includes("/start")
+        ? "Starting with auto GPU optimizer (may take a few minutes for large models)…"
+        : "Working…";
+      $("ctlMsg").className = "msg";
+      try {
+        const data = await api(path, { method: "POST", body: "{}" });
+        $("ctlMsg").className = "msg ok";
+        $("ctlMsg").textContent = data.message || JSON.stringify(data).slice(0, 400);
+        await loadLogs();
+        refresh();
+      } catch (e) {
+        $("ctlMsg").className = "msg err";
+        $("ctlMsg").textContent = e.message;
+      }
+    }
+    $("btnStart").onclick = () => ctl("/api/server/start");
+    $("btnStop").onclick = () => ctl("/api/server/stop");
+    $("btnRestart").onclick = () => ctl("/api/server/restart");
+
+    async function loadLogs() {
+      try {
+        const data = await api("/api/logs?tail=100");
+        $("logs").textContent = data.logs || "(no logs)";
+      } catch (e) {
+        $("logs").textContent = e.message;
+      }
+    }
+    $("btnLogs").onclick = loadLogs;
+
+    $("token").value = localStorage.getItem(tokenKey) || "";
+    if (token()) refresh();
+  </script>
+</body>
+</html>

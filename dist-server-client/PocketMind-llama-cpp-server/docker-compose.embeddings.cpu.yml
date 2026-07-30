@@ -1,0 +1,48 @@
+services:
+  # Code partition embeddings (Nomic v1.5) on CPU.
+  nexusai-embed-code:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: nexusai-embed-code
+    restart: unless-stopped
+    ports:
+      - "${CODE_EMBED_PORT:-8001}:8001"
+    volumes:
+      - ./models:/models
+    command:
+      - -m
+      - ${CODE_EMBED_MODEL_PATH:-/models/nomic-embed-text-v1.5.Q4_K_M.gguf}
+      - --embeddings
+      - --pooling
+      - mean
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8001"
+      - -c
+      - ${EMBED_CTX_SIZE:-2048}
+      - -t
+      - ${THREADS:-8}
+
+  # Knowledge partition embeddings (BGE-M3) on CPU.
+  nexusai-embed-knowledge:
+    image: ghcr.io/ggml-org/llama.cpp:server
+    container_name: nexusai-embed-knowledge
+    restart: unless-stopped
+    ports:
+      - "${KNOWLEDGE_EMBED_PORT:-8002}:8002"
+    volumes:
+      - ./models:/models
+    command:
+      - -m
+      - ${KNOWLEDGE_EMBED_MODEL_PATH:-/models/bge-m3-Q4_K_M.gguf}
+      - --embeddings
+      - --pooling
+      - mean
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8002"
+      - -c
+      - ${EMBED_CTX_SIZE:-2048}
+      - -t
+      - ${THREADS:-8}

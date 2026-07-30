@@ -139,7 +139,7 @@ function summarizeAttachedSymbol(symbol: string, text: string, fileName: string)
       fileName,
     );
   }
-  // Prefer the shared extractive path so TS arrow fns (handleSend) are covered.
+  // Prefer the shared extractive path so TS arrow fns (submitForm) are covered.
   const extractive = tryExtractiveFromAttachedSources(
     `What does ${symbol} do in ${fileName}?`,
     [{ file_name: fileName, text: body }],

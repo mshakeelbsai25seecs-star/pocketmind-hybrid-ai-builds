@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ChevronDown, ChevronRight, CheckCircle2, AlertCircle } from 'lucide-react';
 import type { AgentStep } from '../../codeWorkspace/types';
+import AssistantMarkdown from '../AssistantMarkdown';
 
 function toolStatusLabel(tool?: string): string {
   switch (tool) {
@@ -10,6 +11,8 @@ function toolStatusLabel(tool?: string): string {
       return 'Searched files';
     case 'grep':
       return 'Searched code';
+    case 'codebase_search':
+      return 'Searched codebase';
     case 'repo_map':
       return 'Mapped repository';
     case 'find_symbol':
@@ -62,7 +65,7 @@ function ToolResultCard({ tool, result }: { tool?: string; result: string }) {
         )}
       </button>
       {open && (
-        <pre className="px-2.5 pb-2 text-[11px] font-mono whitespace-pre-wrap break-words text-surface-700 dark:text-surface-300 max-h-48 overflow-auto border-t border-surface-100 dark:border-surface-800 pt-2">
+        <pre className="px-2.5 pb-2 text-[11px] font-mono whitespace-pre-wrap break-words text-surface-700 dark:text-surface-300 max-h-40 overflow-auto border-t border-surface-100 dark:border-surface-800 pt-2">
           {result}
         </pre>
       )}
@@ -71,71 +74,124 @@ function ToolResultCard({ tool, result }: { tool?: string; result: string }) {
 }
 
 /**
- * Cursor-like transcript: narrative / status as plain text; tool outputs in compact cards.
+ * Cursor-like transcript: tools stay collapsed behind one line; final answer is clean Markdown.
+ * Never dumps the reply into a raw grey "thought" / code wall.
  */
-export default function AgentTranscript({ steps }: { steps: AgentStep[] }) {
-  if (steps.length === 0) return null;
+export default function AgentTranscript({
+  steps,
+  answer,
+}: {
+  steps: AgentStep[];
+  /** Preferred final reply (message body). Used when longer than the done step text. */
+  answer?: string | null;
+}) {
+  const [toolsOpen, setToolsOpen] = useState(false);
 
-  // Collapse consecutive assistant JSON noise — only show tools, done, errors as the story.
   const visible = steps.filter(s => s.kind !== 'assistant');
+  const doneStep = [...visible].reverse().find(s => s.kind === 'done');
+  const toolsAndErrors = visible.filter(s => s.kind === 'tool' || s.kind === 'error');
+  const fromDone = (doneStep?.content || '').trim();
+  const fromProp = (answer || '').trim();
+  const answerText = fromProp.length > fromDone.length ? fromProp : (fromDone || fromProp);
+  const looksFailed = /generation (error|failed)|insufficient balance|payment required|invalid api key/i
+    .test(answerText || doneStep?.content || '');
+  const finished = Boolean(doneStep) || (Boolean(answerText) && !looksFailed);
 
-  if (visible.length === 0) {
+  // Cursor behavior: once the answer lands, collapse the tool dump so it cannot bury the reply.
+  useEffect(() => {
+    if (finished) setToolsOpen(false);
+  }, [finished, answerText]);
+
+  if (steps.length === 0 && !(answer || '').trim()) return null;
+
+  if (toolsAndErrors.length === 0 && !answerText) {
     return (
       <p className="text-[13px] text-surface-500 px-0.5 py-1">Working…</p>
     );
   }
 
+  const lastTool = [...toolsAndErrors].reverse().find(s => s.kind === 'tool');
+  const liveLabel = lastTool
+    ? toolStatusLabel(lastTool.tool)
+    : (toolsAndErrors[toolsAndErrors.length - 1]?.kind === 'error' ? 'Hit an issue' : 'Working…');
+  const toolsLabel = finished
+    ? `Used ${toolsAndErrors.length} tool${toolsAndErrors.length === 1 ? '' : 's'}`
+    : liveLabel;
+
   return (
     <div className="space-y-2.5">
-      {visible.map((step, idx) => {
-        const key = `${step.step}-${idx}`;
-
-        if (step.kind === 'tool') {
-          return (
-            <div key={key} className="space-y-1">
-              <p className="text-[13px] text-surface-600 dark:text-surface-300 px-0.5">
-                {toolStatusLabel(step.tool)}
-                {step.tool === 'apply_edit' && step.toolResult
-                  ? ` · ${firstLine(step.toolResult.replace(/^Edit written to\s+/i, ''), 64)}`
-                  : ''}
-              </p>
-              {step.toolResult && (
-                <ToolResultCard tool={step.tool} result={step.toolResult} />
-              )}
+      {toolsAndErrors.length > 0 && (
+        <div className="px-0.5">
+          <button
+            type="button"
+            onClick={() => setToolsOpen(v => !v)}
+            className="group/tools inline-flex items-center gap-1 bg-transparent border-0 p-0 m-0 cursor-pointer text-[12.5px] leading-snug text-surface-500 dark:text-surface-400 hover:text-surface-700 dark:hover:text-surface-200"
+          >
+            <span>{toolsLabel}</span>
+            <ChevronDown
+              className={`w-3.5 h-3.5 opacity-60 transition-transform ${toolsOpen ? '' : '-rotate-90'}`}
+            />
+          </button>
+          {toolsOpen && (
+            <div className="mt-2 space-y-2 border-l border-surface-200 dark:border-surface-800 pl-2.5">
+              {toolsAndErrors.map((step, idx) => {
+                const key = `${step.step}-${idx}`;
+                if (step.kind === 'tool') {
+                  return (
+                    <div key={key} className="space-y-1">
+                      <p className="text-[12px] text-surface-600 dark:text-surface-300">
+                        {toolStatusLabel(step.tool)}
+                        {step.tool === 'apply_edit' && step.toolResult
+                          ? ` · ${firstLine(step.toolResult.replace(/^Edit written to\s+/i, ''), 64)}`
+                          : ''}
+                      </p>
+                      {step.toolResult && (
+                        <ToolResultCard tool={step.tool} result={step.toolResult} />
+                      )}
+                    </div>
+                  );
+                }
+                return (
+                  <div key={key} className="space-y-1">
+                    <p className="text-[12px] text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      Issue
+                    </p>
+                    <p className="text-[12px] leading-relaxed whitespace-pre-wrap break-words text-surface-600 dark:text-surface-300">
+                      {step.content}
+                    </p>
+                  </div>
+                );
+              })}
             </div>
-          );
-        }
+          )}
+        </div>
+      )}
 
-        if (step.kind === 'done') {
-          return (
-            <div key={key} className="space-y-1 px-0.5">
-              <p className="text-[12px] text-emerald-600 dark:text-emerald-400 flex items-center gap-1.5">
-                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                Done
-              </p>
-              <p className="text-[13px] leading-relaxed whitespace-pre-wrap break-words text-surface-800 dark:text-surface-100">
-                {step.content}
-              </p>
-            </div>
-          );
-        }
-
-        if (step.kind === 'error') {
-          return (
-            <div key={key} className="space-y-1 px-0.5">
-              <p className="text-[12px] text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
-                <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                Issue
-              </p>
-              <p className="text-[13px] leading-relaxed whitespace-pre-wrap break-words text-surface-700 dark:text-surface-200">
-                {step.content}
-              </p>
-            </div>
-          );
-        }
-
-        return null;
-      })}
+      {answerText && (
+        <div className="space-y-1 px-0.5">
+          {!finished && !looksFailed ? null : (
+            <p className={`text-[12px] flex items-center gap-1.5 ${
+              looksFailed
+                ? 'text-amber-600 dark:text-amber-400'
+                : 'text-emerald-600 dark:text-emerald-400'
+            }`}
+            >
+              {looksFailed
+                ? <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                : <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />}
+              {looksFailed ? 'Stopped' : 'Done'}
+            </p>
+          )}
+          {looksFailed ? (
+            <p className="text-[13px] leading-relaxed whitespace-pre-wrap break-words text-surface-800 dark:text-surface-100">
+              {answerText}
+            </p>
+          ) : (
+            <AssistantMarkdown content={answerText} className="text-[13px]" />
+          )}
+        </div>
+      )}
     </div>
   );
 }

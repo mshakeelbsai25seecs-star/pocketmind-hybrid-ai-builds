@@ -20,13 +20,17 @@ mod sandbox_runners;
 mod code_workspace;
 mod cw_checkpoints;
 mod cw_symbol_index;
+mod cw_terminal;
 mod cw_plans;
 mod cw_ocr;
 mod cw_pdf_pages;
 mod cw_skills;
 mod mcp_host;
+mod llama_server_host;
 mod power_features;
 mod power_commands;
+mod unlimited_ocr;
+mod doc_export;
 
 use tauri::{GlobalShortcutManager, Manager, WindowEvent};
 use std::sync::Arc;
@@ -42,6 +46,7 @@ use llm::InferenceBackend;
 fn main() {
     env_logger::init();
     deployment::configure_process_storage_env();
+    pocketcode_workspace::init_store_root(deployment::preferred_data_root().join("pocketcode"));
 
     let device_key = CryptoVault::derive_key_from_device();
 
@@ -64,6 +69,8 @@ fn main() {
             local_backend: Arc::new(llm::local::LlamaCppBackend::new()),
             kc_embed_pool: knowledge_chat::runtime::KcEmbedPool::new(),
             kc_rerank_pool: knowledge_chat::llama_rerank::KcRerankPool::new(),
+            download_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            download_tracked: Arc::new(Mutex::new(Vec::new())),
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_system_info,
@@ -97,11 +104,15 @@ fn main() {
             commands::delete_local_model,
             commands::import_local_model,
             commands::scan_model_folder,
+            commands::begin_model_download_job,
+            commands::cancel_model_download,
             commands::download_model,
             commands::process_attachments,
             commands::get_runtime_diagnostics,
             commands::get_gpu_runtime_report,
             commands::kill_llama_servers,
+            commands::path_exists,
+            commands::link_mmproj_beside_model,
             commands::write_soc_text_export,
             commands::scan_soc_knowledge_folder,
             commands::validate_soc_dense_embedding_provider,
@@ -145,6 +156,12 @@ fn main() {
             commands::get_ocr_image_rag_config,
             commands::save_ocr_image_rag_config,
             commands::test_image_rag_connection,
+            unlimited_ocr::probe_unlimited_ocr_status,
+            unlimited_ocr::download_unlimited_ocr_model,
+            doc_export::generate_document_spec,
+            doc_export::export_document,
+            doc_export::generate_and_export_document,
+            doc_export::probe_doc_export,
             knowledge_chat::kc_build_file_catalog,
             knowledge_chat::kc_load_selected_files,
             knowledge_chat::kc_build_repo_map,
@@ -175,10 +192,16 @@ fn main() {
             power_commands::cw_glob,
             power_commands::cw_grep,
             power_commands::cw_read_file,
+            power_commands::cw_load_project_rules,
             power_commands::cw_apply_edit_preview,
             power_commands::cw_apply_edit_write,
             power_commands::cw_run_sandbox,
             power_commands::cw_list_runners,
+            power_commands::cw_terminal_start,
+            power_commands::cw_terminal_read,
+            power_commands::cw_terminal_kill,
+            power_commands::cw_terminal_list,
+            power_commands::cw_terminal_kill_all,
             power_commands::cw_delete_file,
             power_commands::cw_checkpoint_begin,
             power_commands::cw_checkpoint_snapshot_write,
@@ -198,7 +221,9 @@ fn main() {
             power_commands::cw_plan_update_status,
             power_commands::cw_ocr_image,
             power_commands::cw_image_base64,
+            power_commands::cw_save_temp_image,
             power_commands::cw_pdf_page_images,
+            power_commands::cw_archive_workspace_zip_base64,
             power_commands::local_model_vision_ready,
             power_commands::cw_whisper_transcribe,
             power_commands::cw_list_skills,
@@ -214,6 +239,7 @@ fn main() {
             power_commands::mcp_setup_cursor_bridge,
             power_commands::mcp_export_to_cursor,
             power_commands::mcp_cursor_paths,
+            power_commands::get_llama_server_host_hint,
         ])
         .setup(|app| {
             knowledge_chat::qa_corpus::spawn_startup_bootstrap(app.handle());

@@ -52,6 +52,18 @@ bin/
 dist-zips/
 distribution/**/payload/
 
+# Built desktop installers / executables (never version build outputs)
+*.exe
+*.msi
+dist-server-client/*.exe
+dist-server-client/*.msi
+# Accidentally nested duplicate of the org server package
+dist-server-client/PocketMind-llama-cpp-server/PocketMind-llama-cpp-server/
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+
 # Vendored Code Workspace tooling (keep MANIFEST.json only)
 src-tauri/resources/tooling/**/*
 !src-tauri/resources/tooling/MANIFEST.json

@@ -14,6 +14,7 @@ use crate::cw_ocr;
 use crate::cw_pdf_pages;
 use crate::cw_plans;
 use crate::cw_symbol_index;
+use crate::cw_terminal;
 use crate::commands::{self, AppState, BackupData};
 use crate::deployment;
 use crate::error::{AppError, AppResult};
@@ -352,6 +353,12 @@ pub async fn cw_grep(
 
 /// `for_ui = true` allows the editor preview line cap; agent calls must leave it false/None.
 #[tauri::command]
+pub async fn cw_load_project_rules(workspace_root: String) -> AppResult<String> {
+    pocketcode_workspace::read_project_rules(Path::new(workspace_root.trim()))
+        .map_err(|e| AppError::Unknown(e.to_string()))
+}
+
+#[tauri::command]
 pub async fn cw_read_file(
     workspace_root: String,
     path: String,
@@ -419,6 +426,49 @@ pub async fn cw_run_sandbox(
 #[tauri::command]
 pub async fn cw_list_runners() -> AppResult<code_workspace::RunnersStatus> {
     Ok(code_workspace::list_runners())
+}
+
+#[tauri::command]
+pub async fn cw_terminal_start(
+    workspace_root: String,
+    language: Option<String>,
+    script: Option<String>,
+    args: Option<Vec<String>>,
+    argv: Option<Vec<String>>,
+    background: Option<bool>,
+) -> AppResult<cw_terminal::TerminalStartInfo> {
+    cw_terminal::start(
+        Path::new(workspace_root.trim()),
+        language.as_deref(),
+        script,
+        args,
+        argv,
+        background.unwrap_or(false),
+    )
+}
+
+#[tauri::command]
+pub async fn cw_terminal_read(
+    id: String,
+    tail_bytes: Option<usize>,
+) -> AppResult<cw_terminal::TerminalSnapshot> {
+    cw_terminal::read(id.trim(), tail_bytes)
+}
+
+#[tauri::command]
+pub async fn cw_terminal_kill(id: String) -> AppResult<cw_terminal::TerminalSnapshot> {
+    cw_terminal::kill(id.trim())
+}
+
+#[tauri::command]
+pub async fn cw_terminal_list() -> AppResult<Vec<cw_terminal::TerminalSnapshot>> {
+    Ok(cw_terminal::list())
+}
+
+#[tauri::command]
+pub async fn cw_terminal_kill_all() -> AppResult<()> {
+    cw_terminal::kill_all();
+    Ok(())
 }
 
 #[tauri::command]
@@ -573,6 +623,62 @@ pub async fn cw_ocr_image(path: String) -> AppResult<cw_ocr::OcrResult> {
 #[tauri::command]
 pub async fn cw_image_base64(path: String) -> AppResult<(String, String)> {
     cw_ocr::image_to_base64(&path)
+}
+
+/// Persist a clipboard / paste image (base64) into the app temp folder for PocketCode attachments.
+#[tauri::command]
+pub async fn cw_save_temp_image(base64: String, mime: Option<String>) -> AppResult<String> {
+    use base64::Engine as _;
+
+    let mime = mime.unwrap_or_else(|| "image/png".to_string());
+    let mime_l = mime.to_ascii_lowercase();
+    let ext = if mime_l.contains("jpeg") || mime_l.contains("jpg") {
+        "jpg"
+    } else if mime_l.contains("webp") {
+        "webp"
+    } else if mime_l.contains("gif") {
+        "gif"
+    } else if mime_l.contains("bmp") {
+        "bmp"
+    } else {
+        "png"
+    };
+
+    let cleaned = base64
+        .trim()
+        .strip_prefix("data:")
+        .and_then(|s| s.split_once(',').map(|(_, b)| b))
+        .unwrap_or(base64.trim())
+        .replace('\n', "")
+        .replace('\r', "");
+
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(cleaned.as_bytes())
+        .map_err(|e| AppError::Unknown(format!("Invalid image base64: {e}")))?;
+
+    if bytes.is_empty() {
+        return Err(AppError::Unknown("Clipboard image was empty.".to_string()));
+    }
+    // ~20 MiB cap — typical screenshots are far smaller.
+    if bytes.len() > 20 * 1024 * 1024 {
+        return Err(AppError::Unknown(
+            "Clipboard image is too large (max 20 MB).".to_string(),
+        ));
+    }
+
+    let dir = deployment::process_temp_dir().join("clipboard");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| AppError::Unknown(format!("Cannot create clipboard temp dir: {e}")))?;
+
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let path = dir.join(format!("paste-{nanos}.{ext}"));
+    std::fs::write(&path, &bytes)
+        .map_err(|e| AppError::Unknown(format!("Cannot save clipboard image: {e}")))?;
+
+    Ok(path.to_string_lossy().to_string())
 }
 
 #[tauri::command]
@@ -769,4 +875,73 @@ pub async fn mcp_export_to_cursor(workspace_root: String) -> AppResult<String> {
 #[tauri::command]
 pub async fn mcp_cursor_paths(workspace_root: Option<String>) -> AppResult<Vec<String>> {
     Ok(crate::mcp_host::cursor_mcp_paths(workspace_root))
+}
+
+/// Zip a local folder (for client_sync provision) and return base64. Desktop-only helper.
+#[tauri::command]
+pub async fn cw_archive_workspace_zip_base64(workspace_root: String) -> AppResult<String> {
+    let root = PathBuf::from(workspace_root.trim());
+    if !root.is_dir() {
+        return Err(AppError::Unknown(format!(
+            "Not a directory: {}",
+            root.display()
+        )));
+    }
+    tokio::task::spawn_blocking(move || archive_dir_zip_base64(&root))
+        .await
+        .map_err(|e| AppError::Unknown(format!("Archive task failed: {e}")))?
+}
+
+fn archive_dir_zip_base64(root: &Path) -> AppResult<String> {
+    use std::io::{Cursor, Write};
+    use walkdir::WalkDir;
+    use zip::write::FileOptions;
+    use zip::CompressionMethod;
+
+    let mut buf = Cursor::new(Vec::new());
+    {
+        let mut zip = zip::ZipWriter::new(&mut buf);
+        let options = FileOptions::default().compression_method(CompressionMethod::Deflated);
+        let root_canon = root
+            .canonicalize()
+            .map_err(|e| AppError::Unknown(format!("Cannot canonicalize: {e}")))?;
+        for entry in WalkDir::new(&root_canon).into_iter().filter_map(|e| e.ok()) {
+            let path = entry.path();
+            let rel = match path.strip_prefix(&root_canon) {
+                Ok(r) => r,
+                Err(_) => continue,
+            };
+            if rel.as_os_str().is_empty() {
+                continue;
+            }
+            let name = rel.to_string_lossy().replace('\\', "/");
+            if name.split('/').any(|p| {
+                matches!(
+                    p,
+                    ".git" | "node_modules" | "target" | ".nexus" | "__pycache__"
+                )
+            }) {
+                continue;
+            }
+            if path.is_dir() {
+                let _ = zip.add_directory(format!("{name}/"), options);
+            } else if path.is_file() {
+                zip.start_file(&name, options)
+                    .map_err(|e| AppError::Unknown(format!("zip start: {e}")))?;
+                let data = std::fs::read(path)
+                    .map_err(|e| AppError::Unknown(format!("read {}: {e}", path.display())))?;
+                zip.write_all(&data)
+                    .map_err(|e| AppError::Unknown(format!("zip write: {e}")))?;
+            }
+        }
+        zip.finish()
+            .map_err(|e| AppError::Unknown(format!("zip finish: {e}")))?;
+    }
+    use base64::Engine as _;
+    Ok(base64::engine::general_purpose::STANDARD.encode(buf.into_inner()))
+}
+
+#[tauri::command]
+pub fn get_llama_server_host_hint() -> AppResult<crate::llama_server_host::LlamaServerHostHint> {
+    crate::llama_server_host::host_hint()
 }

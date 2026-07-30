@@ -4,15 +4,16 @@
 
 @layer base {
   :root {
-    /* Conductor green #22C55E */
-    --color-primary: 34 197 94;
-    --conductor-green: 34 197 94;
-    --conductor-green-dim: 22 163 74;
+    /* Light green accent #4ADE80 */
+    --color-primary: 74 222 128;
+    --conductor-green: 74 222 128;
+    --conductor-green-dim: 134 239 172;
   }
 
   html {
     @apply antialiased;
     overflow: hidden;
+    font-size: 106.25%; /* slightly larger base type */
   }
 
   html, body, #root {
@@ -22,8 +23,19 @@
 
   body {
     @apply text-surface-900 dark:text-surface-100 bg-surface-50;
+    font-family: "Comic Sans MS", "Comic Sans", cursive;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     overflow: hidden;
+  }
+
+  /* Comic Sans app-wide; brand name uses a clean sans instead */
+  button, input, textarea, select, option, label, p, span, a, li, h1, h2, h3, h4, h5, h6,
+  code, kbd, samp, pre, .font-mono, .font-sans, .font-serif {
+    font-family: "Comic Sans MS", "Comic Sans", cursive;
+  }
+
+  .app-brand-name {
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
   }
 
   .dark body {
@@ -111,32 +123,32 @@
 
   html[data-perf="maximum-quality"] .app-gradient-bg {
     background:
-      radial-gradient(circle at 7% 8%, rgba(34, 197, 94, 0.10), transparent 30%),
+      radial-gradient(circle at 7% 8%, rgba(74, 222, 128, 0.10), transparent 30%),
       linear-gradient(135deg, rgba(250, 250, 250, 0.98), rgba(245, 245, 245, 0.96));
   }
 
   html[data-perf="maximum-quality"].dark .app-gradient-bg {
     background:
-      radial-gradient(circle at 8% 12%, rgba(34, 197, 94, 0.12), transparent 28%),
+      radial-gradient(circle at 8% 12%, rgba(74, 222, 128, 0.12), transparent 28%),
       linear-gradient(135deg, rgba(0, 0, 0, 0.98), rgba(10, 10, 10, 0.98));
   }
 
   .gradient-text {
     @apply bg-clip-text text-transparent;
-    background-image: linear-gradient(90deg, #16a34a, #22c55e, #4ade80);
+    background-image: linear-gradient(90deg, #22c55e, #4ade80, #86efac);
   }
 
   .nexus-pill {
     @apply inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-bold tracking-wide;
-    background: rgba(34, 197, 94, 0.12);
-    color: rgb(22, 163, 74);
-    border: 1px solid rgba(34, 197, 94, 0.28);
+    background: rgba(74, 222, 128, 0.12);
+    color: rgb(74, 222, 128);
+    border: 1px solid rgba(74, 222, 128, 0.28);
   }
 
   .dark .nexus-pill {
     color: rgb(187, 247, 208);
     border-color: rgba(74, 222, 128, 0.28);
-    background: rgba(34, 197, 94, 0.14);
+    background: rgba(74, 222, 128, 0.14);
   }
 
   /* Android onPrimary = black on green in dark; light uses white on green-dim */
@@ -172,8 +184,8 @@
   }
 
   .input-field:focus {
-    border-color: rgba(34, 197, 94, 0.70);
-    box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.14);
+    border-color: rgba(74, 222, 128, 0.70);
+    box-shadow: 0 0 0 4px rgba(74, 222, 128, 0.14);
   }
 
   .dark .input-field {
@@ -205,7 +217,12 @@
     @apply rounded-3xl border shadow-2xl transition-all;
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(245, 245, 245, 0.90));
     border-color: rgba(229, 229, 229, 0.90);
-    box-shadow: 0 22px 50px rgba(0, 0, 0, 0.06), 0 10px 26px rgba(34, 197, 94, 0.06);
+    box-shadow: 0 22px 50px rgba(0, 0, 0, 0.06), 0 10px 26px rgba(74, 222, 128, 0.06);
+  }
+
+  .composer-textarea {
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
 
   .dark .composer-shell {
@@ -238,7 +255,7 @@
 
   .nexus-md-h1 {
     @apply mt-2 mb-4 text-2xl sm:text-3xl font-black tracking-tight;
-    background: linear-gradient(90deg, #16a34a, #22c55e, #4ade80);
+    background: linear-gradient(90deg, #22c55e, #4ade80, #86efac);
     -webkit-background-clip: text;
     background-clip: text;
     color: transparent;
@@ -251,8 +268,8 @@
   .nexus-md-h2::before {
     content: '';
     @apply inline-block w-2.5 h-2.5 mr-2 rounded-full align-middle;
-    background: linear-gradient(135deg, #22c55e, #16a34a);
-    box-shadow: 0 0 20px rgba(34, 197, 94, 0.35);
+    background: linear-gradient(135deg, #4ade80, #22c55e);
+    box-shadow: 0 0 20px rgba(74, 222, 128, 0.35);
   }
 
   .nexus-md-h3 {
@@ -306,8 +323,8 @@
   .nexus-md-ul > .nexus-md-li::before {
     content: '';
     @apply absolute left-1 top-[0.65rem] w-2 h-2 rounded-full;
-    background: linear-gradient(135deg, #22c55e, #16a34a);
-    box-shadow: 0 0 14px rgba(34, 197, 94, 0.30);
+    background: linear-gradient(135deg, #4ade80, #22c55e);
+    box-shadow: 0 0 14px rgba(74, 222, 128, 0.30);
   }
 
   .nexus-md-ol > .nexus-md-li {
@@ -418,8 +435,8 @@
 
   .nexus-md-quote {
     @apply my-4 rounded-2xl border-l-4 px-4 py-3 italic text-surface-700 dark:text-surface-200;
-    border-left-color: rgb(34 197 94);
-    background: linear-gradient(135deg, rgba(34, 197, 94, 0.10), rgba(34, 197, 94, 0.04));
+    border-left-color: rgb(74 222 128);
+    background: linear-gradient(135deg, rgba(74, 222, 128, 0.10), rgba(74, 222, 128, 0.04));
   }
 
   .nexus-md-link {
@@ -427,29 +444,32 @@
   }
 
   .nexus-inline-code {
-    @apply rounded-lg px-1.5 py-0.5 text-[0.88em] font-semibold;
-    color: rgb(22 163 74);
-    background: rgba(34, 197, 94, 0.12);
-    border: 1px solid rgba(34, 197, 94, 0.22);
+    @apply font-normal text-inherit;
+    padding: 0;
+    margin: 0;
+    background: none;
+    border: none;
+    border-radius: 0;
+    color: inherit;
   }
 
   .dark .nexus-inline-code {
-    color: rgb(187 247 208);
-    background: rgba(34, 197, 94, 0.16);
-    border-color: rgba(74, 222, 128, 0.22);
+    background: none;
+    border: none;
+    color: inherit;
   }
 
   .nexus-code-shell {
     @apply my-4 overflow-hidden rounded-2xl border shadow-xl max-w-full;
-    border-color: rgba(34, 197, 94, 0.22);
+    border-color: rgba(74, 222, 128, 0.22);
     background: rgba(0, 0, 0, 0.98);
-    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35), 0 10px 22px rgba(34, 197, 94, 0.08);
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.35), 0 10px 22px rgba(74, 222, 128, 0.08);
   }
 
   .nexus-code-toolbar {
     @apply flex items-center justify-between gap-3 px-4 py-2 border-b;
     border-color: rgba(163, 163, 163, 0.18);
-    background: linear-gradient(90deg, rgba(34, 197, 94, 0.22), rgba(22, 163, 74, 0.12));
+    background: linear-gradient(90deg, rgba(74, 222, 128, 0.22), rgba(134, 239, 172, 0.12));
   }
 
   .nexus-code-language {
@@ -483,7 +503,7 @@
 
   .nexus-md-table-wrap {
     @apply my-4 max-w-full overflow-x-auto rounded-2xl border;
-    border-color: rgba(34, 197, 94, 0.20);
+    border-color: rgba(74, 222, 128, 0.20);
   }
 
   .nexus-md-table {
@@ -492,7 +512,7 @@
 
   .nexus-md-th {
     @apply px-3 py-2 text-left font-bold text-primary-700 dark:text-primary-200;
-    background: rgba(34, 197, 94, 0.10);
+    background: rgba(74, 222, 128, 0.10);
   }
 
   .nexus-md-td {
@@ -501,7 +521,7 @@
 
   .nexus-md-hr {
     @apply my-5 border-0 h-px;
-    background: linear-gradient(90deg, transparent, rgba(34, 197, 94, 0.55), transparent);
+    background: linear-gradient(90deg, transparent, rgba(74, 222, 128, 0.55), transparent);
   }
 }
 

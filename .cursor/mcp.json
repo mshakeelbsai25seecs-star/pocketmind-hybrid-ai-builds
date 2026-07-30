@@ -5,7 +5,7 @@
       "args": [
         "-y",
         "@modelcontextprotocol/server-filesystem",
-        "D:/nexus-ai-deep-fixed"
+        "${workspaceFolder}"
       ]
     }
   }

@@ -295,7 +295,7 @@ Remote embeddings are routed through `src-tauri/src/knowledge_chat/remote_embedd
 
 | Setting | Default | Notes |
 |---------|---------|--------|
-| `ocr.engine` | `auto` | `docling` when Python package installed, else legacy Tesseract/Windows OCR |
+| `ocr.engine` | `auto` | When ready: Unlimited-OCR (CUDA) → Docling → legacy Tesseract/Windows OCR. Also `unlimited` / `docling` / `legacy`. |
 | `ocr.preprocess` | on | OpenCV deskew/binarize when `opencv-python-headless` is installed |
 | `ocr.caption_figures` | off | Wraps tables/figures for search at index time (offline) |
 | `ocr.llm_repair` | off | Stronger OCR text repair; raw sidecar kept; optional `NEXUS_OCR_LLM_REPAIR_CMD` |

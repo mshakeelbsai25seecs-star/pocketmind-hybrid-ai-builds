@@ -51,3 +51,32 @@ pip install pymupdf pillow pytesseract opencv-python-headless docling
 ```
 
 Docling models are **not** bundled in tester zips. Without these packages, PocketMind falls back to legacy Tesseract / Windows OCR. Online Image RAG stays off unless you enable it in Settings and per collection.
+
+### Download embeddings / OCR from the app
+
+During **Setup → Support models**, or later under **Settings → Deployment**, you can download:
+
+- BGE-M3 document embeddings
+- Qwen3-Embedding-8B code embeddings
+- Qwen3-Reranker-4B
+- Unlimited-OCR weights (optional CUDA)
+
+Chat models remain under **Models**. None of these large files are inside the installer.
+
+### Optional: Unlimited-OCR (CUDA, high accuracy)
+
+Requires an NVIDIA GPU and CUDA PyTorch. Weights are **not** in the installer.
+
+```
+pip install torch transformers pymupdf huggingface_hub
+```
+
+In the app: **Settings → Security → Scanned PDFs** → choose **Unlimited-OCR** or **Automatic**, then **Download Unlimited-OCR weights**. Auto order when ready: Unlimited → Docling → Legacy. CPU-only PCs should keep Built-in / Docling.
+
+### Optional: Document Studio (DOCX / PPTX / PDF)
+
+```
+pip install python-docx python-pptx reportlab
+```
+
+Open **Document Studio** in the sidebar, or use Chat **Export as… → DOCX/PPTX/PDF**. The model writes a JSON outline; exporters always write files offline on this PC.

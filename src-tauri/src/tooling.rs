@@ -150,10 +150,22 @@ fn find_binary(tool: &str) -> Option<PathBuf> {
 
 fn which_in_path(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
+    let candidates = if cfg!(windows) {
+        vec![
+            format!("{name}.exe"),
+            format!("{name}.cmd"),
+            format!("{name}.bat"),
+            name.to_string(),
+        ]
+    } else {
+        vec![name.to_string()]
+    };
     for dir in std::env::split_paths(&path) {
-        let candidate = dir.join(name);
-        if candidate.is_file() {
-            return Some(candidate);
+        for c in &candidates {
+            let candidate = dir.join(c);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
         }
     }
     None

@@ -4,7 +4,7 @@ import {
   Plus, Home, Wrench, BookOpen,
   HardDrive, DatabaseBackup, HelpCircle, ImageIcon, MoreVertical,
   Edit3, Trash2, Copy, PanelLeftClose, PanelLeftOpen, Monitor, ServerCog, ShieldCheck, LibraryBig,
-  Menu, ChevronDown, ChevronRight, Code2, Layers
+  Menu, ChevronDown, ChevronRight, Code2, Layers, FileText
 } from 'lucide-react';
 import { useAppStore } from '../store';
 import { invoke } from '@tauri-apps/api/tauri';
@@ -23,7 +23,6 @@ import {
   isKnowledgeChatMode,
   isPocketCodeMode,
 } from '../conversationModes';
-
 function safeTitle(title: string | null | undefined): string {
   const value = (title || '').trim();
   return value || 'Untitled chat';
@@ -136,6 +135,7 @@ export default function Sidebar() {
       return;
     }
     if (historyMode === 'pocketcode' || activeView === 'code-workspace') {
+      useAppStore.getState().requestNewPocketcodeSession();
       setActiveView('code-workspace');
       setSidebarOpen(false);
       return;
@@ -155,6 +155,7 @@ export default function Sidebar() {
       setSidebarOpen(false);
     } catch (err) {
       console.error('Failed to create conversation:', err);
+      alert(`Could not start a new chat: ${String(err)}`);
     }
   };
 
@@ -272,6 +273,7 @@ export default function Sidebar() {
     { id: 'models' as const, icon: Download, label: 'Models' },
     { id: 'enterprise-server' as const, icon: ServerCog, label: 'Org Server' },
     { id: 'image-studio' as const, icon: ImageIcon, label: 'Image Studio' },
+    { id: 'document-studio' as const, icon: FileText, label: 'Document Studio' },
   ];
 
   const toolsNavItems = [
@@ -310,28 +312,31 @@ export default function Sidebar() {
         aria-label="Close navigation overlay"
       />
 
-      <aside className="fixed left-0 top-0 h-full w-[min(20rem,calc(100vw-1rem))] md:w-72 bg-white dark:bg-surface-950 border-r border-surface-200 dark:border-surface-700 flex flex-col z-40 shadow-sm">
-        <div className="p-4 flex items-center justify-between border-b border-surface-200 dark:border-surface-700 flex-shrink-0">
+      <aside className="fixed left-0 top-0 h-full w-[min(20rem,calc(100vw-1rem))] md:w-72 bg-white dark:bg-black border-r border-surface-200 dark:border-white/5 flex flex-col z-40 shadow-sm">
+        <div className="px-4 pt-4 pb-3 flex items-center justify-between flex-shrink-0 bg-white dark:bg-black">
           <div className="flex items-center gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-primary-500 flex items-center justify-center shrink-0">
-              <MessageSquare className="w-5 h-5 text-surface-950" />
-            </div>
+            <img
+              src="/pocketmind-logo-mark.png"
+              alt="PocketMind Hybrid AI"
+              className="w-10 h-10 rounded-xl shrink-0 object-cover bg-black"
+              draggable={false}
+            />
             <div className="min-w-0">
-              <span className="font-black text-lg tracking-tight block truncate text-surface-950 dark:text-white">PocketMind Hybrid AI</span>
+              <span className="app-brand-name font-black text-xl tracking-tight block truncate text-primary-400 dark:text-primary-300">PocketMind Hybrid AI</span>
               <span className="text-[11px] text-surface-500 block truncate">Offline AI workspace</span>
             </div>
           </div>
           <button
             onClick={() => setSidebarOpen(false)}
-            className="p-2 rounded-xl hover:bg-surface-200 dark:hover:bg-surface-800 transition-colors"
+            className="p-2 rounded-xl hover:bg-surface-200 dark:hover:bg-white/5 transition-colors"
             title="Collapse navigation"
           >
             <PanelLeftClose className="w-5 h-5" />
           </button>
         </div>
 
-        <div className="flex-shrink-0 border-b border-surface-200 dark:border-surface-800">
-          <div className="px-3 py-3">
+        <div className="flex-shrink-0 bg-white dark:bg-black">
+          <div className="px-3 pb-3 pt-1">
             <p className="px-1 pb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-surface-500">Workspace</p>
             {FEATURE_FLAGS.workspaceProfiles && profiles.length > 0 && (
               <div className="mb-2 px-1 space-y-1">

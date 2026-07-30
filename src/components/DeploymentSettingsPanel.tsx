@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { open } from '@tauri-apps/api/dialog';
-import { CheckCircle2, FolderOpen, Loader2, Save, Server, Settings2 } from 'lucide-react';
+import { CheckCircle2, Download, FolderOpen, Loader2, Save, Server, Settings2 } from 'lucide-react';
 import { useAppStore } from '../store';
 import { useKnowledgeChatStore } from '../knowledgeChat/store';
 import {
@@ -10,9 +10,9 @@ import {
   saveDeploymentConfigMapped,
   SERVER_INFERENCE_PRESET,
   WORKSTATION_INFERENCE_PRESET,
-  isPathUnderDeploymentRoots,
   type DeploymentConfig,
 } from '../deploymentConfig';
+import SupportModelsPanel from './SupportModelsPanel';
 
 function fieldLabel(label: string, children: React.ReactNode) {
   return (
@@ -160,6 +160,17 @@ export default function DeploymentSettingsPanel() {
             <input value={form.socIntakeSubdir} onChange={e => update('socIntakeSubdir', e.target.value)} className="input-field font-mono text-xs" placeholder="intake" />
           )}
         </div>
+      </div>
+
+      <div className="glass-panel rounded-xl p-6 space-y-4">
+        <h3 className="font-semibold flex items-center gap-2">
+          <Download className="w-5 h-5 text-primary-500" />
+          Download embeddings, reranker &amp; OCR
+        </h3>
+        <p className="text-sm text-surface-500">
+          On-demand downloads with Hugging Face links. The app writes files under your models folder (or OCR cache). Not included in the Windows installer.
+        </p>
+        <SupportModelsPanel />
       </div>
 
       <div className="glass-panel rounded-xl p-6 space-y-4">

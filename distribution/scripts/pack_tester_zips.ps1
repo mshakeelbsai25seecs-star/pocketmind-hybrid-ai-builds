@@ -56,6 +56,7 @@ if (-not $SkipWindowsBuild) {
 }
 
 Write-Host "`n=== Windows: stage ===" -ForegroundColor Cyan
+& powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot "distribution\scripts\sync-llama-cpp-server.ps1")
 & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $RepoRoot "distribution\windows-desktop\scripts\stage-release.ps1") -RepoRoot $RepoRoot -OutDir (Join-Path $winStage "PocketMind")
 
 Write-StartHere (Join-Path $winStage "START_HERE.txt") @"

@@ -3,6 +3,7 @@
 
 use crate::code_workspace::{resolve_under_root, standardize, READ_MAX_BYTES};
 use crate::error::{AppError, AppResult};
+use pocketcode_workspace::WorkspaceSidecar;
 use crate::knowledge_chat::code_languages::is_code_extension;
 use crate::knowledge_chat::code_parser::parse_code_file;
 use serde::{Deserialize, Serialize};
@@ -65,8 +66,10 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-fn index_path(workspace_root: &Path) -> PathBuf {
-    workspace_root.join(INDEX_DIR).join(INDEX_FILE)
+fn index_path(workspace_root: &Path) -> AppResult<PathBuf> {
+    Ok(WorkspaceSidecar::for_workspace(workspace_root)
+        .map_err(|e| AppError::Unknown(e.to_string()))?
+        .index_file())
 }
 
 fn file_mtime_secs(path: &Path) -> u64 {
@@ -79,7 +82,7 @@ fn file_mtime_secs(path: &Path) -> u64 {
 }
 
 fn load_index(workspace_root: &Path) -> SymbolIndex {
-    let path = index_path(workspace_root);
+    let path = index_path(workspace_root).unwrap_or_else(|_| workspace_root.join(INDEX_FILE));
     match fs::read_to_string(&path) {
         Ok(raw) => serde_json::from_str(&raw).unwrap_or_default(),
         Err(_) => SymbolIndex {
@@ -92,10 +95,11 @@ fn load_index(workspace_root: &Path) -> SymbolIndex {
 }
 
 fn save_index(workspace_root: &Path, index: &SymbolIndex) -> AppResult<()> {
-    let dir = workspace_root.join(INDEX_DIR);
-    fs::create_dir_all(&dir)
+    let sidecar = WorkspaceSidecar::for_workspace(workspace_root)
+        .map_err(|e| AppError::Unknown(e.to_string()))?;
+    fs::create_dir_all(sidecar.index_dir())
         .map_err(|e| AppError::Unknown(format!("Cannot create index dir: {e}")))?;
-    let path = index_path(workspace_root);
+    let path = sidecar.index_file();
     let raw = serde_json::to_string(index)
         .map_err(|e| AppError::Unknown(format!("Cannot serialize index: {e}")))?;
     fs::write(&path, raw).map_err(|e| AppError::Unknown(format!("Cannot write index: {e}")))?;
@@ -238,6 +242,98 @@ pub fn ensure_index(workspace_root: &Path) -> AppResult<(usize, usize)> {
     Ok((touched, symbol_total))
 }
 
+const MAX_INVENTORY_FILES: usize = 400;
+
+/// Folder/file inventory used when the tree has no parseable code symbols
+/// (XML/Markdown/JSON/config workspaces), so repo_map is never an empty answer.
+fn non_code_inventory(root: &Path) -> (usize, BTreeMap<String, Vec<(String, u64)>>, BTreeMap<String, usize>) {
+    let mut by_folder: BTreeMap<String, Vec<(String, u64)>> = BTreeMap::new();
+    let mut ext_counts: BTreeMap<String, usize> = BTreeMap::new();
+    let mut total = 0usize;
+
+    for entry in WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|e| {
+            if e.file_type().is_dir() {
+                let name = e.file_name().to_string_lossy();
+                !should_skip_dir(&name)
+            } else {
+                true
+            }
+        })
+    {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let abs = entry.path();
+        let ext = extension_of(abs);
+        let label = if ext.is_empty() {
+            "(no ext)".to_string()
+        } else {
+            format!(".{ext}")
+        };
+        *ext_counts.entry(label).or_insert(0) += 1;
+        total += 1;
+        if total > MAX_INVENTORY_FILES * 8 {
+            break;
+        }
+        let rel = abs
+            .strip_prefix(root)
+            .map(|p| standardize(&p.to_string_lossy()))
+            .unwrap_or_else(|_| standardize(&abs.to_string_lossy()));
+        let size = fs::metadata(abs).map(|m| m.len()).unwrap_or(0);
+        let folder = top_folder(&rel);
+        let bucket = by_folder.entry(folder).or_default();
+        if bucket.len() < MAX_INVENTORY_FILES {
+            bucket.push((rel, size));
+        }
+    }
+
+    (total, by_folder, ext_counts)
+}
+
+fn inventory_map_text(root: &Path) -> String {
+    let (total, by_folder, ext_counts) = non_code_inventory(root);
+    let mut exts: Vec<(String, usize)> = ext_counts.into_iter().collect();
+    exts.sort_by(|a, b| b.1.cmp(&a.1));
+    let ext_line = exts
+        .iter()
+        .take(10)
+        .map(|(e, n)| format!("{e} x{n}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let mut sections = vec![format!(
+        "# Repo map (no code symbols)\n\nRoot: `{}`\nFiles: {} | File types: {}\n\n\
+         This workspace has no parseable source symbols, so there is nothing for find_symbol/read_symbol to return.\n\
+         Use one grep from the root (add a glob to narrow file types), then read_file a small window around the hits.\n",
+        root.to_string_lossy(),
+        total,
+        if ext_line.is_empty() { "(none)".to_string() } else { ext_line }
+    )];
+
+    for (folder, files) in by_folder {
+        sections.push(format!("## {folder}/"));
+        for (path, size) in files.iter().take(MAX_INVENTORY_FILES) {
+            sections.push(format!("- `{path}` ({size} B)"));
+        }
+        sections.push(String::new());
+    }
+
+    let mut text = sections.join("\n");
+    const MAX_MAP_CHARS: usize = 24_000;
+    if text.len() > MAX_MAP_CHARS {
+        text.truncate(MAX_MAP_CHARS);
+        text.push_str("\n…[inventory truncated — use grep with a glob to narrow down]");
+    }
+    text
+}
+
 /// Compact repo map text for the agent.
 pub fn repo_map(workspace_root: &Path) -> AppResult<String> {
     let _ = ensure_index(workspace_root)?;
@@ -245,6 +341,10 @@ pub fn repo_map(workspace_root: &Path) -> AppResult<String> {
         .canonicalize()
         .unwrap_or_else(|_| workspace_root.to_path_buf());
     let index = load_index(&root);
+    let indexed_symbols: usize = index.files.values().map(|f| f.symbols.len()).sum();
+    if indexed_symbols == 0 {
+        return Ok(inventory_map_text(&root));
+    }
 
     let mut by_folder: BTreeMap<String, Vec<&FileIndexEntry>> = BTreeMap::new();
     for file in index.files.values() {

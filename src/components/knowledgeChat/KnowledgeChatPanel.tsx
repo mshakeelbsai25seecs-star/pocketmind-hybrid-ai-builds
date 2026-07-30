@@ -155,7 +155,7 @@ function sourceInterpretation(
   const isModulePreamble = entity_name === 'module_preamble';
 
   // For real code entities, describe them precisely from index metadata
-  // (e.g. "Defines the function `handleSend`.") rather than a generic summary.
+  // (e.g. "Defines the function `submitForm`.") rather than a generic summary.
   if (source_type === 'code_entity' && entity_name && !isModulePreamble) {
     const kind = (entity_kind || 'symbol').toLowerCase();
     return `Defines the ${kind} \`${entity_name}\`.`;
@@ -441,9 +441,6 @@ export default function KnowledgeChatPanel() {
       };
 
       try {
-        // #region agent log
-        fetch('http://127.0.0.1:7414/ingest/28bf2132-0f52-40ef-96b9-4e681c1d7653',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d5a77'},body:JSON.stringify({sessionId:'7d5a77',runId:'kc-persist-post',hypothesisId:'A',location:'KnowledgeChatPanel.tsx:conversation-init',message:'kc_conversation_init_restore_or_create',data:{chatReady,collectionId:activeCollection.id,collectionName:activeCollection.name,serverRagMode,storedId,appActiveConversationId,mode},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
 
         let resolvedId: string | null = null;
         let resolvedMessages: Message[] = [];
@@ -528,10 +525,6 @@ export default function KnowledgeChatPanel() {
         } catch {
           // Sidebar refresh is best-effort.
         }
-
-        // #region agent log
-        fetch('http://127.0.0.1:7414/ingest/28bf2132-0f52-40ef-96b9-4e681c1d7653',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d5a77'},body:JSON.stringify({sessionId:'7d5a77',runId:'kc-persist-post',hypothesisId:'A',location:'KnowledgeChatPanel.tsx:conversation-resolved',message:'kc_conversation_resolved',data:{conversationId:resolvedId,restoreSource,messageCount:resolvedMessages.length,storageKey},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
       } catch (err) {
         if (!cancelled) setError(humanError(err));
       } finally {
@@ -574,8 +567,14 @@ export default function KnowledgeChatPanel() {
     };
     const unlistenChunk = await listen<GenerationResponsePayload>('generation-chunk', (event) => {
       const chunkText = event.payload?.text || '';
-      if (!chunkText || isStale?.()) return;
-      streamingText = event.payload?.finish_reason
+      const fr = event.payload?.finish_reason;
+      if (isStale?.()) return;
+      if (fr === 'reasoning') {
+        if (chunkText.trim()) onStatus?.(chunkText.trim());
+        return;
+      }
+      if (!chunkText) return;
+      streamingText = fr && chunkText.length >= streamingText.length
         ? chunkText
         : appendStreamChunk(streamingText, chunkText);
       onChunk(streamingText);
@@ -586,26 +585,6 @@ export default function KnowledgeChatPanel() {
     });
 
     const backend = backendForModelPath(currentModel!);
-    // #region agent log
-    fetch('http://127.0.0.1:7414/ingest/28bf2132-0f52-40ef-96b9-4e681c1d7653', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7d5a77' },
-      body: JSON.stringify({
-        sessionId: '7d5a77',
-        runId: 'online-kc-1',
-        hypothesisId: 'H3',
-        location: 'KnowledgeChatPanel.tsx:streamGenerate',
-        message: 'stream_generate_invoke',
-        data: {
-          modelPath: currentModel,
-          backend,
-          promptChars: prompt.length,
-          maxTokens: generationParams.max_tokens,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => undefined);
-    // #endregion
     try {
       await invoke('stream_generate', {
         request: {
@@ -617,31 +596,11 @@ export default function KnowledgeChatPanel() {
           backend,
         },
       });
+      await new Promise<void>(resolve => window.setTimeout(() => resolve(), 40));
     } finally {
       unlistenChunk();
       unlistenStatus();
     }
-
-    // #region agent log
-    fetch('http://127.0.0.1:7414/ingest/28bf2132-0f52-40ef-96b9-4e681c1d7653', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7d5a77' },
-      body: JSON.stringify({
-        sessionId: '7d5a77',
-        runId: 'online-kc-1',
-        hypothesisId: 'H3',
-        location: 'KnowledgeChatPanel.tsx:streamGenerate',
-        message: 'stream_generate_done',
-        data: {
-          modelPath: currentModel,
-          backend,
-          replyChars: streamingText.trim().length,
-          replyPreview: streamingText.trim().slice(0, 160),
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => undefined);
-    // #endregion
     return streamingText.trim();
   };
 
@@ -697,9 +656,6 @@ export default function KnowledgeChatPanel() {
       content: serverRagMode ? 'Asking the organization server...' : 'Searching this folder...',
       metadata: null,
     });
-    // #region agent log
-    fetch('http://127.0.0.1:7414/ingest/28bf2132-0f52-40ef-96b9-4e681c1d7653',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d5a77'},body:JSON.stringify({sessionId:'7d5a77',runId:'kc-persist-post',hypothesisId:'B',location:'KnowledgeChatPanel.tsx:messages-persisted',message:'kc_messages_written_to_db',data:{conversationId,userMsgId,assistantMsgId,questionLen:question.length},timestamp:Date.now()})}).catch(()=>{});
-    // #endregion
     setMessages(prev => [...prev, createLocalMessage(
       assistantMsgId,
       conversationId,
@@ -772,9 +728,6 @@ export default function KnowledgeChatPanel() {
         search_scope: searchScope,
         intent_override: precisionVeto || searchIntentResult.intent,
       });
-      // #region agent log
-      fetch('http://127.0.0.1:7414/ingest/28bf2132-0f52-40ef-96b9-4e681c1d7653',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d5a77'},body:JSON.stringify({sessionId:'7d5a77',runId:'llm-orch-1',hypothesisId:'O1',location:'KnowledgeChatPanel.tsx:search',message:'fe_hybrid_search_result',data:{collectionId:activeCollection.id,modeRequested:mode,modeActual:searchResult.mode,hitCount:searchResult.hits?.length??0,denseAvailable,searchIntent:precisionVeto||searchIntentResult.intent,preferLlmOrchestration,precisionVeto,degradationCount:searchResult.degradation_reasons?.length??0,degradationSample:(searchResult.degradation_reasons||[]).slice(0,3),confidence:searchResult.confidence,autoFilters:!!searchResult.auto_filters_applied},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       if (isStale()) return;
 
       // Stage B — skipped under orchestration (LLM decides meaning from evidence).
@@ -896,34 +849,6 @@ export default function KnowledgeChatPanel() {
         structuredAnswer = null;
       }
       let correctiveRetrievalUsed = false;
-      // #region agent log
-      fetch('http://127.0.0.1:7414/ingest/28bf2132-0f52-40ef-96b9-4e681c1d7653', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7d5a77' },
-        body: JSON.stringify({
-          sessionId: '7d5a77',
-          runId: 'llm-orch-1',
-          hypothesisId: 'O1',
-          location: 'KnowledgeChatPanel.tsx:route',
-          message: 'answer_route_resolved',
-          data: {
-            currentModel,
-            preferOnlineLlm,
-            preferLlmOrchestration,
-            llmOwnsAnswer,
-            answerRoute,
-            answerIntent: answerIntent(),
-            searchIntent: searchResult.detected_intent || searchResult.answer_intent || null,
-            hitCount: contextHits.length,
-            hasExtractive: !!extractivePreview,
-            hasStructured: !!structuredAnswer,
-            serverRagMode,
-            questionPreview: question.slice(0, 120),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => undefined);
-      // #endregion
 
       const applySearchState = (next: KcSearchResult) => {
         // Preserve Stage A/B intent fields across corrective re-search.
@@ -1015,9 +940,6 @@ export default function KnowledgeChatPanel() {
           defaultParams,
           searchResult.confidence,
         );
-        // #region agent log
-        fetch('http://127.0.0.1:7414/ingest/28bf2132-0f52-40ef-96b9-4e681c1d7653',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d5a77'},body:JSON.stringify({sessionId:'7d5a77',runId:'llm-orch-1',hypothesisId:'O2',location:'KnowledgeChatPanel.tsx:retrievalDecision',message:'llm_retrieval_decision',data:{action:decision.action,queryPreview:decision.action==='need_retrieval'?decision.query.slice(0,120):null,hitCount:contextHits.length,confidence:searchResult.confidence},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         if (isStale()) return;
         if (decision.action === 'need_retrieval') {
           await runCorrectiveRetrieval(decision.query);
@@ -1218,7 +1140,7 @@ export default function KnowledgeChatPanel() {
           }
         }
 
-        // After files are attached, rebuild extractive — this is the handleSend path:
+        // After files are attached, rebuild extractive — this is the submitForm path:
         // exact function body present, but Tree-sitter/chunk extractive missed earlier.
         // Only for explain_symbol — list/locate/imports use structured specialists instead.
         let extractiveFromAttached: string | null = null;
@@ -1375,30 +1297,6 @@ export default function KnowledgeChatPanel() {
             attachedSources,
           );
 
-        // #region agent log
-        fetch('http://127.0.0.1:7414/ingest/28bf2132-0f52-40ef-96b9-4e681c1d7653', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7d5a77' },
-          body: JSON.stringify({
-            sessionId: '7d5a77',
-            runId: 'online-kc-1',
-            hypothesisId: 'H2',
-            location: 'KnowledgeChatPanel.tsx:postLlm',
-            message: 'llm_draft_trust_gate',
-            data: {
-              preferOnlineLlm,
-              groundedOk,
-              verifyOk,
-              verifyVerdict,
-              answerTrusted,
-              draftChars: finalText.length,
-              hasExtractiveFallback: !!bestExtractive,
-            },
-            timestamp: Date.now(),
-          }),
-        }).catch(() => undefined);
-        // #endregion
-
         if (!llmOwnsAnswer && shouldPreferExtractiveOverLlm(question, bestExtractive, finalText, answerTrusted)) {
           finalText = formatAnswer(bestExtractive!, true);
         } else if (isNotFoundAnswer(finalText) || !answerTrusted) {
@@ -1470,29 +1368,6 @@ export default function KnowledgeChatPanel() {
       };
 
       const result = await runAnswerPipeline(answerContext);
-      // #region agent log
-      fetch('http://127.0.0.1:7414/ingest/28bf2132-0f52-40ef-96b9-4e681c1d7653', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': '7d5a77' },
-        body: JSON.stringify({
-          sessionId: '7d5a77',
-          runId: 'llm-orch-1',
-          hypothesisId: 'O1',
-          location: 'KnowledgeChatPanel.tsx:pipelineResult',
-          message: 'answer_pipeline_winner',
-          data: {
-            currentModel,
-            preferOnlineLlm,
-            preferLlmOrchestration,
-            winningStageId: result?.stageId || null,
-            answerChars: result?.text?.trim().length || 0,
-            answerPreview: (result?.text || '').trim().slice(0, 160),
-            looksLikeSymbolInventory: /^\s*`[^`]+`\s+defines these (functions|symbols):/i.test(result?.text || ''),
-          },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => undefined);
-      // #endregion
       if (isStale() || !result || !result.text.trim()) return;
       await publishAnswer(
         result.text,

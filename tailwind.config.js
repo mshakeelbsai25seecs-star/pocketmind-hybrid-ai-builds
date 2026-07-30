@@ -8,19 +8,19 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Conductor.build–aligned green (matches Android PmGreen / PmGreenDim)
+        // Lighter green accent (shifted up from classic Conductor #22c55e)
         primary: {
-          50: '#f0fdf4',
-          100: '#dcfce7',
-          200: '#bbf7d0',
-          300: '#86efac',
-          400: '#4ade80',
-          500: '#22c55e',
-          600: '#16a34a',
-          700: '#15803d',
-          800: '#166534',
-          900: '#14532d',
-          950: '#052e16',
+          50: '#f3fef6',
+          100: '#e8fceb',
+          200: '#d1fadf',
+          300: '#a7f3c0',
+          400: '#86efac',
+          500: '#4ade80',
+          600: '#22c55e',
+          700: '#16a34a',
+          800: '#15803d',
+          900: '#166534',
+          950: '#14532d',
         },
         // True-black / zinc neutrals (matches Android PmBlack / PmPanel / PmLight*)
         surface: {

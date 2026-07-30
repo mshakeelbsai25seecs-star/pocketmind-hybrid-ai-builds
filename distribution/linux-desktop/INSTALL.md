@@ -35,3 +35,5 @@ pip3 install pymupdf pillow pytesseract opencv-python-headless docling
 `
 
 Docling models are not bundled by default. Online Image RAG remains off unless enabled globally and per collection.
+
+Optional Unlimited-OCR (NVIDIA CUDA + `torch`/`transformers`/`pymupdf`): download weights from **Settings → Security → Scanned PDFs**. Optional Document Studio exporters: `pip3 install python-docx python-pptx reportlab`.

@@ -149,7 +149,7 @@ export default function BackupRestore() {
     }
     const selected = await open({
       multiple: false,
-      filters: [{ name: 'Encrypted backup', extensions: ['pmbk'] }],
+      filters: [{ name: 'Encrypted backup', extensions: ['pmbak', 'pmbk'] }],
     });
     if (typeof selected !== 'string') return;
     setBusy(true);

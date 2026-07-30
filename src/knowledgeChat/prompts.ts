@@ -312,7 +312,7 @@ export function isCodeSymbolQuestion(question: string): boolean {
       question,
     );
   if (/\bimports?\b/i.test(question) && hasCodeFile) return true;
-  // Accuracy-first: symbol + file (e.g. "handleSend in ChatView.tsx") counts even
+  // Accuracy-first: symbol + file (e.g. "submitForm in UserPanel.tsx") counts even
   // without an explicit "what does", so extractive can short-circuit Phi-3.
   if (hasCamelOrSnake && (hasExplainVerb || hasCodeFile)) return true;
   return false;
@@ -960,7 +960,7 @@ function isWeakSectionLabel(label: string): boolean {
 
 export function displaySectionLabel(hit: KcSearchHit): string {
   const { source_type, entity_name, entity_kind } = hit.chunk;
-  // Code entities cite by symbol (e.g. "function handleSend"), never module_preamble.
+  // Code entities cite by symbol (e.g. "function submitForm"), never module_preamble.
   if (source_type === 'code_entity' && entity_name && entity_name !== 'module_preamble') {
     const kind = (entity_kind || '').toLowerCase();
     return kind ? `${kind} ${entity_name}` : entity_name;

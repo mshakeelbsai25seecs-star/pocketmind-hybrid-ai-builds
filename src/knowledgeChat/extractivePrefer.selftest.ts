@@ -15,8 +15,8 @@ function assert(cond: boolean, msg: string) {
   if (!cond) throw new Error(msg);
 }
 
-const handleSendBody = `
-const handleSend = async () => {
+const submitFormBody = `
+const submitForm = async () => {
   if (!input.trim()) return;
   const content = input.trim();
   setInput('');
@@ -25,23 +25,23 @@ const handleSend = async () => {
 };
 `;
 
-const question = 'What does handleSend do in ChatView.tsx?';
-assert(isCodeSymbolQuestion(question), 'handleSend question should be code-symbol');
+const question = 'What does submitForm do in UserPanel.tsx?';
+assert(isCodeSymbolQuestion(question), 'submitForm question should be code-symbol');
 
 const extractive = tryExtractiveFromAttachedSources(question, [
-  { file_name: 'ChatView.tsx', text: handleSendBody, line_start: 10, line_end: 20 },
+  { file_name: 'UserPanel.tsx', text: submitFormBody, line_start: 10, line_end: 20 },
 ]);
-assert(!!extractive, 'attached handleSend body must yield extractive answer');
+assert(!!extractive, 'attached submitForm body must yield extractive answer');
 assert(shouldSkipLlmForExtractive(question, extractive), 'must skip LLM when extractive ready');
 
 const hallucinated = [
   '## Answer',
   '',
-  'handleSend opens a WebSocket and streams tokens from a remote API.',
+  'dispatchMessage opens a WebSocket and streams tokens from a remote API.',
   '',
   '## Evidence',
   '',
-  '[Source: ChatView.tsx | L10–L20]',
+  '[Source: UserPanel.tsx | L10–L20]',
   '',
   '## Explanation',
   '',
@@ -57,11 +57,11 @@ assert(
   'prefer extractive for code-symbol even if groundingOk',
 );
 
-const score = symbolBodyGroundingScore(hallucinated, handleSendBody, ['handleSend']);
+const score = symbolBodyGroundingScore(hallucinated, submitFormBody, ['submitForm']);
 assert(score < 0.12, `hallucination body overlap should be low, got ${score}`);
 assert(
   !groundingCheck(hallucinated, [], question, 0.35, [
-    { file_name: 'ChatView.tsx', text: handleSendBody, line_start: 10, line_end: 20, source_confidence: 0.9, source_type: 'whole_file' },
+    { file_name: 'UserPanel.tsx', text: submitFormBody, line_start: 10, line_end: 20, source_confidence: 0.9, source_type: 'whole_file' },
   ]),
   '## Evidence heading must not auto-pass grounding for code-symbol answers',
 );

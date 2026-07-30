@@ -1,6 +1,7 @@
 //! PocketCode Plan mode artifacts under `.pocketmind-plans/`.
 
 use crate::error::{AppError, AppResult};
+use pocketcode_workspace::WorkspaceSidecar;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -44,8 +45,10 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-fn plans_dir(root: &Path) -> PathBuf {
-    root.join(PLAN_DIR)
+fn plans_dir(root: &Path) -> AppResult<PathBuf> {
+    Ok(WorkspaceSidecar::for_workspace(root)
+        .map_err(|e| AppError::Unknown(e.to_string()))?
+        .plans_dir())
 }
 
 fn plan_json_path(root: &Path, id: &str) -> AppResult<PathBuf> {
@@ -53,7 +56,7 @@ fn plan_json_path(root: &Path, id: &str) -> AppResult<PathBuf> {
     if id.is_empty() || id.contains("..") || id.contains('/') || id.contains('\\') {
         return Err(AppError::Unknown("Invalid plan id.".to_string()));
     }
-    Ok(plans_dir(root).join(format!("{id}.json")))
+    Ok(plans_dir(root)?.join(format!("{id}.json")))
 }
 
 fn plan_md_path(root: &Path, id: &str) -> AppResult<PathBuf> {
@@ -61,11 +64,11 @@ fn plan_md_path(root: &Path, id: &str) -> AppResult<PathBuf> {
     if id.is_empty() || id.contains("..") || id.contains('/') || id.contains('\\') {
         return Err(AppError::Unknown("Invalid plan id.".to_string()));
     }
-    Ok(plans_dir(root).join(format!("{id}.md")))
+    Ok(plans_dir(root)?.join(format!("{id}.md")))
 }
 
 fn ensure_dir(root: &Path) -> AppResult<()> {
-    fs::create_dir_all(plans_dir(root))
+    fs::create_dir_all(plans_dir(root)?)
         .map_err(|e| AppError::Unknown(format!("Cannot create plans dir: {e}")))
 }
 
@@ -153,7 +156,7 @@ pub fn list_plans(workspace_root: &Path) -> AppResult<Vec<PlanSummary>> {
     let root = workspace_root
         .canonicalize()
         .unwrap_or_else(|_| workspace_root.to_path_buf());
-    let dir = plans_dir(&root);
+    let dir = plans_dir(&root)?;
     if !dir.is_dir() {
         return Ok(vec![]);
     }

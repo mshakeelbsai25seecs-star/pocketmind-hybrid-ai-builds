@@ -1,5 +1,6 @@
 use tauri::State;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use std::process::Command as StdCommand;
@@ -30,6 +31,10 @@ pub struct AppState {
     pub local_backend: Arc<crate::llm::local::LlamaCppBackend>,
     pub kc_embed_pool: Arc<crate::knowledge_chat::runtime::KcEmbedPool>,
     pub kc_rerank_pool: Arc<crate::knowledge_chat::llama_rerank::KcRerankPool>,
+    /// User requested Stop on an in-flight model download.
+    pub download_cancel: Arc<AtomicBool>,
+    /// Final + `.part` paths belonging to the current download job (cleared on Stop).
+    pub download_tracked: Arc<Mutex<Vec<PathBuf>>>,
 }
 
 pub(crate) async fn record_audit(
@@ -424,11 +429,17 @@ pub async fn get_messages(
     db.get_messages(&conversation_id).map_err(|e| e.into())
 }
 
-// Stable non-streaming generation used by the desktop UI. It returns exactly one final
-// assistant message, which prevents duplicate SSE/listener bugs.
-#[tauri::command]
-pub async fn generate_response(
-    state: State<'_, AppState>,
+/// Non-streaming completion shared by Chat and Document Studio.
+pub async fn complete_generation(
+    state: &State<'_, AppState>,
+    request: GenerationRequest,
+) -> AppResult<String> {
+    let chunk = generate_response_inner(state, request).await?;
+    Ok(chunk.text)
+}
+
+async fn generate_response_inner(
+    state: &State<'_, AppState>,
     request: GenerationRequest,
 ) -> AppResult<GenerationChunk> {
     let (tx, mut rx) = mpsc::channel::<GenerationChunk>(10000);
@@ -440,7 +451,7 @@ pub async fn generate_response(
             .map(|p| p.starts_with("enterprise:"))
             .unwrap_or(false)
     {
-        let backend = resolve_enterprise_backend(&state, request.model_path.as_ref()).await?;
+        let backend = resolve_enterprise_backend(state, request.model_path.as_ref()).await?;
         backend.generate_stream(request, tx).await?;
     } else if request.backend == "remote" {
         let (provider, model_id) = parse_remote_model(request.model_path.as_ref())?;
@@ -457,7 +468,10 @@ pub async fn generate_response(
     } else {
         let model_path = request.model_path.clone()
             .ok_or_else(|| AppError::InferenceError("No local model selected. Go to Models, import/scan a .gguf file, then click Use.".to_string()))?;
+        let model_path = normalize_local_model_path(&model_path).to_string_lossy().to_string();
         state.local_backend.load_model(&model_path, &request.params).await?;
+        let mut request = request;
+        request.model_path = Some(model_path);
         state.local_backend.generate_stream(request, tx).await?;
     }
 
@@ -478,7 +492,18 @@ pub async fn generate_response(
         tokens_generated,
         tokens_per_sec,
         tool_calls: None,
+        reasoning: None,
     })
+}
+
+// Stable non-streaming generation used by the desktop UI. It returns exactly one final
+// assistant message, which prevents duplicate SSE/listener bugs.
+#[tauri::command]
+pub async fn generate_response(
+    state: State<'_, AppState>,
+    request: GenerationRequest,
+) -> AppResult<GenerationChunk> {
+    generate_response_inner(&state, request).await
 }
 
 // Streaming Generation
@@ -488,7 +513,8 @@ pub async fn stream_generate(
     request: GenerationRequest,
     window: tauri::Window,
 ) -> AppResult<()> {
-    let (tx, mut rx) = mpsc::channel::<GenerationChunk>(100);
+    // Larger buffer so fast remote streams (and occasional reasoning status) do not stall.
+    let (tx, mut rx) = mpsc::channel::<GenerationChunk>(256);
 
     if request.backend == "enterprise"
         || request
@@ -509,6 +535,7 @@ pub async fn stream_generate(
                     tokens_generated: 0,
                     tokens_per_sec: 0.0,
                     tool_calls: None,
+                    reasoning: None,
                 }).await;
             }
         });
@@ -557,6 +584,7 @@ pub async fn stream_generate(
                     tokens_generated: 0,
                     tokens_per_sec: 0.0,
                     tool_calls: None,
+                    reasoning: None,
                 }).await;
             }
         });
@@ -601,6 +629,7 @@ pub async fn stream_generate(
                     tokens_generated: 0,
                     tokens_per_sec: 0.0,
                     tool_calls: None,
+                    reasoning: None,
                 }).await;
             }
         });
@@ -751,7 +780,7 @@ pub async fn validate_api_key(
     let api_key = if !trimmed.is_empty() {
         trimmed
     } else {
-        let db = state.db.lock().await;
+    let db = state.db.lock().await;
         let encrypted = db
             .get_api_key(&provider)?
             .ok_or_else(|| AppError::Unknown(format!("No saved API key for {provider}.")))?;
@@ -765,7 +794,21 @@ pub async fn validate_api_key(
 #[tauri::command]
 pub async fn get_local_models(state: State<'_, AppState>) -> AppResult<Vec<crate::database::LocalModelRecord>> {
     let db = state.db.lock().await;
-    db.get_models().map_err(|e| e.into())
+    let models = db.get_models()?;
+    // Drop stale DB rows whose GGUF file is gone (common after Stop & clear or moved files).
+    let mut kept = Vec::new();
+    for m in models {
+        let p = PathBuf::from(&m.path);
+        if !is_chat_selectable_gguf_record(&m) {
+            continue;
+        }
+        if !p.is_file() {
+            let _ = db.delete_model(&m.id);
+            continue;
+        }
+        kept.push(m);
+    }
+    Ok(kept)
 }
 
 #[tauri::command]
@@ -825,24 +868,145 @@ fn infer_quantization(name: &str) -> Option<String> {
     None
 }
 
+fn is_mmproj_filename(name: &str) -> bool {
+    name.to_ascii_lowercase().contains("mmproj")
+}
+
+/// True for non-primary multi-part GGUF shards (…-00002-of-00005.gguf, …-split-00002-of-…).
+fn is_secondary_gguf_shard(file_name: &str) -> bool {
+    let lower = file_name.to_ascii_lowercase();
+    let Some(of_pos) = lower.rfind("-of-") else {
+        return false;
+    };
+    let before = &lower[..of_pos];
+    let Some(dash) = before.rfind('-') else {
+        return false;
+    };
+    let num = &before[dash + 1..];
+    if num.is_empty() || !num.chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    num.parse::<u32>().unwrap_or(1) != 1
+}
+
+fn is_chat_selectable_gguf_record(m: &crate::database::LocalModelRecord) -> bool {
+    let backend = m.backend.to_ascii_lowercase();
+    if backend == "mmproj" || backend == "gguf_shard" {
+        return false;
+    }
+    if is_mmproj_filename(&m.name) || is_mmproj_filename(&m.path) {
+        return false;
+    }
+    let leaf = Path::new(&m.path)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or(m.name.as_str());
+    if is_secondary_gguf_shard(leaf) || is_secondary_gguf_shard(&m.name) {
+        return false;
+    }
+    true
+}
+
+/// If this is a primary shard (…-00001-of-NNNN), ensure siblings 00002..NNNN exist.
+fn missing_gguf_shard_siblings(path: &Path) -> Vec<String> {
+    let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
+        return Vec::new();
+    };
+    let lower = file_name.to_ascii_lowercase();
+    let Some(of_pos) = lower.rfind("-of-") else {
+        return Vec::new();
+    };
+    let after = &lower[of_pos + 4..];
+    let total_str = after.split(|c: char| !c.is_ascii_digit()).next().unwrap_or("");
+    let Ok(total) = total_str.parse::<u32>() else {
+        return Vec::new();
+    };
+    if total <= 1 {
+        return Vec::new();
+    }
+    let before = &lower[..of_pos];
+    let Some(dash) = before.rfind('-') else {
+        return Vec::new();
+    };
+    let num = &before[dash + 1..];
+    if num.parse::<u32>().unwrap_or(0) != 1 {
+        // Not primary — load_model will still try; sibling check is for primary only.
+        return Vec::new();
+    }
+    let prefix = &file_name[..dash + 1];
+    let suffix_start = of_pos;
+    // Keep original case from file_name for suffix from -of-
+    let suffix = &file_name[suffix_start..];
+    let width = num.len();
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut missing = Vec::new();
+    for i in 2..=total {
+        let shard = format!("{prefix}{i:0width$}{suffix}", width = width);
+        let candidate = parent.join(&shard);
+        if !candidate.is_file() {
+            missing.push(shard);
+        }
+    }
+    missing
+}
+
 fn model_record_from_path(db: &Database, path: &Path, source_url: Option<&str>) -> AppResult<crate::database::LocalModelRecord> {
     if !path.exists() {
         return Err(AppError::MissingFile(path.display().to_string()));
     }
     crate::gguf::validate_gguf_file(path).map_err(AppError::CorruptModel)?;
 
-    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    // Windows canonicalize() yields \\?\D:\... which breaks llama-server -m.
+    let canonical = strip_windows_verbatim_prefix(
+        std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf()),
+    );
     let canonical_str = canonical.to_string_lossy().to_string();
+    let name = canonical.file_name().and_then(|n| n.to_str()).unwrap_or("model.gguf").to_string();
+    let meta = std::fs::metadata(&canonical)?;
+
+    // mmproj projectors are companions for VL GGUFs — keep on disk, do not list as chat models.
+    if is_mmproj_filename(&name) {
+        return Ok(crate::database::LocalModelRecord {
+            id: format!("mmproj:{}", canonical_str),
+            name,
+            path: canonical_str,
+            backend: "mmproj".to_string(),
+            quantization: None,
+            size_bytes: meta.len() as i64,
+            downloaded: true,
+            source_url: source_url.map(|s| s.to_string()),
+            metadata: Some(r#"{"role":"mmproj","selectable":false}"#.to_string()),
+            created_at: chrono_like_unix(),
+        });
+    }
+
+    // Secondary shards stay on disk for llama.cpp; do not register as selectable chat models.
+    if is_secondary_gguf_shard(&name) {
+        let quant = infer_quantization(&name);
+        return Ok(crate::database::LocalModelRecord {
+            id: format!("shard:{}", canonical_str),
+            name,
+            path: canonical_str,
+            backend: "gguf_shard".to_string(),
+            quantization: quant,
+            size_bytes: meta.len() as i64,
+            downloaded: true,
+            source_url: source_url.map(|s| s.to_string()),
+            metadata: Some(r#"{"role":"gguf_shard","selectable":false}"#.to_string()),
+            created_at: chrono_like_unix(),
+        });
+    }
+
     for existing in db.get_models()? {
         let existing_path = PathBuf::from(&existing.path);
-        let existing_canonical = std::fs::canonicalize(&existing_path).unwrap_or(existing_path);
+        let existing_canonical = strip_windows_verbatim_prefix(
+            std::fs::canonicalize(&existing_path).unwrap_or(existing_path),
+        );
         if existing_canonical.to_string_lossy().eq_ignore_ascii_case(&canonical_str) {
             return Ok(existing);
         }
     }
 
-    let meta = std::fs::metadata(&canonical)?;
-    let name = canonical.file_name().and_then(|n| n.to_str()).unwrap_or("model.gguf").to_string();
     let quant = infer_quantization(&name);
     let id = db.add_model(
         &name,
@@ -857,6 +1021,42 @@ fn model_record_from_path(db: &Database, path: &Path, source_url: Option<&str>) 
     models.into_iter()
         .find(|m| m.id == id)
         .ok_or_else(|| AppError::DatabaseError("Model was inserted but could not be read back.".to_string()))
+}
+
+/// Windows `canonicalize` adds a `\\?\` prefix that some native tools (llama-server) reject.
+fn strip_windows_verbatim_prefix(path: PathBuf) -> PathBuf {
+    let s = path.to_string_lossy();
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+            return PathBuf::from(format!(r"\\{rest}"));
+        }
+        if let Some(rest) = s.strip_prefix(r"\\?\") {
+            return PathBuf::from(rest);
+        }
+    }
+    let _ = s;
+    path
+}
+
+/// Normalize a stored/selected model path for existence checks and llama-server -m.
+fn normalize_local_model_path(path: &str) -> PathBuf {
+    let raw = PathBuf::from(path.trim());
+    let stripped = strip_windows_verbatim_prefix(raw);
+    if stripped.exists() {
+        return strip_windows_verbatim_prefix(
+            std::fs::canonicalize(&stripped).unwrap_or(stripped),
+        );
+    }
+    stripped
+}
+
+fn chrono_like_unix() -> i64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs() as i64)
+        .unwrap_or(0)
 }
 
 fn emit_download_progress(
@@ -920,7 +1120,124 @@ pub async fn scan_model_folder(state: State<'_, AppState>, folder_path: String) 
     for path in ggufs {
         let _ = model_record_from_path(&db, &path, None);
     }
-    db.get_models().map_err(|e| e.into())
+    let models = db.get_models()?;
+    Ok(models
+        .into_iter()
+        .filter(|m| {
+            is_chat_selectable_gguf_record(m) && PathBuf::from(&m.path).is_file()
+        })
+        .collect())
+}
+
+fn sanitize_download_filename(name: &str) -> AppResult<String> {
+    let leaf = Path::new(name)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .trim();
+    if leaf.is_empty() || leaf == "." || leaf == ".." {
+        return Err(AppError::DownloadError("Invalid download filename.".to_string()));
+    }
+    if leaf.contains('/') || leaf.contains('\\') {
+        return Err(AppError::DownloadError("Invalid download filename.".to_string()));
+    }
+    Ok(leaf.to_string())
+}
+
+async fn wipe_tracked_download_files(paths: &[PathBuf]) -> usize {
+    let mut removed = 0usize;
+    for _ in 0..12 {
+        let mut remaining = false;
+        for p in paths {
+            if p.exists() {
+                remaining = true;
+                if tokio::fs::remove_file(p).await.is_ok() {
+                    removed += 1;
+                }
+            }
+        }
+        if !remaining {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+    removed
+}
+
+/// Register every file in a catalog/direct download job and clear any prior Stop flag.
+#[tauri::command]
+pub async fn begin_model_download_job(
+    state: State<'_, AppState>,
+    dest_dir: String,
+    files: Vec<String>,
+) -> AppResult<()> {
+    state.download_cancel.store(false, Ordering::SeqCst);
+    let dir = PathBuf::from(&dest_dir);
+    tokio::fs::create_dir_all(&dir).await?;
+    let mut tracked = state.download_tracked.lock().await;
+    tracked.clear();
+    // Pre-register .part only so Stop can clear them before the first byte arrives.
+    // Final paths are added when a file actually starts writing (avoids wiping pre-existing models).
+    for raw in files {
+        let name = sanitize_download_filename(&raw)?;
+        let part = dir.join(format!("{}.part", name));
+        if !tracked.iter().any(|p| p == &part) {
+            tracked.push(part);
+        }
+    }
+    Ok(())
+}
+
+/// Stop the active download and delete all job files (final + `.part`) from disk.
+#[tauri::command]
+pub async fn cancel_model_download(state: State<'_, AppState>) -> AppResult<String> {
+    state.download_cancel.store(true, Ordering::SeqCst);
+    let paths = {
+        let tracked = state.download_tracked.lock().await;
+        tracked.clone()
+    };
+    // Give the writer a moment to close the handle, then force-delete.
+    tokio::time::sleep(Duration::from_millis(250)).await;
+    let removed = wipe_tracked_download_files(&paths).await;
+    {
+        let mut tracked = state.download_tracked.lock().await;
+        tracked.clear();
+    }
+    // Also drop library rows that pointed at wiped final GGUFs so Chat cannot select ghosts.
+    {
+        let db = state.db.lock().await;
+        let finals: Vec<PathBuf> = paths
+            .iter()
+            .map(|p| {
+                let s = p.to_string_lossy();
+                if let Some(stripped) = s.strip_suffix(".part") {
+                    PathBuf::from(stripped)
+                } else {
+                    p.clone()
+                }
+            })
+            .collect();
+        if let Ok(models) = db.get_models() {
+            for m in models {
+                let mp = PathBuf::from(&m.path);
+                let gone = finals.iter().any(|f| {
+                    f == &mp
+                        || strip_windows_verbatim_prefix(
+                            std::fs::canonicalize(f).unwrap_or_else(|_| f.clone()),
+                        ) == strip_windows_verbatim_prefix(
+                            std::fs::canonicalize(&mp).unwrap_or_else(|_| mp.clone()),
+                        )
+                });
+                if gone && !mp.is_file() {
+                    let _ = db.delete_model(&m.id);
+                }
+            }
+        }
+    }
+    Ok(format!(
+        "Download stopped. Cleared {} file(s) from disk.",
+        removed
+    ))
 }
 
 #[tauri::command]
@@ -931,6 +1248,11 @@ pub async fn download_model(
     dest_dir: String,
     name: Option<String>,
 ) -> AppResult<crate::database::LocalModelRecord> {
+    if state.download_cancel.load(Ordering::SeqCst) {
+        return Err(AppError::DownloadError(
+            "Download stopped by user. Partial files were deleted.".to_string(),
+        ));
+    }
     if !url.starts_with("http://") && !url.starts_with("https://") {
         return Err(AppError::DownloadError("Download URL must start with http:// or https://".to_string()));
     }
@@ -946,6 +1268,16 @@ pub async fn download_model(
     if final_path.exists() {
         let db = state.db.lock().await;
         return model_record_from_path(&db, &final_path, Some(&url));
+    }
+
+    {
+        let mut tracked = state.download_tracked.lock().await;
+        if !tracked.iter().any(|p| p == &final_path) {
+            tracked.push(final_path.clone());
+        }
+        if !tracked.iter().any(|p| p == &part_path) {
+            tracked.push(part_path.clone());
+        }
     }
 
     let client = reqwest::Client::builder()
@@ -965,6 +1297,15 @@ pub async fn download_model(
     let mut last_bytes = downloaded;
 
     loop {
+        if state.download_cancel.load(Ordering::SeqCst) {
+            let _ = tokio::fs::remove_file(&part_path).await;
+            let _ = tokio::fs::remove_file(&final_path).await;
+            emit_download_progress(&window, &id, &file_name, "cancelled", 0, None, 0.0, retries, "Download stopped; files cleared.", started_at);
+            return Err(AppError::DownloadError(
+                "Download stopped by user. Partial files were deleted.".to_string(),
+            ));
+        }
+
         let mut req = client.get(&url).header(USER_AGENT, "PocketMind Hybrid AI/0.1 model-downloader");
         if downloaded > 0 {
             req = req.header(RANGE, format!("bytes={}-", downloaded));
@@ -976,6 +1317,12 @@ pub async fn download_model(
         let response = match req.send().await {
             Ok(r) => r,
             Err(e) => {
+                if state.download_cancel.load(Ordering::SeqCst) {
+                    let _ = tokio::fs::remove_file(&part_path).await;
+                    return Err(AppError::DownloadError(
+                        "Download stopped by user. Partial files were deleted.".to_string(),
+                    ));
+                }
                 retries += 1;
                 if retries > max_retries {
                     return Err(AppError::NetworkError(format!("Download failed after {} retries: {}", max_retries, e)));
@@ -1012,6 +1359,15 @@ pub async fn download_model(
         use futures::StreamExt;
 
         loop {
+            if state.download_cancel.load(Ordering::SeqCst) {
+                drop(file);
+                let _ = tokio::fs::remove_file(&part_path).await;
+                let _ = tokio::fs::remove_file(&final_path).await;
+                emit_download_progress(&window, &id, &file_name, "cancelled", 0, None, 0.0, retries, "Download stopped; files cleared.", started_at);
+                return Err(AppError::DownloadError(
+                    "Download stopped by user. Partial files were deleted.".to_string(),
+                ));
+            }
             match tokio::time::timeout(Duration::from_secs(45), stream.next()).await {
                 Ok(Some(Ok(chunk))) => {
                     file.write_all(&chunk).await?;
@@ -1026,6 +1382,13 @@ pub async fn download_model(
                     }
                 }
                 Ok(Some(Err(e))) => {
+                    if state.download_cancel.load(Ordering::SeqCst) {
+                        drop(file);
+                        let _ = tokio::fs::remove_file(&part_path).await;
+                        return Err(AppError::DownloadError(
+                            "Download stopped by user. Partial files were deleted.".to_string(),
+                        ));
+                    }
                     retries += 1;
                     if retries > max_retries {
                         return Err(AppError::NetworkError(format!("Stream failed after {} retries: {}", max_retries, e)));
@@ -1067,6 +1430,13 @@ pub async fn download_model(
                     break;
                 }
                 Err(_) => {
+                    if state.download_cancel.load(Ordering::SeqCst) {
+                        drop(file);
+                        let _ = tokio::fs::remove_file(&part_path).await;
+                        return Err(AppError::DownloadError(
+                            "Download stopped by user. Partial files were deleted.".to_string(),
+                        ));
+                    }
                     retries += 1;
                     if retries > max_retries {
                         return Err(AppError::NetworkError("Download stalled too many times.".to_string()));
@@ -1134,8 +1504,8 @@ pub async fn get_runtime_diagnostics(
         None,
     ));
 
-    let selected_model_exists = selected_model_path.as_ref().map(|p| Path::new(p).is_file()).unwrap_or(false);
-    let selected_model_size_bytes = selected_model_path.as_ref().and_then(|p| std::fs::metadata(p).ok().map(|m| m.len()));
+    let selected_model_exists = selected_model_path.as_ref().map(|p| normalize_local_model_path(p).is_file()).unwrap_or(false);
+    let selected_model_size_bytes = selected_model_path.as_ref().and_then(|p| std::fs::metadata(normalize_local_model_path(p)).ok().map(|m| m.len()));
     checks.push(diag_check(
         "selected_model",
         "Selected model file",
@@ -2162,6 +2532,51 @@ pub async fn scan_soc_knowledge_folder(
         truncated,
         files,
     })
+}
+
+/// Lightweight path probe for Setup / support-model download UI.
+#[tauri::command]
+pub async fn path_exists(path: String) -> bool {
+    let p = PathBuf::from(path.trim());
+    p.is_file() || p.is_dir()
+}
+
+/// Copy an mmproj projector next to a chat GGUF so offline vision pairing works.
+#[tauri::command]
+pub async fn link_mmproj_beside_model(model_path: String, mmproj_path: String) -> AppResult<String> {
+    let model = PathBuf::from(model_path.trim());
+    let mmproj_src = PathBuf::from(mmproj_path.trim());
+    if !model.is_file() {
+        return Err(AppError::InferenceError(format!(
+            "Model GGUF not found: {}",
+            model.display()
+        )));
+    }
+    if !mmproj_src.is_file() {
+        return Err(AppError::InferenceError(format!(
+            "mmproj file not found: {}",
+            mmproj_src.display()
+        )));
+    }
+    let leaf = mmproj_src
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("mmproj.gguf");
+    if !leaf.to_ascii_lowercase().contains("mmproj") {
+        return Err(AppError::InferenceError(
+            "Selected file does not look like an mmproj projector (filename should contain 'mmproj').".to_string(),
+        ));
+    }
+    let parent = model.parent().ok_or_else(|| {
+        AppError::InferenceError("Model path has no parent folder.".to_string())
+    })?;
+    let dest = parent.join(leaf);
+    if dest != mmproj_src {
+        std::fs::copy(&mmproj_src, &dest).map_err(|e| {
+            AppError::InferenceError(format!("Failed to copy mmproj beside model: {e}"))
+        })?;
+    }
+    Ok(dest.to_string_lossy().to_string())
 }
 
 #[tauri::command]

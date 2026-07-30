@@ -45,3 +45,26 @@ model and each embedding model typically run as separate processes/ports. See
 
 If the embeddings contract is not available, PocketMind Hybrid AI runs Knowledge Chat
 embeddings locally with no loss of accuracy.
+
+## PocketCode runtime modes
+
+PocketCode can run with local or remote workspace hosts. Inference, workspace FS/tools,
+provisioning, and UI are independent axes. Remote workspace tools are served by the
+standalone **agent-host** (not the Full RAG gateway). See
+[`agent-host/README.md`](agent-host/README.md) for bind/token/data env and smoke curls.
+
+| Preset | Inference | Workspace tools | Provision | UI |
+|---|---|---|---|---|
+| **LocalClassic** | Local GGUF / desktop LLM | Local Tauri `cw_*` | none (open local folder) | Full desktop |
+| **HybridBrain** | Org / online chat completions | Local Tauri `cw_*` | none | Full desktop |
+| **RemoteAgentPreloaded** | Org / online (or local) | Remote agent-host HTTP | `preloaded` — bind existing server path | Full desktop thin over remote FS |
+| **RemoteAgentSync** | Org / online (or local) | Remote agent-host HTTP | `client_sync` — upload zip/tar archive | Full desktop |
+| **RemoteAgentGit** | Org / online (or local) | Remote agent-host HTTP | `git_clone` — server-side `git clone` | Full desktop |
+| **ThinClient\*** | Org OpenAI-compatible API | Remote agent-host HTTP | preloaded / sync / git (profile-selected) | Thin / kiosk-style client |
+
+### Ops steps (remote workspace)
+
+1. Deploy `pocketcode-agent-host` with `AGENT_HOST_TOKEN`, `AGENT_HOST_BIND`, `AGENT_HOST_DATA`.
+2. Provision workspaces via `/v1/workspaces/provision/{preloaded,sync,git}`.
+3. Point the desktop runtime profile `remote.baseUrl` at the agent-host URL; reuse the Bearer token.
+4. Keep Full RAG gateway (Knowledge Chat) on its own port/process — do not merge routes.

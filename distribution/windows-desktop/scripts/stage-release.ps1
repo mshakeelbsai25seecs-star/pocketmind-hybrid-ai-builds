@@ -44,6 +44,17 @@ Get-ChildItem $releaseDir -Filter "*.exe" -File -ErrorAction SilentlyContinue |
   Where-Object { $_.Name -match 'PocketMind|nexus' -and $_.Name -notmatch 'build-script' } |
   ForEach-Object { Copy-One $_.FullName }
 
+# Copy co-located llama.cpp Docker admin for Organization Server hosting on Windows.
+$llamaSrc = Join-Path $RepoRoot "dist-server-client\PocketMind-llama-cpp-server"
+$llamaDst = Join-Path $OutDir "PocketMind-llama-cpp-server"
+if (Test-Path $llamaSrc) {
+  Copy-Item $llamaSrc $llamaDst -Recurse -Force
+  Write-Host "Copied PocketMind-llama-cpp-server (Org Server Docker admin)"
+  $copied = $true
+} else {
+  Write-Warning "Missing dist-server-client\PocketMind-llama-cpp-server - run distribution\scripts\sync-llama-cpp-server.ps1"
+}
+
 $llamaSrc = Join-Path $RepoRoot "bin\llama.cpp"
 $llamaDst = Join-Path $OutDir "bin\llama.cpp"
 if (Test-Path $llamaSrc) {
@@ -75,17 +86,40 @@ if (Test-Path $guide) {
 New-Item -ItemType Directory -Force -Path (Join-Path $OutDir "models\embeddings") | Out-Null
 New-Item -ItemType Directory -Force -Path (Join-Path $OutDir "models\rerankers") | Out-Null
 
+# Sidecar Python helpers for OCR / Document Studio (also bundled via tauri resources when present).
+$scriptsSrc = Join-Path $RepoRoot "scripts"
+$scriptsDst = Join-Path $OutDir "scripts"
+if (Test-Path $scriptsSrc) {
+  New-Item -ItemType Directory -Force -Path $scriptsDst | Out-Null
+  foreach ($name in @(
+    "unlimited_ocr_worker.py",
+    "soc_pdf_ocr.py",
+    "doc_export_worker.py"
+  )) {
+    $p = Join-Path $scriptsSrc $name
+    if (Test-Path $p) { Copy-Item $p -Destination (Join-Path $scriptsDst $name) -Force }
+  }
+  $docExport = Join-Path $scriptsSrc "doc_export"
+  if (Test-Path $docExport) {
+    Copy-Item $docExport -Destination (Join-Path $scriptsDst "doc_export") -Recurse -Force
+  }
+  Write-Host "Copied scripts/ OCR + Document Studio helpers"
+  $copied = $true
+}
+
 @"
 PocketMind Hybrid AI - Windows (tester)
 
 1. Run the NSIS/MSI installer if present, or open PocketMind Hybrid AI.exe.
-2. Add your .gguf models in Settings.
-3. Knowledge Chat: pick a folder, Scan, Build Index, then ask in your own words.
-4. Full product guide (for operators): PRODUCT_GUIDE.md in the source repo / handoff pack.
+2. Setup wizard: engine check, models folder, first chat model, then optional Support models downloads (embeddings / reranker / OCR).
+3. Or download those later under Settings -> Deployment (same list). Chat GGUFs stay under Models.
+4. Knowledge Chat: pick a folder, Scan, Build Index, then ask in your own words.
+5. Org Server admin (if included): PocketMind-llama-cpp-server\START_ADMIN.cmd
+6. Full product guide (for operators): PRODUCT_GUIDE.md in the source repo / handoff pack.
 
 If Windows warns: More info -> Run anyway.
 
-Models are not included in this zip.
+Large model weights are not included in this zip - use in-app Download buttons.
 "@ | Set-Content (Join-Path $OutDir "START_HERE.txt") -Encoding UTF8
 
 if (-not $copied) {

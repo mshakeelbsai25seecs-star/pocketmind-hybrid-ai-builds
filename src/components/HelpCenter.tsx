@@ -30,6 +30,36 @@ const sections = [
   },
   {
     icon: Download,
+    title: 'Embeddings, reranker & OCR downloads',
+    items: [
+      'Setup includes a Support models step; the same list lives under Settings → Deployment.',
+      'Download BGE-M3 (docs), Qwen3-Embedding-8B (code), Qwen3-Reranker-4B, and optional Unlimited-OCR weights — the app handles the downloads.',
+      'Chat GGUFs are still under Models. Support models are not packaged inside the installer.',
+      'Unlimited-OCR also appears under Settings → Security (probe + CUDA status). Needs NVIDIA CUDA + Python torch on this PC.',
+    ],
+  },
+  {
+    icon: FileText,
+    title: 'Unlimited-OCR (optional)',
+    items: [
+      'High-accuracy offline OCR for scanned PDFs and images when you have an NVIDIA GPU with CUDA.',
+      'Not bundled in the installer: open Settings → Security → Scanned PDFs, or Setup → Support models, then Download.',
+      'Needs Python packages: torch (CUDA), transformers, pymupdf, huggingface_hub. CPU-only PCs should keep Legacy or Docling.',
+      'Auto order when ready: Unlimited-OCR → Docling → Tesseract/Windows OCR. Failures fall through without blocking Chat.',
+    ],
+  },
+  {
+    icon: FileText,
+    title: 'Document Studio',
+    items: [
+      'Create DOCX, PPTX, and PDF on this PC: your current model writes a structured outline; Python exporters write the real file.',
+      'Install exporters once: pip install python-docx python-pptx reportlab',
+      'Open Document Studio from the sidebar, enter a brief, pick a format, Generate outline, then Save As.',
+      'In Chat, Export as… and each assistant message also offer DOCX / PPTX / PDF using the same offline pipeline. Online models only generate the outline — files always stay local.',
+    ],
+  },
+  {
+    icon: Download,
     title: 'Model downloads',
     items: [
       'Use direct .gguf download links when downloading from Hugging Face.',

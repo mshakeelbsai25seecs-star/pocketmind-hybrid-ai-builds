@@ -22,6 +22,7 @@ const READ_TOOLS: CodeWorkspaceToolName[] = [
   'list_dir',
   'glob_file_search',
   'grep',
+  'codebase_search',
   'repo_map',
   'find_symbol',
   'read_symbol',
@@ -39,12 +40,16 @@ export const MODE_TOOLS: Record<PocketCodeAgentMode, readonly CodeWorkspaceToolN
     'apply_edit',
     'delete_file',
     'run_command',
+    'read_terminal',
+    'kill_terminal',
   ],
   debug: [
     ...READ_TOOLS,
     'apply_edit',
     'delete_file',
     'run_command',
+    'read_terminal',
+    'kill_terminal',
   ],
 };
 

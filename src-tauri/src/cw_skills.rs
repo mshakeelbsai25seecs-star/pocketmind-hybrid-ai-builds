@@ -8,6 +8,7 @@ use walkdir::WalkDir;
 
 use crate::deployment;
 use crate::error::{AppError, AppResult};
+use pocketcode_workspace::WorkspaceSidecar;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SkillInfo {
@@ -123,8 +124,13 @@ fn collect_skills_in_dir(root: &Path, source: &str, out: &mut Vec<SkillInfo>) {
 pub fn list_skills(workspace_root: Option<String>) -> AppResult<Vec<SkillInfo>> {
     let mut out = Vec::new();
     if let Some(ws) = workspace_root.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-        let root = PathBuf::from(ws).join(".pocketcode").join("skills");
-        collect_skills_in_dir(&root, "workspace", &mut out);
+        let root = match WorkspaceSidecar::for_workspace(Path::new(ws)) {
+            Ok(sidecar) => sidecar.skills_dir(),
+            Err(_) => PathBuf::new(),
+        };
+        if root.is_dir() {
+            collect_skills_in_dir(&root, "workspace", &mut out);
+        }
     }
     collect_skills_in_dir(&user_skills_dir(), "user", &mut out);
     out.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
@@ -136,15 +142,8 @@ pub fn read_skill(path: String) -> AppResult<SkillInfo> {
     if !p.is_file() {
         return Err(AppError::Unknown(format!("Skill file not found: {}", p.display())));
     }
-    let source = if p
-        .to_string_lossy()
-        .replace('\\', "/")
-        .contains("/.pocketcode/skills/")
-    {
-        "workspace"
-    } else {
-        "user"
-    };
+    let user_dir = user_skills_dir();
+    let source = if p.starts_with(&user_dir) { "user" } else { "workspace" };
     load_skill_file(&p, source).ok_or_else(|| AppError::Unknown("Failed to read skill.".into()))
 }
 
@@ -154,10 +153,14 @@ pub fn skills_dir_paths(workspace_root: Option<String>) -> AppResult<serde_json:
         .as_deref()
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .map(|ws| {
-            let p = PathBuf::from(ws).join(".pocketcode").join("skills");
-            let _ = fs::create_dir_all(&p);
-            p.to_string_lossy().to_string()
+        .and_then(|ws| {
+            WorkspaceSidecar::for_workspace(Path::new(ws))
+                .ok()
+                .map(|sidecar| {
+                    let p = sidecar.skills_dir();
+                    let _ = fs::create_dir_all(&p);
+                    p.to_string_lossy().to_string()
+                })
         });
     Ok(serde_json::json!({
         "user": user.to_string_lossy(),

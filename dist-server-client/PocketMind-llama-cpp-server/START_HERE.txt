@@ -1,0 +1,33 @@
+PocketMind llama.cpp server package — START HERE (Windows)
+==========================================================
+
+1) Install Docker Desktop + NVIDIA driver + Python 3 (one time).
+
+2) Double-click:  START_ADMIN.cmd
+   - Do NOT open PowerShell in C:\Windows\System32 and type .\start-admin.ps1
+   - Do NOT fight Execution Policy — the .cmd file bypasses it for you.
+
+3) Browser opens http://127.0.0.1:8090/
+   Paste the admin token shown in the black window (also in .admin_token).
+
+4) Use a model:
+   - Import local GGUF: paste a full path (e.g. D:\model.gguf) → Import & select
+   - Or App catalog → Download
+   - Or copy a complete .gguf into models\ and Select it
+   Then click Start (auto-optimize). GPU layers are maximized; leftover uses CPU/RAM.
+
+5) PocketMind Organization Server URL on THIS PC:
+     http://127.0.0.1:8000/v1
+   Other PCs (same LAN that can ping this machine):
+     http://THIS_PC_IP:8000/v1
+
+Other launchers:
+  START_SERVER.cmd   — start chat without opening admin UI
+  PREFLIGHT.cmd      — check Docker / GPU / model file
+  SMOKE_TEST.cmd     — curl.exe http://127.0.0.1:8000/v1/models
+
+If .ps1 says "not digitally signed" or "running scripts is disabled":
+  Use START_ADMIN.cmd (recommended), or:
+  powershell.exe -ExecutionPolicy Bypass -File .\start-admin.ps1
+
+Full guide: SETUP_WINDOWS.md

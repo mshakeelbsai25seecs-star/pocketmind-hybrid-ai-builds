@@ -146,11 +146,13 @@ export interface GenerationChunk {
   tokens_generated: number;
   tokens_per_sec: number;
   tool_calls?: ToolCall[] | null;
+  /** DeepSeek / reasoner thinking delta (separate from answer text). */
+  reasoning?: string | null;
 }
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 export type PerformanceMode = 'low-ram' | 'battery-saver' | 'balanced' | 'maximum-speed' | 'maximum-quality';
-export type AppView = 'chat' | 'home' | 'soc' | 'knowledge-chat' | 'code-workspace' | 'hardware' | 'runtime' | 'models' | 'enterprise-server' | 'image-studio' | 'diagnostics' | 'characters' | 'settings' | 'setup' | 'prompts' | 'storage' | 'backup' | 'help';
+export type AppView = 'chat' | 'home' | 'soc' | 'knowledge-chat' | 'code-workspace' | 'hardware' | 'runtime' | 'models' | 'enterprise-server' | 'image-studio' | 'document-studio' | 'diagnostics' | 'characters' | 'settings' | 'setup' | 'prompts' | 'storage' | 'backup' | 'help';
 
 export type SocKnowledgeCategory =
   | 'FortiSIEM Guide'
@@ -525,7 +527,10 @@ export interface OfflineChatModelCatalogItem {
   quality: string;
   categories: ModelCategoryId[];
   recommendedUse: string;
+  /** Primary GGUF URL (first shard for split models). */
   url: string;
+  /** Extra GGUF shards (00002-of-N …) downloaded beside the primary file. */
+  shardUrls?: string[];
   /** Companion multimodal projector GGUF for offline vision. */
   mmprojUrl?: string;
   visionCapable?: boolean;

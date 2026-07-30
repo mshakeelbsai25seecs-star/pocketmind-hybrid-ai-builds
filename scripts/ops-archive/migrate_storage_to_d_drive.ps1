@@ -1,7 +1,7 @@
-# Move PocketMind Hybrid AI heavy storage from C: to D:\nexus-ai-deep-fixed\runtime-data (models, indexes, app DB, HNSW, cache).
-# Safe to re-run: only copies files that are missing on D:.
+# Move PocketMind Hybrid AI heavy storage from C: to repo-adjacent runtime-data (models, indexes, app DB, HNSW, cache).
+# Safe to re-run: only copies files that are missing on the target tree.
 param(
-  [string]$TargetRoot = "D:\nexus-ai-deep-fixed\runtime-data",
+  [string]$TargetRoot = (Join-Path (Split-Path -Parent (Split-Path -Parent $PSScriptRoot)) 'runtime-data'),
   [string]$LegacyProgramData = "$env:ProgramData\NexusAI",
   [string]$LegacyAppData = "$env:APPDATA\NexusAI"
 )

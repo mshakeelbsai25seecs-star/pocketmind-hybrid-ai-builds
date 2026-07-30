@@ -176,9 +176,6 @@ export default function CollectionPanel() {
       try {
         const health = await kcCollectionHealth(activeCollectionId);
         if (cancelled) return;
-        // #region agent log
-        fetch('http://127.0.0.1:7414/ingest/28bf2132-0f52-40ef-96b9-4e681c1d7653',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d5a77'},body:JSON.stringify({sessionId:'7d5a77',runId:'failmode-scan-1',hypothesisId:'C',location:'CollectionPanel.tsx:health',message:'fe_collection_health',data:{collectionId:activeCollectionId,chunkCount:health.chunk_count,denseChunkCount:health.dense_chunk_count,denseCoveragePct:health.dense_coverage_pct,ftsPopulated:health.fts_populated,hnswReady:health.hnsw_ready,failedFiles:health.failed_files,pdfOcrAvailable:health.pdf_ocr_available,imageRagConfigured:health.image_rag_configured},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         setCollectionHealth(health);
         const warnings: string[] = [];
         if (health.code_entity_rebuild_required) {
@@ -281,9 +278,6 @@ export default function CollectionPanel() {
         return;
       }
       setIndexProgress(payload);
-      // #region agent log
-      fetch('http://127.0.0.1:7414/ingest/28bf2132-0f52-40ef-96b9-4e681c1d7653',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d5a77'},body:JSON.stringify({sessionId:'7d5a77',runId:'index-progress-1',hypothesisId:'P1',location:'CollectionPanel.tsx:progress',message:'kc_index_progress_event',data:{collectionId:payload.collection_id,phase:payload.phase,current:payload.current,total:payload.total,detail:payload.detail||null,fileName:payload.file_name||null,filesDone:payload.files_done??null,filesFailed:payload.files_failed??null,elapsedMs:payload.elapsed_ms??null,state:payload.state||null},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
     });
     return () => { unlisten.then(fn => fn()); };
   }, [activeCollectionId, setIndexProgress]);

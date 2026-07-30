@@ -6,14 +6,14 @@ import {
   Send, Square, Bot, User, Copy, Check, Trash2,
   Paperclip, Sparkles, AlertCircle, Download, MessageSquare,
   SlidersHorizontal, ClipboardCopy, RotateCcw, FileText, X,
-  UploadCloud, Info, Power
+  UploadCloud, Info, Power, ChevronDown
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { useAppStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
-import { AttachmentContext, Conversation, Message } from '../types';
+import { AttachmentContext, Conversation, LocalModelRecord, Message } from '../types';
 import {
   mergeGenerationParams,
   PendingChatOptions,
@@ -22,6 +22,7 @@ import {
   SOC_SYSTEM_PROMPT,
 } from '../socChatHandoff';
 import { exportChatAs, type ChatExportKind } from '../chatExport';
+import { exportContentAsDocument, pickChatBackend, type DocFormatId } from '../docStudio';
 import ContextBudgetBar from './ContextBudgetBar';
 import DiffViewer from './DiffViewer';
 import { computeContextBudget, defaultKeepLastN } from '../contextBudget';
@@ -29,6 +30,9 @@ import { FEATURE_FLAGS } from '../featureFlags';
 import { getSetting, setSetting } from '../api/powerFeatures';
 import { chipForPath, prepareAttachmentsForModel } from '../attachments/prepareAttachments';
 import { modelSupportsVision } from '../codeWorkspace/visionCapability';
+import { onOpenExternal } from '../openExternal';
+import { useAutoResizeTextarea } from '../hooks/useAutoResizeTextarea';
+import { filterChatSelectableLocalModels } from '../localModels';
 
 function humanError(err: unknown): string {
   let raw = '';
@@ -51,8 +55,14 @@ function humanError(err: unknown): string {
   if (lower.includes('vram') || lower.includes('ggml_cuda') || lower.includes('failed to allocate')) {
     return 'GPU / VRAM allocation failed. Lower GPU layers or switch Runtime to CPU.';
   }
+  if (lower.includes('llama-server') && (lower.includes('not found') || lower.includes('was not found'))) {
+    return 'Local runtime (llama-server) was not found. Install CUDA/CPU runtimes under bin/llama.cpp, or open Diagnostics.';
+  }
+  if (lower.includes('selected model file was not found')) {
+    return raw.replace(/^error:\s*/i, '').trim();
+  }
   if (lower.includes('no such file') || lower.includes('not found') || lower.includes('does not exist')) {
-    return 'A required file was not found. Check the model path in Models.';
+    return 'A required file was not found. Check the model path in Models (and that the .gguf was not moved).';
   }
   if (lower.includes('connection refused') || lower.includes('failed to connect')) {
     return 'Could not reach the server. Check Org Server / network, then retry.';
@@ -723,7 +733,16 @@ const MarkdownMessage = memo(function MarkdownMessage({ content, variant = 'assi
           ol: ({ children }) => <ol className="nexus-md-ol">{children}</ol>,
           li: ({ children }) => <li className="nexus-md-li">{children}</li>,
           blockquote: ({ children }) => <blockquote className="nexus-md-quote">{children}</blockquote>,
-          a: ({ children, href }) => <a className="nexus-md-link" href={href} target="_blank" rel="noreferrer">{children}</a>,
+          a: ({ children, href }) => (
+            <button
+              type="button"
+              className="nexus-md-link bg-transparent border-0 p-0 cursor-pointer text-left underline"
+              onClick={href ? onOpenExternal(href) : undefined}
+              title={href || undefined}
+            >
+              {children}
+            </button>
+          ),
           table: ({ children }) => <div className="nexus-md-table-wrap"><table className="nexus-md-table">{children}</table></div>,
           th: ({ children }) => <th className="nexus-md-th">{children}</th>,
           td: ({ children }) => <td className="nexus-md-td">{children}</td>,
@@ -735,7 +754,11 @@ const MarkdownMessage = memo(function MarkdownMessage({ content, variant = 'assi
             const language = match?.[1] || '';
             const plainCode = rawCode.trim();
             if (!plainCode) return null;
-            if (inline || isTinyCodeFragment(plainCode)) {
+            const looksProse = /^#{1,6}\s/m.test(plainCode) || /^---\s*$/m.test(plainCode);
+            if (inline || isTinyCodeFragment(plainCode) || looksProse) {
+              if (looksProse && plainCode.includes('\n')) {
+                return <p className="nexus-md-p whitespace-pre-wrap">{plainCode}</p>;
+              }
               return <code className="nexus-inline-code" {...rest}>{plainCode}</code>;
             }
             return <CopyableCodeBlock language={language} code={rawCode} />;
@@ -745,6 +768,169 @@ const MarkdownMessage = memo(function MarkdownMessage({ content, variant = 'assi
       >
         {normalized}
       </ReactMarkdown>
+    </div>
+  );
+});
+
+function parseChatMessageMeta(metadata?: string | null): { reasoning?: string; reasoningMs?: number } | null {
+  if (!metadata?.trim()) return null;
+  try {
+    const parsed = JSON.parse(metadata) as { reasoning?: unknown; reasoningMs?: unknown };
+    const reasoning = typeof parsed.reasoning === 'string' ? parsed.reasoning : undefined;
+    const reasoningMs = typeof parsed.reasoningMs === 'number' ? parsed.reasoningMs : undefined;
+    if (!reasoning && reasoningMs == null) return null;
+    return { reasoning, reasoningMs };
+  } catch {
+    return null;
+  }
+}
+
+function thoughtLabel(opts: { streaming: boolean; durationMs?: number | null }): string {
+  if (opts.streaming) return 'Thinking';
+  const ms = opts.durationMs ?? 0;
+  if (ms > 0 && ms < 2500) return 'Thought briefly';
+  if (ms >= 2500) {
+    const secs = Math.max(1, Math.round(ms / 1000));
+    return `Thought for ${secs}s`;
+  }
+  return 'Thought';
+}
+
+/** True when "reasoning" is actually a finished Markdown answer (DeepSeek sometimes does this). */
+function reasoningLooksLikeFinalAnswer(text: string): boolean {
+  const t = text.trim();
+  if (t.length < 120) return false;
+  return (
+    /^#{1,6}\s/m.test(t)
+    || /\n##\s/.test(t)
+    || /\n###\s/.test(t)
+    || /\*\*[^*]{3,}\*\*/.test(t) && t.split('\n').length > 6
+  );
+}
+
+/** Collapsed-by-default thought disclosure; click to open or close. */
+const ThoughtBlock = memo(function ThoughtBlock({
+  text,
+  streaming = false,
+  durationMs = null,
+}: {
+  text: string;
+  streaming?: boolean;
+  durationMs?: number | null;
+}) {
+  const [open, setOpen] = useState(false);
+
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  // Never present a finished Markdown reply as an open "thought" wall.
+  if (!streaming && reasoningLooksLikeFinalAnswer(trimmed)) return null;
+
+  const label = thoughtLabel({ streaming, durationMs });
+
+  return (
+    <div className="mb-2">
+      <button
+        type="button"
+        onClick={() => setOpen(v => !v)}
+        aria-expanded={open}
+        className="group/thought inline-flex items-center gap-1 bg-transparent border-0 p-0 m-0 cursor-pointer text-[13px] leading-snug text-surface-500 dark:text-surface-400 hover:text-surface-700 dark:hover:text-surface-200"
+      >
+        <span className={streaming && !open ? 'opacity-90' : undefined}>{label}</span>
+        <ChevronDown
+          className={`w-3.5 h-3.5 opacity-60 transition-transform ${open ? '' : '-rotate-90'}`}
+        />
+      </button>
+      {open && (
+        <div className="mt-1.5 pl-0 text-[12.5px] leading-relaxed text-surface-500 dark:text-surface-400 whitespace-pre-wrap break-words max-h-48 overflow-y-auto">
+          {text}
+          {streaming ? (
+            <span className="inline-block w-1.5 h-3.5 ml-0.5 align-text-bottom bg-current/50 animate-pulse" />
+          ) : null}
+        </div>
+      )}
+    </div>
+  );
+});
+
+/** A user prompt plus every message that answers it — the unit that scrolls together. */
+interface ChatTurn {
+  key: string;
+  prompt: Message | null;
+  replies: Message[];
+}
+
+function groupMessagesIntoTurns(messages: Message[]): ChatTurn[] {
+  const turns: ChatTurn[] = [];
+  for (const message of messages) {
+    if (message.role === 'user' || turns.length === 0) {
+      turns.push({
+        key: message.id,
+        prompt: message.role === 'user' ? message : null,
+        replies: message.role === 'user' ? [] : [message],
+      });
+      continue;
+    }
+    turns[turns.length - 1].replies.push(message);
+  }
+  return turns;
+}
+
+function promptPreview(content: string): string {
+  return content
+    .replace(/```[\s\S]*?```/g, ' [code] ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Cursor-style turn header: the prompt for the reply you are reading stays pinned to the top of
+ * the scroll area. Sibling sticky headers push each other out, so scrolling back through the
+ * conversation always shows the question that produced the visible answer.
+ */
+const StickyPrompt = memo(function StickyPrompt({
+  message,
+  index,
+  total,
+}: {
+  message: Message;
+  index: number;
+  total: number;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const preview = promptPreview(message.content);
+  const isLong = preview.length > 160 || message.content.includes('\n');
+
+  return (
+    <div className="sticky top-0 z-20 -mx-4 sm:-mx-6 -mt-1 px-4 sm:px-6 pt-1 pb-2 bg-surface-50/95 dark:bg-surface-950/95 backdrop-blur-sm border-b border-surface-200/70 dark:border-surface-800/70">
+      <div className="flex items-start gap-2.5">
+        <div className="w-6 h-6 mt-0.5 rounded-lg bg-surface-200 dark:bg-surface-700 flex-shrink-0 flex items-center justify-center">
+          <User className="w-3.5 h-3.5 text-surface-700 dark:text-surface-200" />
+        </div>
+        <div className="min-w-0 flex-1">
+          {expanded ? (
+            <div className="max-h-64 overflow-y-auto pr-1">
+              <MarkdownMessage content={message.content} />
+            </div>
+          ) : (
+            <p className="text-[13.5px] leading-snug text-surface-800 dark:text-surface-100 line-clamp-2 break-words">
+              {preview}
+            </p>
+          )}
+        </div>
+        <span className="text-[11px] text-surface-400 dark:text-surface-500 tabular-nums flex-shrink-0 mt-1">
+          {index + 1}/{total}
+        </span>
+        {isLong && (
+          <button
+            type="button"
+            onClick={() => setExpanded(v => !v)}
+            title={expanded ? 'Collapse prompt' : 'Show full prompt'}
+            className="flex-shrink-0 mt-0.5 p-1 rounded-lg text-surface-400 hover:text-surface-700 dark:hover:text-surface-200 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
+          >
+            <ChevronDown className={`w-3.5 h-3.5 transition-transform ${expanded ? '' : '-rotate-90'}`} />
+          </button>
+        )}
+      </div>
     </div>
   );
 });
@@ -784,10 +970,12 @@ type GenerationResponsePayload = {
   finish_reason?: string | null;
   tokens_generated?: number;
   tokens_per_sec?: number;
+  reasoning?: string | null;
 };
 
 export default function ChatView() {
   const [input, setInput] = useState('');
+  const chatInputRef = useAutoResizeTextarea(input);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [busyCreatingChat, setBusyCreatingChat] = useState(false);
@@ -800,8 +988,14 @@ export default function ChatView() {
   const [keepLastN, setKeepLastN] = useState(defaultKeepLastN());
   const [showCompareRewrite, setShowCompareRewrite] = useState(false);
   const [compareOriginal, setCompareOriginal] = useState('');
+  /** Live reasoning for the in-flight assistant message (Cursor-style Thought). */
+  const [liveReasoning, setLiveReasoning] = useState('');
+  const [liveReasoningMsgId, setLiveReasoningMsgId] = useState<string | null>(null);
+  const [liveReasoningStreaming, setLiveReasoningStreaming] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const streamingTextRef = useRef<string>('');
+  const streamingReasoningRef = useRef<string>('');
+  const reasoningStartedAtRef = useRef<number | null>(null);
   const streamUiTimerRef = useRef<number | null>(null);
   const streamLastUiAtRef = useRef(0);
   const attachmentCacheRef = useRef<Map<string, AttachmentContext>>(new Map());
@@ -814,6 +1008,7 @@ export default function ChatView() {
     isGenerating,
     generationError,
     currentModel,
+    localModels,
     activeCharacterId,
     defaultParams,
     pendingChatPrompt,
@@ -832,6 +1027,8 @@ export default function ChatView() {
     setActiveConversation,
     setMessages,
     setConversations,
+    setCurrentModel,
+    setLocalModels,
   } = useAppStore(useShallow(s => ({
     activeConversationId: s.activeConversationId,
     messages: s.messages,
@@ -840,6 +1037,7 @@ export default function ChatView() {
     isGenerating: s.isGenerating,
     generationError: s.generationError,
     currentModel: s.currentModel,
+    localModels: s.localModels,
     activeCharacterId: s.activeCharacterId,
     defaultParams: s.defaultParams,
     pendingChatPrompt: s.pendingChatPrompt,
@@ -858,6 +1056,8 @@ export default function ChatView() {
     setActiveConversation: s.setActiveConversation,
     setMessages: s.setMessages,
     setConversations: s.setConversations,
+    setCurrentModel: s.setCurrentModel,
+    setLocalModels: s.setLocalModels,
   })));
 
   const activeConversation = conversations.find(c => c.id === activeConversationId);
@@ -866,9 +1066,41 @@ export default function ChatView() {
   const effectiveConversationId = chatModeOk ? activeConversationId : null;
   const currentMessages = effectiveConversationId ? messages[effectiveConversationId] || [] : [];
   const activeConversationTitle = chatModeOk ? (activeConversation?.title || 'New Chat') : 'New Chat';
+  const chatTurns = useMemo(() => groupMessagesIntoTurns(currentMessages), [currentMessages]);
   const activeCharacter = characters.find(c => c.id === (activeCharacterId || (chatModeOk ? activeConversation?.character_id : null)));
   const selectedModelName = modelFileName(currentModel);
+  const selectableLocalModels = useMemo(
+    () => filterChatSelectableLocalModels(localModels),
+    [localModels],
+  );
   const canSend = Boolean(input.trim() && effectiveConversationId && currentModel && !isGenerating);
+
+  useEffect(() => {
+    void invoke<LocalModelRecord[]>('get_local_models')
+      .then(models => setLocalModels(filterChatSelectableLocalModels(models)))
+      .catch(() => { /* library refresh is best-effort */ });
+  }, [setLocalModels]);
+
+  const selectLocalGguf = async (path: string) => {
+    setGenerationError(null);
+    if (!path) {
+      setCurrentModel(null);
+      return;
+    }
+    try {
+      const exists = await invoke<boolean>('path_exists', { path });
+      if (!exists) {
+        setGenerationError('That local GGUF file is missing on disk. Open Models → Import/Scan, then select it again.');
+        await invoke<LocalModelRecord[]>('get_local_models')
+          .then(models => setLocalModels(filterChatSelectableLocalModels(models)))
+          .catch(() => {});
+        return;
+      }
+      setCurrentModel(path);
+    } catch (err) {
+      setGenerationError(humanError(err));
+    }
+  };
 
   // If a knowledge/pocketcode thread is still active, clear it so Chat never shows mixed history.
   useEffect(() => {
@@ -933,6 +1165,9 @@ export default function ChatView() {
     setBusyCreatingChat(true);
     setGenerationError(null);
     try {
+      if (!currentModel) {
+        throw new Error('Select a model in Models before starting a new chat.');
+      }
       const id = await invoke<string>('create_conversation', {
         title: 'New Chat',
         characterId: activeCharacterId || null,
@@ -945,6 +1180,9 @@ export default function ChatView() {
       const convs = await invoke<Conversation[]>('get_conversations');
       setConversations(convs);
       setActiveView('chat');
+      setInput('');
+      setAttachments([]);
+      setGenerationStatus(null);
     } catch (err) {
       setGenerationError(humanError(err));
     } finally {
@@ -968,6 +1206,46 @@ export default function ChatView() {
         currentMessages,
         kind,
       );
+      setGenerationStatus(result.message);
+    } catch (err) {
+      setGenerationError(humanError(err));
+    }
+  };
+
+  const exportChatDocument = async (format: DocFormatId) => {
+    setExportMenuOpen(false);
+    try {
+      const markdown = currentMessages
+        .map(m => `## ${m.role}\n\n${m.content}`)
+        .join('\n\n');
+      const { backend, modelPath } = pickChatBackend(currentModel);
+      const result = await exportContentAsDocument({
+        format,
+        brief: `Export chat "${activeConversationTitle}" as ${format.toUpperCase()}`,
+        sourceMarkdown: markdown,
+        backend,
+        modelPath,
+        params: defaultParams,
+        defaultTitle: activeConversationTitle || 'chat-export',
+      });
+      setGenerationStatus(result.message);
+    } catch (err) {
+      setGenerationError(humanError(err));
+    }
+  };
+
+  const exportMessageDocument = async (content: string, format: DocFormatId, titleHint: string) => {
+    try {
+      const { backend, modelPath } = pickChatBackend(currentModel);
+      const result = await exportContentAsDocument({
+        format,
+        brief: `Export assistant answer as ${format.toUpperCase()}`,
+        sourceMarkdown: content,
+        backend,
+        modelPath,
+        params: defaultParams,
+        defaultTitle: titleHint || 'answer-export',
+      });
       setGenerationStatus(result.message);
     } catch (err) {
       setGenerationError(humanError(err));
@@ -1007,9 +1285,6 @@ export default function ChatView() {
     try {
       setGenerationStatus('Unloading model from memory...');
       const result = await invoke<{ message: string }>('unload_chat_model', { releaseKnowledgeEngines: false });
-      // #region agent log
-      fetch('http://127.0.0.1:7414/ingest/28bf2132-0f52-40ef-96b9-4e681c1d7653',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'7d5a77'},body:JSON.stringify({sessionId:'7d5a77',runId:'unload-feature',hypothesisId:'B',location:'ChatView.tsx:unload',message:'fe_unload_chat_model',data:{ok:true},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       setGenerationError(null);
       setGenerationStatus(result.message || 'Model unloaded from memory.');
     } catch (err) {
@@ -1234,7 +1509,13 @@ export default function ChatView() {
 
       setGenerationStatus('Loading or reusing the selected model...');
       streamingTextRef.current = '';
+      streamingReasoningRef.current = '';
+      reasoningStartedAtRef.current = null;
+      setLiveReasoning('');
+      setLiveReasoningMsgId(assistantMsgId);
+      setLiveReasoningStreaming(false);
       let streamError: string | null = null;
+      let reasoningMs: number | null = null;
 
       const pushStreamingUi = (text: string) => {
         const flush = () => {
@@ -1242,7 +1523,7 @@ export default function ChatView() {
           streamLastUiAtRef.current = Date.now();
         };
         const elapsed = Date.now() - streamLastUiAtRef.current;
-        if (elapsed >= 100) {
+        if (elapsed >= 80) {
           if (streamUiTimerRef.current) {
             window.clearTimeout(streamUiTimerRef.current);
             streamUiTimerRef.current = null;
@@ -1254,21 +1535,62 @@ export default function ChatView() {
         streamUiTimerRef.current = window.setTimeout(() => {
           streamUiTimerRef.current = null;
           flush();
-        }, Math.max(16, 100 - elapsed));
+        }, Math.max(16, 80 - elapsed));
+      };
+
+      const flushStreamingUiNow = () => {
+        if (streamUiTimerRef.current) {
+          window.clearTimeout(streamUiTimerRef.current);
+          streamUiTimerRef.current = null;
+        }
+        if (streamingTextRef.current) {
+          replaceMessage(conversationId, assistantMsgId!, streamingTextRef.current);
+          streamLastUiAtRef.current = Date.now();
+        }
       };
 
       const unlistenChunk = await listen<GenerationResponsePayload>('generation-chunk', (event) => {
         const chunkText = event.payload?.text || '';
         const finishReason = event.payload?.finish_reason;
-        if (!chunkText) return;
+        const reasoningDelta = event.payload?.reasoning || '';
 
-        if (finishReason) {
-          streamingTextRef.current = chunkText;
-        } else {
+        // DeepSeek V4 streams reasoning_content first — show live Thought panel.
+        if (finishReason === 'reasoning' || reasoningDelta) {
+          if (reasoningDelta) {
+            if (!reasoningStartedAtRef.current) reasoningStartedAtRef.current = Date.now();
+            streamingReasoningRef.current += reasoningDelta;
+            setLiveReasoning(streamingReasoningRef.current);
+            setLiveReasoningStreaming(true);
+            setGenerationStatus('Thinking…');
+          }
+          return;
+        }
+
+        if (!chunkText && !finishReason) return;
+
+        if (streamingReasoningRef.current) {
+          setLiveReasoningStreaming(false);
+          if (reasoningStartedAtRef.current && reasoningMs == null) {
+            reasoningMs = Date.now() - reasoningStartedAtRef.current;
+          }
+        }
+
+        if (finishReason && chunkText) {
+          if (
+            finishReason === 'error'
+            || chunkText.startsWith(streamingTextRef.current)
+            || streamingTextRef.current.length < 8
+          ) {
+            streamingTextRef.current = appendStreamChunk(streamingTextRef.current, chunkText);
+          }
+        } else if (chunkText) {
           streamingTextRef.current = appendStreamChunk(streamingTextRef.current, chunkText);
         }
-        pushStreamingUi(streamingTextRef.current);
-        setGenerationStatus('Generating response...');
+
+        if (streamingTextRef.current) {
+          pushStreamingUi(streamingTextRef.current);
+          setGenerationStatus('Generating response...');
+        }
       });
       const unlistenStatus = await listen<any>('generation-status', (event) => {
         const message = event.payload?.message;
@@ -1296,23 +1618,32 @@ export default function ChatView() {
           }
         }
 
+        // DeepSeek V4 thinking needs a larger answer budget or markdown gets cut mid-format.
+        const streamParams =
+          currentModel.startsWith('remote:deepseek/')
+            ? { ...generationParams, max_tokens: Math.max(generationParams.max_tokens || 0, 4096) }
+            : generationParams;
+
         await invoke('stream_generate', {
           request: {
             prompt: userModelContent,
             messages: modelMessages,
             system_prompt: systemPrompt,
-            params: generationParams,
+            params: streamParams,
             model_path: currentModel,
             backend: currentModel.startsWith('enterprise:') ? 'enterprise' : currentModel.startsWith('remote:') ? 'remote' : 'llama.cpp',
             images: visionImages,
           }
         });
+        // Let any last Tauri events drain into listeners before we unsubscribe.
+        await new Promise<void>(resolve => window.setTimeout(() => resolve(), 40));
       } catch (err) {
         streamError = humanError(err);
       } finally {
-        if (streamUiTimerRef.current) {
-          window.clearTimeout(streamUiTimerRef.current);
-          streamUiTimerRef.current = null;
+        flushStreamingUiNow();
+        setLiveReasoningStreaming(false);
+        if (reasoningStartedAtRef.current && reasoningMs == null) {
+          reasoningMs = Date.now() - reasoningStartedAtRef.current;
         }
         unlistenChunk();
         unlistenStatus();
@@ -1328,8 +1659,27 @@ export default function ChatView() {
       } else {
         setGenerationError(null);
       }
+      const reasoningText = streamingReasoningRef.current.trim();
+      const metadata = reasoningText
+        ? JSON.stringify({
+            reasoning: reasoningText,
+            reasoningMs: reasoningMs ?? undefined,
+          })
+        : null;
       replaceMessage(conversationId, assistantMsgId, finalText);
-      await invoke('update_message', { id: assistantMsgId, content: finalText, metadata: null });
+      await invoke('update_message', { id: assistantMsgId, content: finalText, metadata });
+      // Keep reasoning on the message via store metadata for re-render.
+      if (metadata) {
+        useAppStore.setState(state => ({
+          messages: {
+            ...state.messages,
+            [conversationId]: (state.messages[conversationId] || []).map(m =>
+              m.id === assistantMsgId ? { ...m, content: finalText, metadata } : m
+            ),
+          },
+        }));
+      }
+      setLiveReasoningMsgId(null);
       setGenerationStatus(null);
     } catch (err) {
       const msg = humanError(err) || 'Generation failed. Check the selected model, runtime folder, and diagnostics report.';
@@ -1339,6 +1689,8 @@ export default function ChatView() {
         replaceMessage(conversationId, assistantMsgId, failed);
         try { await invoke('update_message', { id: assistantMsgId, content: failed, metadata: null }); } catch { /* ignore db update failure */ }
       }
+      setLiveReasoningMsgId(null);
+      setLiveReasoningStreaming(false);
       setGenerationStatus(null);
     } finally {
       setIsGenerating(false);
@@ -1386,16 +1738,32 @@ export default function ChatView() {
             <h2 className="text-2xl font-black text-surface-900 dark:text-surface-100 mb-2">PocketMind Hybrid AI Desktop</h2>
             <p className="text-surface-600 dark:text-surface-300">Select a model and start a chat.</p>
           </div>
-          <div className="rounded-xl border border-surface-200 dark:border-surface-800 p-3 text-left bg-surface-50 dark:bg-surface-900">
+          <div className="rounded-xl border border-surface-200 dark:border-surface-800 p-3 text-left bg-surface-50 dark:bg-surface-900 space-y-2">
             <p className="text-sm font-semibold mb-1">Selected model</p>
             <p className="text-sm text-surface-500 break-all">{selectedModelName}</p>
+            <label className="block text-xs text-surface-500">
+              Local GGUF (this PC)
+              <select
+                className="input-field mt-1 text-sm"
+                value={currentModel && !currentModel.startsWith('remote:') && !currentModel.startsWith('enterprise:') ? currentModel : ''}
+                onChange={e => { void selectLocalGguf(e.target.value); }}
+              >
+                <option value="">Select a local .gguf…</option>
+                {selectableLocalModels.map(m => (
+                  <option key={m.id} value={m.path}>{m.name}</option>
+                ))}
+              </select>
+            </label>
+            {selectableLocalModels.length === 0 && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">No local GGUFs in the library yet. Import or Scan in Models.</p>
+            )}
           </div>
           <div className="flex flex-wrap gap-3 justify-center">
             <button onClick={() => setActiveView('models')} className="btn-primary flex items-center gap-2"><Download className="w-4 h-4" /> Models</button>
             <button onClick={createChat} disabled={!currentModel || busyCreatingChat} className="btn-secondary flex items-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"><MessageSquare className="w-4 h-4" /> New Chat</button>
             <button onClick={() => setActiveView('characters')} className="btn-secondary">Characters</button>
           </div>
-          {!currentModel && <p className="text-sm text-amber-600 dark:text-amber-400">Choose a model in Models first.</p>}
+          {!currentModel && <p className="text-sm text-amber-600 dark:text-amber-400">Choose a local GGUF above, or open Models for online/org models.</p>}
           {generationError && <p className="text-sm text-red-500">{generationError}</p>}
         </div>
       </div>
@@ -1404,30 +1772,88 @@ export default function ChatView() {
 
   return (
     <div className="flex-1 flex flex-col h-full min-w-0">
-      <div className="min-h-16 border-b border-white/70 dark:border-surface-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-4 py-3 glass-panel flex-shrink-0">
-        <div className="flex items-center gap-3 min-w-0">
+      <div className="min-h-16 border-b border-white/70 dark:border-surface-800/80 flex flex-col xl:flex-row xl:items-center justify-between gap-2 px-4 py-3 glass-panel flex-shrink-0">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
           <div className="w-10 h-10 rounded-xl bg-primary-600 flex items-center justify-center flex-shrink-0">
             {activeCharacter ? <span className="text-sm font-bold text-white">{activeCharacter.name[0]}</span> : <Bot className="w-4 h-4 text-white" />}
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h3 className="font-semibold text-sm truncate">{activeConversationTitle}</h3>
             <p className="text-xs text-surface-500 truncate">{activeCharacter?.name || 'Assistant'} • {selectedModelName} • {isGenerating ? generationStatus || 'Generating...' : currentModel ? 'Ready' : 'Model required'}</p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2 max-w-xl">
+              <label className="text-[11px] text-surface-500 flex items-center gap-1.5 min-w-0 flex-1">
+                <span className="shrink-0">Local GGUF</span>
+                <select
+                  className="input-field text-xs py-1 min-w-0 flex-1"
+                  disabled={isGenerating}
+                  value={currentModel && !currentModel.startsWith('remote:') && !currentModel.startsWith('enterprise:') ? currentModel : ''}
+                  onChange={e => { void selectLocalGguf(e.target.value); }}
+                  title="Select a local .gguf on this PC"
+                >
+                  <option value="">{currentModel?.startsWith('remote:') ? 'Online model active — pick local…' : currentModel?.startsWith('enterprise:') ? 'Org model active — pick local…' : 'Select local .gguf…'}</option>
+                  {selectableLocalModels.map(m => (
+                    <option key={m.id} value={m.path}>{m.name}</option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                onClick={() => setActiveView('models')}
+                className="text-[11px] text-primary-600 dark:text-primary-400 underline shrink-0"
+              >
+                Models
+              </button>
+            </div>
           </div>
         </div>
-        <div className="flex items-center gap-2 w-full sm:w-auto overflow-x-auto pb-1 sm:pb-0">
-          <button onClick={() => setShowCompareRewrite(v => !v)} className="btn-secondary text-sm whitespace-nowrap">Compare rewrite</button>
-          <button onClick={() => setShowTuning(v => !v)} className="btn-secondary text-sm flex items-center gap-2 whitespace-nowrap"><SlidersHorizontal className="w-4 h-4" /> Tuning</button>
-          <button onClick={copyChat} className="btn-secondary text-sm flex items-center gap-2 whitespace-nowrap" title="Copy whole chat"><ClipboardCopy className="w-4 h-4" /> {copiedId === 'chat' ? 'Copied' : 'Copy chat'}</button>
-          <div className="relative">
+        <div className="flex flex-wrap items-center justify-end gap-1.5 xl:gap-2 w-full xl:w-auto xl:max-w-[min(100%,52rem)] xl:flex-shrink-0">
+          <button
+            type="button"
+            onClick={() => void createChat()}
+            disabled={!currentModel || busyCreatingChat}
+            className="btn-secondary text-xs xl:text-sm px-2.5 xl:px-4 py-1.5 xl:py-2 flex items-center gap-1.5 flex-shrink-0 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+            title={!currentModel ? 'Select a model first' : 'Start a new chat'}
+          >
+            <MessageSquare className="w-4 h-4 flex-shrink-0" />
+            <span className="hidden sm:inline">New Chat</span>
+          </button>
+          <button
+            onClick={() => setShowCompareRewrite(v => !v)}
+            className="btn-secondary text-xs xl:text-sm px-2.5 xl:px-4 py-1.5 xl:py-2 flex-shrink-0 whitespace-nowrap"
+            title="Compare rewrite vs last assistant message"
+          >
+            <span className="hidden lg:inline">Compare rewrite</span>
+            <span className="lg:hidden">Compare</span>
+          </button>
+          <button
+            onClick={() => setShowTuning(v => !v)}
+            className="btn-secondary text-xs xl:text-sm px-2.5 xl:px-4 py-1.5 xl:py-2 flex items-center gap-1.5 flex-shrink-0 whitespace-nowrap"
+            title="Generation tuning"
+          >
+            <SlidersHorizontal className="w-4 h-4 flex-shrink-0" />
+            <span className="hidden sm:inline">Tuning</span>
+          </button>
+          <button
+            onClick={copyChat}
+            className="btn-secondary text-xs xl:text-sm px-2.5 xl:px-4 py-1.5 xl:py-2 flex items-center gap-1.5 flex-shrink-0 whitespace-nowrap"
+            title="Copy whole chat"
+          >
+            <ClipboardCopy className="w-4 h-4 flex-shrink-0" />
+            <span className="hidden md:inline">{copiedId === 'chat' ? 'Copied' : 'Copy chat'}</span>
+            <span className="md:hidden">{copiedId === 'chat' ? 'Copied' : 'Copy'}</span>
+          </button>
+          <div className="relative flex-shrink-0">
             <button
               onClick={() => setExportMenuOpen(v => !v)}
-              className="btn-secondary text-sm flex items-center gap-2 whitespace-nowrap"
+              className="btn-secondary text-xs xl:text-sm px-2.5 xl:px-4 py-1.5 xl:py-2 flex items-center gap-1.5 whitespace-nowrap"
               title="Export chat"
             >
-              <Download className="w-4 h-4" /> Export as…
+              <Download className="w-4 h-4 flex-shrink-0" />
+              <span className="hidden lg:inline">Export as…</span>
+              <span className="lg:hidden">Export</span>
             </button>
             {exportMenuOpen && (
-              <div className="absolute right-0 top-full mt-1 z-40 w-40 rounded-xl border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 shadow-md p-1">
+              <div className="absolute right-0 top-full mt-1 z-40 w-48 rounded-xl border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 shadow-md p-1">
                 {(['md', 'json', 'txt'] as const).map(kind => (
                   <button
                     key={kind}
@@ -1437,18 +1863,33 @@ export default function ChatView() {
                     {kind.toUpperCase()}
                   </button>
                 ))}
+                <div className="my-1 border-t border-surface-200 dark:border-surface-700" />
+                {(['docx', 'pptx', 'pdf'] as const).map(kind => (
+                  <button
+                    key={kind}
+                    className="w-full text-left px-3 py-2 rounded-lg text-sm hover:bg-surface-100 dark:hover:bg-surface-800"
+                    onClick={() => { void exportChatDocument(kind); }}
+                  >
+                    {kind.toUpperCase()}
+                  </button>
+                ))}
               </div>
             )}
           </div>
           {!isGenerating && (
-            <button onClick={() => void unloadChatModel()} className="btn-secondary text-sm flex items-center gap-2 whitespace-nowrap" title="Free RAM/VRAM by unloading the local chat model">
-              <Power className="w-4 h-4" /> Unload
+            <button
+              onClick={() => void unloadChatModel()}
+              className="btn-secondary text-xs xl:text-sm px-2.5 xl:px-4 py-1.5 xl:py-2 flex items-center gap-1.5 flex-shrink-0 whitespace-nowrap"
+              title="Free RAM/VRAM by unloading the local chat model"
+            >
+              <Power className="w-4 h-4 flex-shrink-0" />
+              <span className="hidden sm:inline">Unload</span>
             </button>
           )}
           {isGenerating ? (
-            <button onClick={stopGeneration} className="px-3 py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-sm flex items-center gap-2"><Square className="w-4 h-4" /> Stop</button>
+            <button onClick={stopGeneration} className="px-2.5 xl:px-3 py-1.5 xl:py-2 rounded-lg bg-red-600 hover:bg-red-500 text-white text-xs xl:text-sm flex items-center gap-1.5 flex-shrink-0 whitespace-nowrap"><Square className="w-4 h-4" /> Stop</button>
           ) : (
-            <button onClick={deleteChat} className="p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors" title="Delete chat"><Trash2 className="w-4 h-4 text-red-500" /></button>
+            <button onClick={deleteChat} className="p-1.5 xl:p-2 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 transition-colors flex-shrink-0" title="Delete chat"><Trash2 className="w-4 h-4 text-red-500" /></button>
           )}
         </div>
       </div>
@@ -1537,10 +1978,43 @@ export default function ChatView() {
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
+      {/* No top padding: sticky turn headers must sit flush with the top of the scroll area. */}
+      <div className="flex-1 overflow-y-auto px-4 sm:px-6 pb-6 space-y-6">
         {currentMessages.length === 0 && <div className="flex items-center justify-center h-32 text-surface-400 text-sm text-center">{currentModel ? 'Start a conversation below. Attach files when you want PocketMind Hybrid AI to use local document context.' : 'Select a model before sending your first message.'}</div>}
 
-        {currentMessages.map((message) => (
+        {chatTurns.map((turn, turnIndex) => (
+        <section key={turn.key} className="space-y-4">
+        {turn.prompt && (
+          <StickyPrompt message={turn.prompt} index={turnIndex} total={chatTurns.length} />
+        )}
+        {turn.replies.map((message) => {
+          const meta = message.role === 'assistant' ? parseChatMessageMeta(message.metadata) : null;
+          const isLiveThought = message.role === 'assistant'
+            && liveReasoningMsgId === message.id
+            && Boolean(liveReasoning.trim());
+          const rawThought = isLiveThought ? liveReasoning : (meta?.reasoning || '');
+          const thoughtStreaming = isLiveThought && liveReasoningStreaming;
+          const showThinkingPlaceholder = message.role === 'assistant'
+            && (!message.content || message.content === 'Thinking...')
+            && isGenerating
+            && message.id === liveReasoningMsgId;
+          // DeepSeek sometimes puts the real Markdown answer in reasoning_content and only a
+          // short coda in content. Promote that reasoning into the answer instead of a grey dump.
+          const contentTrim = (message.content || '').trim();
+          const thoughtTrim = rawThought.trim();
+          const promoteThoughtToAnswer = !thoughtStreaming
+            && reasoningLooksLikeFinalAnswer(thoughtTrim)
+            && thoughtTrim.length > contentTrim.length + 80;
+          const thoughtText = promoteThoughtToAnswer ? '' : rawThought;
+          const answerBody = showThinkingPlaceholder
+            ? (liveReasoning.trim() ? '' : (generationStatus || 'Starting…'))
+            : (promoteThoughtToAnswer
+              ? (contentTrim && !thoughtTrim.includes(contentTrim)
+                ? `${thoughtTrim}\n\n${contentTrim}`
+                : thoughtTrim)
+              : message.content);
+
+          return (
           <div key={message.id} className={`group flex gap-3 sm:gap-4 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}>
             <div className={`w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center ${message.role === 'user' ? 'bg-surface-200 dark:bg-surface-700' : 'bg-primary-500'}`}>
               {message.role === 'user' ? <User className="w-4 h-4 text-surface-700 dark:text-surface-200" /> : <Bot className="w-4 h-4 text-surface-950" />}
@@ -1548,18 +2022,45 @@ export default function ChatView() {
             <div className={`flex-1 min-w-0 max-w-[min(52rem,100%)] ${message.role === 'user' ? 'text-right' : ''}`}>
               <div className={`inline-block chat-message-surface max-w-full rounded-xl px-4 py-3 text-left overflow-hidden ${message.role === 'user' ? 'bg-primary-600 text-white' : 'bg-white dark:bg-surface-900 text-surface-900 dark:text-surface-100 border border-surface-200 dark:border-surface-800' }`}>
                 {message.role === 'assistant' ? (
-                  <MarkdownMessage content={message.content || generationStatus || 'Starting local model...'} />
+                  <div>
+                    {thoughtText ? (
+                      <ThoughtBlock
+                        text={thoughtText}
+                        streaming={thoughtStreaming}
+                        durationMs={meta?.reasoningMs ?? null}
+                      />
+                    ) : null}
+                    {answerBody ? (
+                      <MarkdownMessage content={answerBody} />
+                    ) : thoughtStreaming ? null : (
+                      <MarkdownMessage content={generationStatus || 'Thinking...'} />
+                    )}
+                  </div>
                 ) : <MarkdownMessage content={message.content} variant="user" />}
               </div>
-              {message.role === 'assistant' && message.content && (
-                <div className="flex items-center gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                  <button onClick={() => handleCopy(message.content, message.id)} className="p-1.5 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors">
+              {message.role === 'assistant' && message.content && message.content !== 'Thinking...' && (
+                <div className="flex items-center gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity flex-wrap">
+                  <button onClick={() => handleCopy(message.content, message.id)} className="p-1.5 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors" title="Copy">
                     {copiedId === message.id ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3 text-surface-400" />}
                   </button>
+                  {(['docx', 'pptx', 'pdf'] as const).map(fmt => (
+                    <button
+                      key={fmt}
+                      type="button"
+                      title={`Export as ${fmt.toUpperCase()}`}
+                      className="px-1.5 py-1 rounded-lg text-[10px] uppercase tracking-wide text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-800"
+                      onClick={() => { void exportMessageDocument(message.content, fmt, activeConversationTitle || 'answer'); }}
+                    >
+                      {fmt}
+                    </button>
+                  ))}
                 </div>
               )}
             </div>
           </div>
+          );
+        })}
+        </section>
         ))}
         <div ref={messagesEndRef} />
       </div>
@@ -1621,12 +2122,23 @@ export default function ChatView() {
             </div>
           )}
 
-          <div className="composer-shell flex items-end gap-2 sm:gap-3 p-2 sm:p-3">
-            <button onClick={attachFiles} disabled={attachmentBusy} className="p-2 rounded-xl hover:bg-surface-200 dark:hover:bg-surface-700 transition-colors flex-shrink-0" title={modelSupportsVision(currentModel) ? 'Attach docs/images — vision model will see images & PDF pages' : 'Attach PDF, DOCX, text, code, spreadsheet, or image (images need a vision model)'}><Paperclip className="w-5 h-5 text-surface-500" /></button>
-            <textarea value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={handleKeyDown} placeholder={currentModel ? 'Message PocketMind Hybrid AI...' : 'Select a model before chatting...'} rows={1} disabled={!currentModel || isGenerating} className="flex-1 bg-transparent border-none focus:outline-none resize-none py-2 max-h-32 text-surface-900 dark:text-surface-100 placeholder:text-surface-400 disabled:opacity-60" style={{ minHeight: '24px' }} />
-            <button onClick={isGenerating ? stopGeneration : () => void handleSend()} disabled={!isGenerating && !canSend} className={`p-2 rounded-xl transition-all shadow-md ${isGenerating ? 'bg-red-600 hover:bg-red-500 text-white' : canSend ? 'bg-primary-500 hover:bg-primary-600 text-surface-950 shadow-primary-500/20' : 'bg-surface-200 dark:bg-surface-700 text-surface-400 cursor-not-allowed'}`} title={isGenerating ? 'Stop response' : !currentModel ? 'Select a model first' : 'Send'}>
-              {isGenerating ? <Square className="w-5 h-5" /> : <Send className="w-5 h-5" />}
-            </button>
+          <div className="composer-shell flex flex-col gap-2 p-2.5 sm:p-3">
+            <textarea
+              ref={chatInputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={currentModel ? 'Message PocketMind Hybrid AI...' : 'Select a model before chatting...'}
+              rows={1}
+              disabled={!currentModel || isGenerating}
+              className="composer-textarea w-full bg-transparent border-none focus:outline-none resize-none py-1.5 px-1 text-[13px] leading-relaxed min-h-[2.5rem] max-h-[min(40vh,20rem)] text-surface-900 dark:text-surface-100 placeholder:text-surface-400 disabled:opacity-60"
+            />
+            <div className="flex items-center justify-between gap-2 pt-1 border-t border-surface-200/70 dark:border-surface-800/80">
+              <button onClick={attachFiles} disabled={attachmentBusy} className="p-2 rounded-xl hover:bg-surface-200 dark:hover:bg-surface-700 transition-colors flex-shrink-0" title={modelSupportsVision(currentModel) ? 'Attach docs/images — vision model will see images & PDF pages' : 'Attach PDF, DOCX, text, code, spreadsheet, or image (images need a vision model)'}><Paperclip className="w-5 h-5 text-surface-500" /></button>
+              <button onClick={isGenerating ? stopGeneration : () => void handleSend()} disabled={!isGenerating && !canSend} className={`p-2 rounded-xl transition-all shadow-md ${isGenerating ? 'bg-red-600 hover:bg-red-500 text-white' : canSend ? 'bg-primary-500 hover:bg-primary-600 text-surface-950 shadow-primary-500/20' : 'bg-surface-200 dark:bg-surface-700 text-surface-400 cursor-not-allowed'}`} title={isGenerating ? 'Stop response' : !currentModel ? 'Select a model first' : 'Send'}>
+                {isGenerating ? <Square className="w-5 h-5" /> : <Send className="w-5 h-5" />}
+              </button>
+            </div>
           </div>
           <p className="text-xs text-center text-surface-400 mt-2">{currentModel?.startsWith('enterprise:') ? 'Organization server mode' : currentModel?.startsWith('remote:') ? 'Online API mode' : currentModel ? 'Local model selected • first response may take longer while the GGUF loads' : 'No model selected'} {attachments.length > 0 ? `• ${attachments.length} indexed attachment(s) ready` : ''}</p>
         </div>

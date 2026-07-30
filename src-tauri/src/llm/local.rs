@@ -1,5 +1,5 @@
 use std::net::TcpListener;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::collections::BTreeSet;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -22,17 +22,128 @@ pub struct LlamaCppBackend {
     port: u16,
 }
 
+/// True for non-primary multi-part GGUF shards (…-00002-of-00005.gguf).
+fn is_secondary_gguf_shard(file_name: &str) -> bool {
+    let lower = file_name.to_ascii_lowercase();
+    let Some(of_pos) = lower.rfind("-of-") else {
+        return false;
+    };
+    let before = &lower[..of_pos];
+    let Some(dash) = before.rfind('-') else {
+        return false;
+    };
+    let num = &before[dash + 1..];
+    if num.is_empty() || !num.chars().all(|c| c.is_ascii_digit()) {
+        return false;
+    }
+    num.parse::<u32>().unwrap_or(1) != 1
+}
+
+/// If this is a primary shard (…-00001-of-NNNN), list missing sibling shard filenames.
+fn missing_gguf_shard_siblings(path: &Path) -> Vec<String> {
+    let Some(file_name) = path.file_name().and_then(|s| s.to_str()) else {
+        return Vec::new();
+    };
+    let lower = file_name.to_ascii_lowercase();
+    let Some(of_pos) = lower.rfind("-of-") else {
+        return Vec::new();
+    };
+    let after = &lower[of_pos + 4..];
+    let total_str = after.split(|c: char| !c.is_ascii_digit()).next().unwrap_or("");
+    let Ok(total) = total_str.parse::<u32>() else {
+        return Vec::new();
+    };
+    if total <= 1 {
+        return Vec::new();
+    }
+    let before = &lower[..of_pos];
+    let Some(dash) = before.rfind('-') else {
+        return Vec::new();
+    };
+    let num = &before[dash + 1..];
+    if num.parse::<u32>().unwrap_or(0) != 1 {
+        return Vec::new();
+    }
+    let prefix = &file_name[..dash + 1];
+    let suffix = &file_name[of_pos..];
+    let width = num.len();
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let mut missing = Vec::new();
+    for i in 2..=total {
+        let shard = format!("{prefix}{i:0width$}{suffix}", width = width);
+        if !parent.join(&shard).is_file() {
+            missing.push(shard);
+        }
+    }
+    missing
+}
+
+/// Strip shard + quant suffixes so mmproj names can share a clean base stem.
+fn strip_gguf_quant_suffix(stem: &str) -> String {
+    let mut s = stem.to_string();
+    // e.g. ...-00001-of-00002 / ...-split-00001-of-00003
+    if let Some(idx) = s.to_ascii_lowercase().rfind("-0000") {
+        // keep only if it looks like -0000N-of-0000M
+        let tail = &s[idx..];
+        if tail.to_ascii_lowercase().contains("-of-") {
+            s.truncate(idx);
+        }
+    }
+    if let Some(idx) = s.to_ascii_lowercase().rfind("-split-0000") {
+        s.truncate(idx);
+    }
+    const SUFFIXES: &[&str] = &[
+        "-UD-Q2_K_XL", "-UD-Q3_K_XL", "-UD-Q4_K_XL", "-UD-Q5_K_XL", "-UD-Q6_K_XL", "-UD-Q8_K_XL",
+        "-UD-IQ1_S", "-UD-IQ1_M", "-UD-IQ2_M", "-UD-IQ2_XXS", "-UD-IQ3_XXS", "-UD-TQ1_0",
+        "-Q2_K_L", "-Q2_K", "-Q3_K_S", "-Q3_K_M", "-Q3_K_L", "-Q4_0", "-Q4_1", "-Q4_K_S", "-Q4_K_M",
+        "-Q4_K_L", "-Q5_0", "-Q5_1", "-Q5_K_S", "-Q5_K_M", "-Q6_K", "-Q8_0", "-IQ4_NL",
+        "-IQ4_XS", "-IQ3_M", "-IQ3_XXS", "-IQ3_XS", "-F16", "-BF16",
+        ".Q2_K", ".Q3_K_S", ".Q3_K_M", ".Q3_K_L", ".Q4_0", ".Q4_1", ".Q4_K_S", ".Q4_K_M",
+        ".Q5_0", ".Q5_1", ".Q5_K_S", ".Q5_K_M", ".Q6_K", ".Q8_0",
+    ];
+    let upper = s.to_ascii_uppercase();
+    for suf in SUFFIXES {
+        let suf_u = suf.to_ascii_uppercase();
+        if upper.ends_with(&suf_u) {
+            s.truncate(s.len().saturating_sub(suf.len()));
+            break;
+        }
+    }
+    s
+}
+
 /// Locate a paired mmproj next to a GGUF (offline vision).
 pub fn find_mmproj_for_model(model_path: &str) -> Option<String> {
     let p = Path::new(model_path);
     let parent = p.parent()?;
     let stem = p.file_stem()?.to_str()?;
+    let stem_l = stem.to_ascii_lowercase();
+    // Skip looking for a projector next to an mmproj file itself.
+    if stem_l.contains("mmproj") {
+        return None;
+    }
+    let base = strip_gguf_quant_suffix(stem);
     let candidates = [
         parent.join(format!("{stem}.mmproj")),
         parent.join(format!("{stem}.mmproj.gguf")),
         parent.join(format!("{stem}-mmproj-f16.gguf")),
         parent.join(format!("{stem}-mmproj-Q8_0.gguf")),
+        parent.join(format!("mmproj-{stem}-f16.gguf")),
+        parent.join(format!("mmproj-{stem}.gguf")),
+        parent.join(format!("{base}-mmproj-f16.gguf")),
+        parent.join(format!("mmproj-{base}-f16.gguf")),
+        parent.join(format!("mmproj-{base}-F16.gguf")),
+        parent.join(format!("mmproj-{base}-bf16.gguf")),
+        parent.join(format!("mmproj-{base}-BF16.gguf")),
+        parent.join(format!("mmproj-{base}-Q8_0.gguf")),
+        parent.join(format!("mmproj-{base}.gguf")),
+        // Prefer uniquely renamed projectors (see ModelManager mmproj download).
+        // Generic mmproj-F16.gguf is last-resort when only one VL model is present.
         parent.join("mmproj.gguf"),
+        parent.join("mmproj-F16.gguf"),
+        parent.join("mmproj-f16.gguf"),
+        parent.join("mmproj-BF16.gguf"),
+        parent.join("mmproj-bf16.gguf"),
         parent.join("mmproj-model-f16.gguf"),
     ];
     for c in candidates {
@@ -40,9 +151,21 @@ pub fn find_mmproj_for_model(model_path: &str) -> Option<String> {
             return Some(c.to_string_lossy().to_string());
         }
     }
-    // Any *mmproj*.gguf in the same folder
+    // Prefer *mmproj*.gguf files whose name shares tokens with the model stem
+    // (important when several VL models share one models folder).
     if let Ok(rd) = std::fs::read_dir(parent) {
-        let mut found: Vec<_> = rd
+        let tokens: Vec<String> = stem_l
+            .split(|c: char| !c.is_ascii_alphanumeric())
+            .filter(|t| {
+                t.len() >= 2
+                    && *t != "instruct"
+                    && *t != "gguf"
+                    && *t != "f16"
+                    && *t != "bf16"
+            })
+            .map(|t| t.to_string())
+            .collect();
+        let mut found: Vec<(usize, PathBuf)> = rd
             .flatten()
             .map(|e| e.path())
             .filter(|path| {
@@ -53,10 +176,23 @@ pub fn find_mmproj_for_model(model_path: &str) -> Option<String> {
                         .map(|n| n.to_ascii_lowercase().contains("mmproj"))
                         .unwrap_or(false)
             })
+            .map(|path| {
+                let name = path
+                    .file_name()
+                    .and_then(|n| n.to_str())
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                let score = tokens.iter().filter(|t| name.contains(t.as_str())).count();
+                (score, path)
+            })
             .collect();
-        found.sort();
-        if let Some(path) = found.into_iter().next() {
-            return Some(path.to_string_lossy().to_string());
+        found.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        // Accept best match with shared tokens, or the sole mmproj in the folder
+        // (e.g. LLaVA's generic mmproj-model-f16.gguf).
+        if let Some((score, path)) = found.first() {
+            if *score > 0 || found.len() == 1 {
+                return Some(path.to_string_lossy().to_string());
+            }
         }
     }
     None
@@ -623,23 +759,63 @@ impl InferenceBackend for LlamaCppBackend {
         if path.trim().is_empty() {
             return Err(AppError::InferenceError("No local GGUF model is selected. Open Models, import/scan a .gguf file, then click Use.".to_string()));
         }
-        if !Path::new(path).exists() {
-            return Err(AppError::InferenceError(format!("Selected model file was not found: {path}")));
+        // Strip Windows \\?\ verbatim prefix from stored paths — llama-server rejects it.
+        let path_buf = {
+            let raw = PathBuf::from(path.trim());
+            let s = raw.to_string_lossy();
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(rest) = s.strip_prefix(r"\\?\UNC\") {
+                    PathBuf::from(format!(r"\\{rest}"))
+                } else if let Some(rest) = s.strip_prefix(r"\\?\") {
+                    PathBuf::from(rest)
+                } else {
+                    raw
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = s;
+                raw
+            }
+        };
+        let path = path_buf.to_string_lossy().to_string();
+        if !path_buf.is_file() {
+            return Err(AppError::InferenceError(format!(
+                "Selected model file was not found: {path}. Re-import the .gguf from Models (Import .gguf / Scan Folder), then click Use in Chat. If you used Stop & clear during a download, the file was removed — download again."
+            )));
+        }
+        if is_secondary_gguf_shard(
+            path_buf
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or(""),
+        ) {
+            return Err(AppError::InferenceError(
+                "This file is a secondary GGUF shard (not 00001-of-N). Select the primary shard (*-00001-of-*.gguf) in Models — llama.cpp loads the other parts automatically from the same folder.".to_string(),
+            ));
+        }
+        let missing_shards = missing_gguf_shard_siblings(&path_buf);
+        if !missing_shards.is_empty() {
+            return Err(AppError::InferenceError(format!(
+                "Multi-part model is incomplete. Missing shard file(s) next to the primary GGUF: {}. Keep all parts in the same folder, then Use the *-00001-of-*.gguf file.",
+                missing_shards.join(", ")
+            )));
         }
 
-        let requested_signature = Self::requested_signature(path, params);
+        let requested_signature = Self::requested_signature(&path, params);
         {
             let loaded = self.model_loaded.lock().await;
             let loaded_path = self.loaded_model_path.lock().await;
             let loaded_signature = self.loaded_runtime_signature.lock().await;
             let process_alive = self.process.lock().await.as_mut().map(|child| child.try_wait().ok().flatten().is_none()).unwrap_or(false);
-            if *loaded && process_alive && loaded_path.as_deref() == Some(path) && loaded_signature.as_deref() == Some(requested_signature.as_str()) {
+            if *loaded && process_alive && loaded_path.as_deref() == Some(path.as_str()) && loaded_signature.as_deref() == Some(requested_signature.as_str()) {
                 return Ok(());
             }
         }
 
         let runtime_candidates = runtime_discovery::ordered_runtime_candidates(params.gpu_layers)?;
-        let launch_plans = Self::build_launch_plans(path, params, runtime_candidates);
+        let launch_plans = Self::build_launch_plans(&path, params, runtime_candidates);
         let mut errors = Vec::<String>::new();
 
         for plan in launch_plans {
@@ -650,7 +826,7 @@ impl InferenceBackend for LlamaCppBackend {
             *proc_lock = None;
             drop(proc_lock);
 
-            let args = self.build_args(path, params, &plan);
+            let args = self.build_args(&path, params, &plan);
             let mut cmd = Command::new(&plan.runtime.path);
             cmd.args(&args).stdout(Stdio::null()).stderr(Stdio::null());
             if let Some(parent) = plan.runtime.path.parent() {
@@ -667,9 +843,9 @@ impl InferenceBackend for LlamaCppBackend {
                             let mut loaded_signature = self.loaded_runtime_signature.lock().await;
                             let mut loaded_mmproj = self.loaded_mmproj.lock().await;
                             *loaded = true;
-                            *loaded_path = Some(path.to_string());
+                            *loaded_path = Some(path.clone());
                             *loaded_signature = Some(requested_signature.clone());
-                            *loaded_mmproj = find_mmproj_for_model(path);
+                            *loaded_mmproj = find_mmproj_for_model(&path);
                             // Record GPU usage so Knowledge Chat embeddings can avoid
                             // competing for the same VRAM (0 when this plan is CPU-only).
                             let active = if plan.runtime.force_cpu || plan.gpu_layers == 0 { 0 } else { plan.gpu_layers };
@@ -861,6 +1037,7 @@ impl InferenceBackend for LlamaCppBackend {
                         tokens_generated: 1,
                         tokens_per_sec: 0.0,
                         tool_calls: None,
+                    reasoning: None,
 }).await;
                 }
             }
@@ -873,6 +1050,7 @@ impl InferenceBackend for LlamaCppBackend {
                     if let Some(cleaned_piece) = ingest_stream_piece(&mut full_text, piece) {
                         tokens_generated = tokens_generated.saturating_add(1);
                         let _ = tx.send(GenerationChunk { text: cleaned_piece, finish_reason: None, tokens_generated: 1, tokens_per_sec: 0.0, tool_calls: None,
+                    reasoning: None,
 }).await;
                     }
                 }
@@ -891,6 +1069,7 @@ impl InferenceBackend for LlamaCppBackend {
                 tokens_generated,
                 tokens_per_sec: 0.0,
                 tool_calls: None,
+                    reasoning: None,
 }).await;
         } else if normalize_stream_compare(&final_text) != normalize_stream_compare(&full_text) {
             let _ = tx.send(GenerationChunk {
@@ -899,6 +1078,7 @@ impl InferenceBackend for LlamaCppBackend {
                 tokens_generated,
                 tokens_per_sec: 0.0,
                 tool_calls: None,
+                    reasoning: None,
 }).await;
         } else {
             let _ = tx.send(GenerationChunk {
@@ -907,6 +1087,7 @@ impl InferenceBackend for LlamaCppBackend {
                 tokens_generated,
                 tokens_per_sec: 0.0,
                 tool_calls: None,
+                    reasoning: None,
 }).await;
         }
 

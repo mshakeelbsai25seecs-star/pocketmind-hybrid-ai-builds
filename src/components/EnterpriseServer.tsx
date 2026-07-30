@@ -7,6 +7,7 @@ import {
 import { useAppStore } from '../store';
 import { Conversation, EnterpriseEmbeddingProbe, EnterpriseModelInfo, EnterpriseServerConfig, EnterpriseServerTestResult } from '../types';
 import { probeServerRag } from '../knowledgeChat/serverRag';
+import EnterpriseServerHostPanel from './EnterpriseServerHostPanel';
 
 function humanError(err: unknown): string {
   if (!err) return 'Unknown error';
@@ -242,6 +243,8 @@ export default function EnterpriseServer() {
         </div>
       </div>
 
+      <EnterpriseServerHostPanel />
+
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         <div className="xl:col-span-2 premium-card p-6 space-y-5">
           <div className="flex items-center gap-3">
@@ -299,6 +302,25 @@ export default function EnterpriseServer() {
               </button>
             </div>
 
+            <div className="rounded-2xl border border-surface-200 dark:border-surface-800 bg-surface-50/70 dark:bg-surface-900/50 p-4 space-y-2">
+              <p className="text-sm font-bold text-surface-700 dark:text-surface-200">
+                PocketCode runtime modes
+              </p>
+              <p className="text-xs text-surface-500">
+                Workspace tools (local vs remote agent-host) are configured in PocketCode via the
+                runtime profile bar — independent of Server RAG below. Deploy
+                <code className="mx-1">enterprise-server/agent-host</code> for remote tools;
+                do not merge it into the Full RAG gateway. See COMPATIBILITY_MATRIX.md.
+              </p>
+              <button
+                type="button"
+                className="btn-secondary text-xs"
+                onClick={() => store.setActiveView('code-workspace')}
+              >
+                Open PocketCode profile picker
+              </button>
+            </div>
+
             <div className="rounded-2xl border border-surface-200 dark:border-surface-800 bg-surface-50/70 dark:bg-surface-900/50 p-4 space-y-3">
               <label className="flex items-center gap-3 cursor-pointer">
                 <input
@@ -324,9 +346,10 @@ export default function EnterpriseServer() {
                 </span>
               </label>
               <p className="text-xs text-surface-500">
-                Thin client mode: the desktop app sends questions and a Bearer token only.
+                Knowledge Chat thin client: the desktop app sends questions and a Bearer token only.
                 Collections, embeddings, rerank, and answers run on the Full Server RAG stack
                 (<code className="mx-1">/v1/knowledge/*</code>). Leave off to keep local Knowledge Chat.
+                This is separate from PocketCode remote agent-host modes.
               </p>
               {serverRagReachable === true && (
                 <div className="text-xs text-emerald-700 dark:text-emerald-300">Knowledge API reachable on this endpoint.</div>

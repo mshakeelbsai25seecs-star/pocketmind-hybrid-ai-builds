@@ -5,6 +5,7 @@
 //! - Never `cmd /c`, `powershell -Command`, or `bash -c` with agent strings
 
 use crate::error::{AppError, AppResult};
+use pocketcode_workspace::WorkspaceSidecar;
 use crate::tooling;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -46,8 +47,66 @@ const CLI_ALLOWLIST: &[&str] = &[
     "go", "java", "javac", "mvn", "gradle", "dotnet", "ruby", "php", "perl", "lua", "rscript",
     "pytest", "pip", "pip3", "uv", "poetry", "tsc", "tsx", "ts-node", "dart", "flutter",
     "kotlin", "kotlinc", "swift", "zig", "julia", "make", "cmake", "gcc", "g++", "clang",
-    "clang++", "rg", "elixir", "mix", "nim", "crystal", "phpunit", "composer",
+    "clang++", "rg", "elixir", "mix", "nim", "crystal", "phpunit", "composer", "git",
 ];
+
+/// git is allowed only for inspection: the agent may verify its own edits, never rewrite
+/// history, move refs, or touch a remote.
+const GIT_SUBCOMMAND_ALLOWLIST: &[&str] = &[
+    "status", "diff", "log", "show", "rev-parse", "ls-files", "blame", "describe", "shortlog",
+    "branch", "remote", "config", "stash", "grep", "cat-file", "symbolic-ref", "count-objects",
+];
+
+/// Flags that turn an otherwise read-only git subcommand into a mutation.
+fn git_args_are_read_only(sub: &str, rest: &[String]) -> bool {
+    let flags: Vec<String> = rest.iter().map(|a| a.to_ascii_lowercase()).collect();
+    let has = |needle: &str| flags.iter().any(|f| f == needle);
+    match sub {
+        "branch" => !(has("-d") || has("-D") || has("--delete") || has("-m") || has("--move")
+            || has("-c") || has("--copy") || has("--set-upstream-to") || has("-f")
+            || has("--force")),
+        // `git remote` alone lists; subverbs add/remove/set-url mutate config.
+        "remote" => flags.first().map(|f| f == "-v" || f == "--verbose" || f == "show").unwrap_or(true),
+        // Reading config is fine; writing (`--add`, `--unset`, or key value pairs) is not.
+        "config" => (has("--get") || has("--get-all") || has("--list") || has("-l"))
+            && !(has("--add") || has("--unset") || has("--unset-all") || has("--replace-all")),
+        "stash" => flags.first().map(|f| f == "list" || f == "show").unwrap_or(false),
+        _ => true,
+    }
+}
+
+fn check_git_argv(argv: &[String]) -> AppResult<()> {
+    let sub = argv
+        .iter()
+        .skip(1)
+        .find(|a| !a.starts_with('-'))
+        .map(|s| s.to_ascii_lowercase())
+        .unwrap_or_default();
+    if sub.is_empty() {
+        return Err(AppError::Unknown(
+            "git needs a read-only subcommand, e.g. [\"git\",\"status\",\"--short\"].".to_string(),
+        ));
+    }
+    if !GIT_SUBCOMMAND_ALLOWLIST.iter().any(|a| *a == sub) {
+        return Err(AppError::Unknown(format!(
+            "git {sub} is not allowed. Inspection only: {}. Use apply_edit for changes; commits and pushes stay with the user.",
+            GIT_SUBCOMMAND_ALLOWLIST.join(", ")
+        )));
+    }
+    let rest: Vec<String> = argv
+        .iter()
+        .skip(1)
+        .skip_while(|a| a.to_ascii_lowercase() != sub)
+        .skip(1)
+        .cloned()
+        .collect();
+    if !git_args_are_read_only(&sub, &rest) {
+        return Err(AppError::Unknown(format!(
+            "git {sub} with those flags would modify the repository. Only read-only inspection is allowed."
+        )));
+    }
+    Ok(())
+}
 
 const LONG_TIMEOUT_CLIS: &[&str] = &[
     "cargo", "npm", "npx", "yarn", "pnpm", "bun", "deno", "go", "mvn", "gradle", "dotnet",
@@ -181,12 +240,14 @@ fn normalize_bin_name(name: &str) -> String {
 
 fn which_in_path(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
+    // Windows Node/npm ship extensionless shims that PowerShell can run but CreateProcess
+    // cannot — prefer real executables (.exe/.cmd/.bat) before bare names.
     let candidates = if cfg!(windows) {
         vec![
-            name.to_string(),
             format!("{name}.exe"),
             format!("{name}.cmd"),
             format!("{name}.bat"),
+            name.to_string(),
         ]
     } else {
         vec![name.to_string()]
@@ -233,12 +294,71 @@ fn cli_timeout_secs(bin: &str) -> u64 {
 }
 
 #[derive(Debug)]
-struct PreparedCmd {
-    label: String,
-    program: PathBuf,
-    args: Vec<String>,
-    cwd: PathBuf,
-    timeout_secs: u64,
+pub struct PreparedCmd {
+    pub label: String,
+    pub program: PathBuf,
+    pub args: Vec<String>,
+    pub cwd: PathBuf,
+    pub timeout_secs: u64,
+}
+
+impl PreparedCmd {
+    /// Display form for terminal UI / agent messages (never the resolved absolute program path).
+    pub fn display_command(&self) -> String {
+        let bin = self
+            .program
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("command");
+        if self.args.is_empty() {
+            bin.to_string()
+        } else {
+            format!("{bin} {}", self.args.join(" "))
+        }
+    }
+}
+
+/// Same allowlist/gating as [`run`], but hands back the command instead of executing it.
+/// Used by the streaming terminal so background processes obey identical rules.
+pub fn prepare_command(
+    workspace_root: &Path,
+    language: Option<&str>,
+    code: Option<String>,
+    args: Option<Vec<String>>,
+    argv: Option<Vec<String>>,
+) -> AppResult<PreparedCmd> {
+    let root = canonicalize_root(workspace_root)?;
+    let extra = args.unwrap_or_default();
+
+    if let Some(argv) = argv {
+        if !argv.is_empty() {
+            return prepare_cli(&root, &argv);
+        }
+    }
+
+    let lang = language
+        .map(|s| s.trim().to_ascii_lowercase())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| {
+            AppError::Unknown(
+                "Provide language+code for script mode, or argv for CLI mode.".to_string(),
+            )
+        })?;
+    // Compile-then-run languages need two commands; the one-shot runner handles those.
+    if matches!(lang.as_str(), "rust" | "java" | "csharp" | "cs" | "c#") {
+        return Err(AppError::Unknown(format!(
+            "Language '{lang}' compiles before running and cannot stream in a terminal session. Run it without background mode."
+        )));
+    }
+    let code = code.ok_or_else(|| {
+        AppError::Unknown("Script mode requires a non-empty code/script body.".to_string())
+    })?;
+    prepare_script(&root, &lang, &code, &extra)
+}
+
+/// Apply the same env scrubbing the one-shot sandbox uses.
+pub fn apply_sandbox_env(cmd: &mut Command) {
+    scrub_env(cmd);
 }
 
 /// Build argv for script languages.
@@ -255,18 +375,15 @@ fn prepare_script(
     }
 
     let run_id = uuid::Uuid::new_v4();
-    let work = root.join(".pocketmind-sandbox").join(run_id.to_string());
+    let sidecar = WorkspaceSidecar::for_workspace(root)
+        .map_err(|e| AppError::Unknown(e.to_string()))?;
+    let work = sidecar.sandbox_dir().join(run_id.to_string());
     std::fs::create_dir_all(&work)
         .map_err(|e| AppError::Unknown(format!("Cannot create sandbox dir: {e}")))?;
     let work_canon = strip_verbatim_prefix(
         work.canonicalize()
             .map_err(|e| AppError::Unknown(format!("Cannot canonicalize sandbox dir: {e}")))?,
     );
-    if !path_is_under(root, &work_canon) {
-        return Err(AppError::Unknown(
-            "Sandbox path escaped workspace root.".to_string(),
-        ));
-    }
 
     let missing = |tool: &str| -> AppError {
         AppError::Unknown(format!(
@@ -501,6 +618,9 @@ fn prepare_cli(root: &Path, argv: &[String]) -> AppResult<PreparedCmd> {
         return Err(AppError::Unknown(
             "CLI argv[0] must be a bare allowlisted binary name, not a path.".to_string(),
         ));
+    }
+    if normalize_bin_name(bin_name) == "git" {
+        check_git_argv(argv)?;
     }
     let program = resolve_binary(bin_name).ok_or_else(|| {
         AppError::Unknown(format!(
@@ -740,6 +860,62 @@ mod tests {
     fn normalizes_windows_exe_suffix() {
         assert_eq!(normalize_bin_name("cargo.exe"), "cargo");
         assert!(is_cli_allowed("NPM.CMD"));
+    }
+
+    #[test]
+    fn allows_read_only_git_inspection() {
+        for argv in [
+            vec!["git".to_string(), "status".to_string(), "--short".to_string()],
+            vec!["git".to_string(), "diff".to_string(), "--stat".to_string()],
+            vec!["git".to_string(), "log".to_string(), "-n".to_string(), "5".to_string()],
+            vec!["git".to_string(), "branch".to_string(), "--list".to_string()],
+            vec!["git".to_string(), "remote".to_string(), "-v".to_string()],
+            vec!["git".to_string(), "config".to_string(), "--get".to_string(), "user.name".to_string()],
+        ] {
+            assert!(check_git_argv(&argv).is_ok(), "expected allowed: {argv:?}");
+        }
+    }
+
+    #[test]
+    fn blocks_git_mutations() {
+        for argv in [
+            vec!["git".to_string(), "push".to_string()],
+            vec!["git".to_string(), "commit".to_string(), "-m".to_string(), "x".to_string()],
+            vec!["git".to_string(), "reset".to_string(), "--hard".to_string()],
+            vec!["git".to_string(), "checkout".to_string(), "main".to_string()],
+            vec!["git".to_string(), "clean".to_string(), "-fdx".to_string()],
+            vec!["git".to_string(), "branch".to_string(), "-D".to_string(), "old".to_string()],
+            vec!["git".to_string(), "config".to_string(), "--add".to_string(), "k".to_string(), "v".to_string()],
+            vec!["git".to_string(), "stash".to_string(), "pop".to_string()],
+            vec!["git".to_string()],
+        ] {
+            assert!(check_git_argv(&argv).is_err(), "expected blocked: {argv:?}");
+        }
+    }
+
+    #[test]
+    fn terminal_prepare_rejects_compile_then_run_languages() {
+        let root = std::env::temp_dir();
+        let err = prepare_command(&root, Some("rust"), Some("fn main(){}".into()), None, None)
+            .unwrap_err();
+        assert!(format!("{err}").contains("background"), "{err}");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn resolves_npm_to_spawnable_binary() {
+        let root = std::env::temp_dir();
+        let prep = prepare_cli(&root, &["npm".into(), "--version".into()]).expect("npm prepare");
+        let ext = prep
+            .program
+            .extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+        assert!(
+            ext.eq_ignore_ascii_case("cmd") || ext.eq_ignore_ascii_case("exe"),
+            "npm must resolve to .cmd/.exe for CreateProcess, got {}",
+            prep.program.display()
+        );
     }
 }
 

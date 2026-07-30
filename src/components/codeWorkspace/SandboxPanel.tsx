@@ -29,6 +29,9 @@ export default function SandboxPanel({
             {pending.mode === 'cli'
               ? 'Agent wants to run an allowlisted CLI in your workspace. Confirm before execution.'
               : `Agent wants to run a ${pending.language} script in the workspace sandbox. Confirm before execution.`}
+            {pending.background
+              ? ' This one keeps running in the background until it exits or you stop it in the Terminal panel.'
+              : ''}
           </p>
           {pending.mode === 'cli' ? (
             <pre className="text-xs font-mono max-h-32 overflow-auto bg-white/60 dark:bg-surface-900/60 rounded p-2">

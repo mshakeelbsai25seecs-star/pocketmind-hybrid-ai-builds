@@ -20,6 +20,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import io
+import os
 import re
 import shutil
 import sys
@@ -375,16 +376,85 @@ def ocr_pdf_docling(pdf_path: Path, max_pages: int | None) -> tuple[str, int, in
     return wrapped, total, total
 
 
+def unlimited_worker_path() -> Path | None:
+    here = Path(__file__).resolve().parent
+    candidate = here / "unlimited_ocr_worker.py"
+    if candidate.is_file():
+        return candidate
+    return None
+
+
+def ocr_pdf_unlimited(pdf_path: Path, output_md: Path, max_pages: int | None) -> tuple[str, int, int]:
+    """Delegate to Unlimited-OCR sidecar when CUDA + weights are available."""
+    import json
+    import subprocess
+
+    worker = unlimited_worker_path()
+    if worker is None:
+        raise RuntimeError("unlimited_ocr_worker.py not found")
+
+    model_dir = os.environ.get("NEXUS_UNLIMITED_OCR_DIR", "").strip()
+    if not model_dir:
+        # Best-effort default under common data roots
+        for root in (
+            os.environ.get("NEXUS_DATA_ROOT", ""),
+            str(Path.home() / "AppData" / "Local" / "PocketMind"),
+        ):
+            if root:
+                cand = Path(root) / "models" / "ocr" / "unlimited-ocr"
+                if cand.is_dir():
+                    model_dir = str(cand)
+                    break
+    if not model_dir:
+        model_dir = str(Path.home() / ".cache" / "pocketmind" / "unlimited-ocr")
+
+    cmd = [
+        sys.executable,
+        str(worker),
+        "ocr",
+        "--input",
+        str(pdf_path),
+        "--output",
+        str(output_md),
+        "--model-dir",
+        model_dir,
+        "--mode",
+        "gundam",
+    ]
+    if max_pages is not None:
+        cmd.extend(["--max-pages", str(max_pages)])
+
+    proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace")
+    stdout = (proc.stdout or "").strip()
+    stderr = (proc.stderr or "").strip()
+    json_line = next((ln for ln in reversed(stdout.splitlines()) if ln.strip().startswith("{")), "")
+    if not json_line:
+        raise RuntimeError(stderr or "Unlimited-OCR produced no JSON")
+    payload = json.loads(json_line)
+    if not payload.get("ok"):
+        raise RuntimeError(payload.get("error") or stderr or "Unlimited-OCR failed")
+    if not output_md.is_file():
+        raise RuntimeError("Unlimited-OCR reported ok but wrote no markdown")
+    text = output_md.read_text(encoding="utf-8", errors="replace")
+    pages = int(payload.get("pages") or 1)
+    return text, pages, pages
+
+
 def resolve_engine(requested: str) -> str:
     req = (requested or "auto").strip().lower()
     if req == "legacy":
         return "legacy"
+    if req in {"unlimited", "unlimited-ocr", "unlimited_ocr"}:
+        if unlimited_worker_path() is not None:
+            return "unlimited"
+        print("WARNING: Unlimited-OCR worker missing; falling back", file=sys.stderr)
+        req = "auto"
     if req == "docling":
         if docling_available():
             return "docling"
         print("WARNING: Docling not importable; falling back to legacy", file=sys.stderr)
         return "legacy"
-    # auto
+    # auto → docling then legacy (Unlimited is attempted separately in main)
     if docling_available():
         return "docling"
     return "legacy"
@@ -407,9 +477,9 @@ def main() -> int:
     parser.add_argument("--dpi", type=int, default=300)
     parser.add_argument(
         "--engine",
-        choices=["auto", "legacy", "docling"],
+        choices=["auto", "legacy", "docling", "unlimited"],
         default="auto",
-        help="OCR engine (auto tries Docling then legacy)",
+        help="OCR engine (auto tries Unlimited when ready, then Docling, then legacy)",
     )
     parser.add_argument(
         "--preprocess",
@@ -455,22 +525,45 @@ def main() -> int:
     if max_pages is not None and (not isinstance(max_pages, int) or max_pages < 1):
         max_pages = None
 
-    engine = resolve_engine(args.engine)
-    print(f"Using engine: {engine}", file=sys.stderr)
+    requested = (args.engine or "auto").strip().lower()
+    out_preview = args.output
+    engine = resolve_engine(requested)
+    print(f"Using engine: {engine} (requested={requested})", file=sys.stderr)
 
     try:
-        if engine == "docling":
+        text = ""
+        pages = 0
+        ocr_pages = 0
+        # Auto/explicit unlimited: try Unlimited-OCR first, then fall through.
+        if requested in {"auto", "unlimited", "unlimited-ocr", "unlimited_ocr"} and unlimited_worker_path():
             try:
-                text, pages, ocr_pages = ocr_pdf_docling(args.pdf, max_pages)
+                tmp_out = out_preview or (Path(tempfile.mkdtemp(prefix="soc_uo_")) / "ocr.md")
+                text, pages, ocr_pages = ocr_pdf_unlimited(args.pdf, Path(tmp_out), max_pages)
+                engine = "unlimited"
             except Exception as exc:  # noqa: BLE001
-                print(f"WARNING: Docling failed ({exc}); falling back to legacy", file=sys.stderr)
+                print(f"WARNING: Unlimited-OCR failed ({exc}); falling back", file=sys.stderr)
+                text = ""
+                if requested in {"unlimited", "unlimited-ocr", "unlimited_ocr"}:
+                    engine = resolve_engine("auto")
+                else:
+                    engine = resolve_engine("auto") if engine == "unlimited" else engine
+
+        if not text.strip():
+            if engine == "docling" or (requested == "auto" and docling_available()):
+                try:
+                    text, pages, ocr_pages = ocr_pdf_docling(args.pdf, max_pages)
+                    engine = "docling"
+                except Exception as exc:  # noqa: BLE001
+                    print(f"WARNING: Docling failed ({exc}); falling back to legacy", file=sys.stderr)
+                    text, pages, ocr_pages = ocr_pdf_legacy(
+                        args.pdf, max_pages, dpi, args.preprocess
+                    )
+                    engine = "legacy"
+            else:
                 text, pages, ocr_pages = ocr_pdf_legacy(
                     args.pdf, max_pages, dpi, args.preprocess
                 )
-        else:
-            text, pages, ocr_pages = ocr_pdf_legacy(
-                args.pdf, max_pages, dpi, args.preprocess
-            )
+                engine = "legacy"
     except Exception as exc:  # noqa: BLE001
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1

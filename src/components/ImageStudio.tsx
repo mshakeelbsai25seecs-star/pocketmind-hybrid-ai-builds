@@ -2,6 +2,7 @@ import { useMemo, useState, type ReactNode } from 'react';
 import { Download, Image as ImageIcon, Wand2, Crown, Zap, HardDrive, SlidersHorizontal, ExternalLink, Copy, Check, AlertTriangle, Loader2, RefreshCw, Maximize2 } from 'lucide-react';
 import { IMAGE_GENERATION_MODELS, MODEL_CATEGORIES } from '../modelCatalog';
 import { GeneratedImageRecord, ImageGenerationModel, ModelCategoryId } from '../types';
+import { onOpenExternal } from '../openExternal';
 
 const IMAGE_CATEGORIES = MODEL_CATEGORIES.filter(c => c.id.startsWith('image-'));
 
@@ -274,8 +275,8 @@ function GalleryCard({ record, copied, onCopy, onPreview }: { record: GeneratedI
         <p className="text-xs text-surface-500 truncate">{record.provider} • {record.width}×{record.height} • seed {record.seed}</p>
         <div className="grid grid-cols-3 gap-2">
           <button onClick={onCopy} className="btn-secondary text-xs flex items-center justify-center gap-1 min-w-0 px-2">{copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />} <span className="hidden sm:inline">Copy</span></button>
-          <button onClick={() => window.open(record.url, '_blank')} className="btn-secondary text-xs flex items-center justify-center gap-1 min-w-0 px-2"><ExternalLink className="w-3 h-3" /> <span className="hidden sm:inline">Open</span></button>
-          <a href={record.url} target="_blank" rel="noreferrer" className="btn-secondary text-xs flex items-center justify-center gap-1 min-w-0 px-2"><Download className="w-3 h-3" /> <span className="hidden sm:inline">Save</span></a>
+          <button type="button" onClick={onOpenExternal(record.url)} className="btn-secondary text-xs flex items-center justify-center gap-1 min-w-0 px-2"><ExternalLink className="w-3 h-3" /> <span className="hidden sm:inline">Open</span></button>
+          <button type="button" onClick={onOpenExternal(record.url)} className="btn-secondary text-xs flex items-center justify-center gap-1 min-w-0 px-2" title="Open image URL (save from browser)"><Download className="w-3 h-3" /> <span className="hidden sm:inline">Save</span></button>
         </div>
       </div>
     </div>

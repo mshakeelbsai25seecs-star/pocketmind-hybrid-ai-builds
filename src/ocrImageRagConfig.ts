@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/tauri';
 
-export type OcrEngineId = 'auto' | 'legacy' | 'docling';
+export type OcrEngineId = 'auto' | 'legacy' | 'docling' | 'unlimited';
 
 export interface OcrImageRagConfig {
   ocr_engine: OcrEngineId | string;
@@ -20,9 +20,34 @@ export interface OcrCapabilities {
   legacy_ocr_script_available: boolean;
   docling_importable: boolean;
   opencv_available: boolean;
+  unlimited_ocr_available?: boolean;
+  unlimited_ocr_model_ready?: boolean;
+  unlimited_ocr_cuda?: boolean;
   image_rag_configured: boolean;
   active_engine_hint: string;
   warnings: string[];
+}
+
+export interface UnlimitedOcrProbe {
+  ok: boolean;
+  python: string;
+  torch: boolean;
+  transformers: boolean;
+  pymupdf: boolean;
+  cuda: boolean;
+  model_dir: string;
+  model_ready: boolean;
+  available: boolean;
+  warning?: string | null;
+  worker_found: boolean;
+}
+
+export async function probeUnlimitedOcr(): Promise<UnlimitedOcrProbe> {
+  return invoke<UnlimitedOcrProbe>('probe_unlimited_ocr_status');
+}
+
+export async function downloadUnlimitedOcrModel(): Promise<UnlimitedOcrProbe> {
+  return invoke<UnlimitedOcrProbe>('download_unlimited_ocr_model');
 }
 
 export const DEFAULT_OCR_IMAGE_RAG_CONFIG: OcrImageRagConfig = {

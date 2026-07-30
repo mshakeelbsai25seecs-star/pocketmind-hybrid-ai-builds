@@ -9,12 +9,15 @@ import {
 } from '../productConfig';
 import {
   DEFAULT_OCR_IMAGE_RAG_CONFIG,
+  downloadUnlimitedOcrModel,
   loadOcrCapabilities,
   loadOcrImageRagConfig,
+  probeUnlimitedOcr,
   saveOcrImageRagConfig,
   testImageRagConnection,
   type OcrCapabilities,
   type OcrImageRagConfig,
+  type UnlimitedOcrProbe,
 } from '../ocrImageRagConfig';
 
 export default function SecuritySettingsPanel() {
@@ -316,6 +319,7 @@ export default function SecuritySettingsPanel() {
 function OcrImageRagSettingsBlock() {
   const [cfg, setCfg] = useState<OcrImageRagConfig>(DEFAULT_OCR_IMAGE_RAG_CONFIG);
   const [caps, setCaps] = useState<OcrCapabilities | null>(null);
+  const [uoProbe, setUoProbe] = useState<UnlimitedOcrProbe | null>(null);
   const [apiKey, setApiKey] = useState('');
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -326,6 +330,11 @@ function OcrImageRagSettingsBlock() {
       try {
         setCfg(await loadOcrImageRagConfig());
         setCaps(await loadOcrCapabilities());
+        try {
+          setUoProbe(await probeUnlimitedOcr());
+        } catch {
+          /* optional */
+        }
       } catch (e) {
         setErr(e instanceof Error ? e.message : String(e));
       }
@@ -345,17 +354,36 @@ function OcrImageRagSettingsBlock() {
       const clamped = {
         ...cfg,
         image_rag_max_regions_per_query: Math.min(8, Math.max(1, Number(cfg.image_rag_max_regions_per_query) || 4)),
-        ocr_engine: ['auto', 'legacy', 'docling'].includes(cfg.ocr_engine) ? cfg.ocr_engine : 'auto',
+        ocr_engine: ['auto', 'legacy', 'docling', 'unlimited'].includes(cfg.ocr_engine) ? cfg.ocr_engine : 'auto',
       };
       const saved = await saveOcrImageRagConfig(clamped, apiKey.trim() ? apiKey : null);
       setCfg(saved);
       setApiKey('');
       try {
         setCaps(await loadOcrCapabilities());
+        setUoProbe(await probeUnlimitedOcr());
       } catch {
         /* optional */
       }
       setMsg('Saved. Rebuild your folder index if you changed how PDFs are read.');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const downloadUnlimited = async () => {
+    setBusy(true);
+    setMsg(null);
+    setErr(null);
+    try {
+      const probe = await downloadUnlimitedOcrModel();
+      setUoProbe(probe);
+      setCaps(await loadOcrCapabilities());
+      setMsg(probe.available
+        ? 'Unlimited-OCR weights downloaded and ready.'
+        : `Weights downloaded to ${probe.model_dir}. CUDA + torch still required for use.`);
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
@@ -381,7 +409,18 @@ function OcrImageRagSettingsBlock() {
         caps.python_available ? 'PDF text reading ready' : 'PDF text reading needs Python',
         caps.docling_importable ? 'layout reader installed' : null,
         caps.opencv_available ? 'image cleanup installed' : null,
+        caps.unlimited_ocr_available || uoProbe?.available ? 'Unlimited-OCR ready' : null,
+        caps.active_engine_hint ? `active: ${caps.active_engine_hint}` : null,
       ].filter(Boolean).join(' · ')
+    : null;
+
+  const unlimitedStatus = uoProbe
+    ? [
+        uoProbe.worker_found ? 'worker found' : 'worker missing',
+        uoProbe.cuda ? 'CUDA yes' : 'CUDA no',
+        uoProbe.model_ready ? 'weights yes' : 'weights not downloaded',
+        uoProbe.available ? 'ready' : 'not ready',
+      ].join(' · ')
     : null;
 
   return (
@@ -391,6 +430,11 @@ function OcrImageRagSettingsBlock() {
         Scanned PDFs are read on this device by default. Sending page images to an online vision service is optional and off unless you turn it on here and again for each folder.
       </p>
       {statusLine && <p className="text-xs text-surface-500">{statusLine}</p>}
+      {caps?.warnings?.length ? (
+        <ul className="text-xs text-amber-700 dark:text-amber-300 list-disc pl-4 space-y-1">
+          {caps.warnings.map(w => <li key={w}>{w}</li>)}
+        </ul>
+      ) : null}
       <label className="block text-sm">
         <span className="text-xs text-surface-500">How to read scanned PDFs</span>
         <select
@@ -398,11 +442,47 @@ function OcrImageRagSettingsBlock() {
           value={cfg.ocr_engine}
           onChange={e => setCfg({ ...cfg, ocr_engine: e.target.value })}
         >
-          <option value="auto">Automatic (best available on this PC)</option>
+          <option value="auto">Automatic (Unlimited → Docling → Legacy)</option>
+          <option value="unlimited">Unlimited-OCR (CUDA GPU, high accuracy)</option>
           <option value="legacy">Built-in reader</option>
           <option value="docling">Layout-aware reader (if installed)</option>
         </select>
       </label>
+      <div className="rounded-xl border border-surface-200 dark:border-surface-700 p-3 space-y-2">
+        <p className="text-xs font-medium">Unlimited-OCR (optional)</p>
+        <p className="text-xs text-surface-500">
+          Needs an NVIDIA GPU with CUDA, Python packages (torch, transformers, pymupdf), and downloaded weights (not bundled in the installer).
+        </p>
+        {unlimitedStatus && <p className="text-xs text-surface-500">{unlimitedStatus}</p>}
+        {uoProbe?.warning && <p className="text-xs text-amber-700 dark:text-amber-300">{uoProbe.warning}</p>}
+        {uoProbe?.model_dir && (
+          <p className="text-[11px] text-surface-400 break-all">Model dir: {uoProbe.model_dir}</p>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="btn-secondary text-xs"
+            disabled={busy}
+            onClick={() => void (async () => {
+              setBusy(true);
+              setErr(null);
+              try {
+                setUoProbe(await probeUnlimitedOcr());
+                setCaps(await loadOcrCapabilities());
+              } catch (e) {
+                setErr(e instanceof Error ? e.message : String(e));
+              } finally {
+                setBusy(false);
+              }
+            })()}
+          >
+            Probe Unlimited-OCR
+          </button>
+          <button type="button" className="btn-secondary text-xs" disabled={busy} onClick={() => void downloadUnlimited()}>
+            Download Unlimited-OCR weights
+          </button>
+        </div>
+      </div>
       <label className="flex items-start gap-3 cursor-pointer">
         <input type="checkbox" checked={cfg.ocr_preprocess} onChange={e => setCfg({ ...cfg, ocr_preprocess: e.target.checked })} className="mt-1" />
         <span className="text-sm">Clean up page images before reading (when available)</span>

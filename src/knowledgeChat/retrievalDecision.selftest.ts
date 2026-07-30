@@ -10,13 +10,13 @@ function assert(cond: boolean, msg: string) {
 
 assert(parseRetrievalDecision('{"action":"answer"}')?.action === 'answer', 'answer ok');
 assert(
-  parseRetrievalDecision('{"action":"need_retrieval","query":"handleSend body in ChatView.tsx"}')?.action
+  parseRetrievalDecision('{"action":"need_retrieval","query":"submitForm body in UserPanel.tsx"}')?.action
     === 'need_retrieval',
   'need_retrieval ok',
 );
 assert(
-  (parseRetrievalDecision('{"action":"need_retrieval","query":"handleSend body in ChatView.tsx"}') as { query: string })
-    .query.includes('ChatView'),
+  (parseRetrievalDecision('{"action":"need_retrieval","query":"submitForm body in UserPanel.tsx"}') as { query: string })
+    .query.includes('UserPanel'),
   'query preserved',
 );
 assert(parseRetrievalDecision('{"action":"need_retrieval","query":"short"}') === null, 'reject short query');

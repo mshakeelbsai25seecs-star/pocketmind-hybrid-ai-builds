@@ -1,3 +1,9 @@
+/**
+ * PocketCode workspace facade.
+ * Resolves LocalTauri vs RemoteAgentHttp from the active runtime profile.
+ * Agent loop and UI keep calling these functions — no mode branches here beyond transport resolve.
+ */
+
 import { invoke } from '@tauri-apps/api/tauri';
 import type {
   DirEntryInfo,
@@ -8,11 +14,78 @@ import type {
   SandboxRunResult,
 } from '../codeWorkspace/types';
 import type { SandboxPendingRequest } from '../codeWorkspace/sandboxTypes';
+import type {
+  TerminalSnapshot,
+  TerminalStartInfo,
+  TerminalStartRequest,
+} from '../codeWorkspace/terminalTypes';
+import {
+  loadRuntimeProfile,
+  type PocketCodeRuntimeProfile,
+} from '../codeWorkspace/runtimeProfile';
+import {
+  remoteWorkspaceRootToken,
+  resetWorkspaceToolsCache,
+  resolveWorkspaceTools,
+  type WorkspaceTools,
+} from '../codeWorkspace/workspaceTransport';
+
+export type {
+  CheckpointManifest,
+  CheckpointSummary,
+  CwOcrResult,
+  CwPdfPageImage,
+  SymbolHit,
+} from './codeWorkspaceTypes';
+
+export { remoteWorkspaceRootToken, resetWorkspaceToolsCache };
+
+let cachedProfile: PocketCodeRuntimeProfile | null = null;
+
+/** Force-reload profile on next tool call (after saveRuntimeProfile). */
+export function invalidateRuntimeProfileCache(): void {
+  cachedProfile = null;
+  resetWorkspaceToolsCache();
+}
+
+export async function getActiveRuntimeProfile(): Promise<PocketCodeRuntimeProfile> {
+  if (!cachedProfile) {
+    cachedProfile = await loadRuntimeProfile();
+  }
+  return cachedProfile;
+}
+
+async function tools(): Promise<WorkspaceTools> {
+  const profile = await getActiveRuntimeProfile();
+  return resolveWorkspaceTools(profile);
+}
+
+/** Logical workspace root for the active profile (local path or remote://id). */
+export async function activeWorkspaceRoot(localFallback = ''): Promise<string> {
+  const profile = await getActiveRuntimeProfile();
+  if (profile.workspaceHost === 'remote') {
+    const id = profile.remote?.workspaceId?.trim() || '';
+    if (!id) throw new Error('Remote workspace profile has no workspaceId. Provision or select a workspace first.');
+    return remoteWorkspaceRootToken(id);
+  }
+  return localFallback;
+}
 
 export async function cwCanUse(
   modelPath: string | null,
   params?: number | null,
 ): Promise<{ allowed: boolean; reason: string }> {
+  const profile = await getActiveRuntimeProfile();
+  if (profile.uiShell === 'thin_client') {
+    const ok =
+      Boolean(modelPath?.startsWith('enterprise:') || modelPath?.startsWith('remote:'));
+    return {
+      allowed: ok,
+      reason: ok
+        ? 'Thin client: org/cloud model'
+        : 'Thin client requires an enterprise or cloud model (local GGUF disabled).',
+    };
+  }
   const result = await invoke<{ allowed: boolean; message: string }>('cw_can_use', {
     modelPath: modelPath || '',
     params: params ?? null,
@@ -21,11 +94,11 @@ export async function cwCanUse(
 }
 
 export async function cwListDir(workspaceRoot: string, path = '.'): Promise<DirEntryInfo[]> {
-  return invoke<DirEntryInfo[]>('cw_list_dir', { workspaceRoot, rel: path });
+  return (await tools()).listDir(workspaceRoot, path);
 }
 
 export async function cwGlobFileSearch(workspaceRoot: string, pattern: string): Promise<string[]> {
-  return invoke<string[]>('cw_glob', { workspaceRoot, pattern });
+  return (await tools()).glob(workspaceRoot, pattern);
 }
 
 export async function cwGrep(
@@ -35,13 +108,11 @@ export async function cwGrep(
   glob?: string | null,
   caseInsensitive = false,
 ): Promise<string> {
-  return invoke<string>('cw_grep', {
-    workspaceRoot,
-    pattern,
-    path: path ?? null,
-    glob: glob ?? null,
-    caseInsensitive,
-  });
+  return (await tools()).grep(workspaceRoot, pattern, path, glob, caseInsensitive);
+}
+
+export async function cwLoadProjectRules(workspaceRoot: string): Promise<string> {
+  return (await tools()).loadProjectRules(workspaceRoot);
 }
 
 export async function cwReadFile(
@@ -51,39 +122,24 @@ export async function cwReadFile(
   limit = 120,
   forUi = false,
 ): Promise<string> {
-  return invoke<string>('cw_read_file', {
-    workspaceRoot,
-    path,
-    offset,
-    limit,
-    forUi,
-  });
-}
-
-export interface SymbolHit {
-  path: string;
-  name: string;
-  kind: string;
-  line_start: number;
-  line_end: number;
-  signature: string;
+  return (await tools()).readFile(workspaceRoot, path, offset, limit, forUi);
 }
 
 export async function cwEnsureSymbolIndex(
   workspaceRoot: string,
 ): Promise<[number, number]> {
-  return invoke<[number, number]>('cw_ensure_symbol_index', { workspaceRoot });
+  return (await tools()).ensureSymbolIndex(workspaceRoot);
 }
 
 export async function cwRepoMap(workspaceRoot: string): Promise<string> {
-  return invoke<string>('cw_repo_map', { workspaceRoot });
+  return (await tools()).repoMap(workspaceRoot);
 }
 
 export async function cwFindSymbol(
   workspaceRoot: string,
   query: string,
-): Promise<SymbolHit[]> {
-  return invoke<SymbolHit[]>('cw_find_symbol', { workspaceRoot, query });
+): Promise<import('./codeWorkspaceTypes').SymbolHit[]> {
+  return (await tools()).findSymbol(workspaceRoot, query);
 }
 
 export async function cwReadSymbol(
@@ -92,38 +148,15 @@ export async function cwReadSymbol(
   name: string,
   lineStart?: number | null,
 ): Promise<string> {
-  return invoke<string>('cw_read_symbol', {
-    workspaceRoot,
-    path,
-    name,
-    lineStart: lineStart ?? null,
-  });
+  return (await tools()).readSymbol(workspaceRoot, path, name, lineStart);
 }
 
 export async function cwDeleteFile(workspaceRoot: string, path: string): Promise<void> {
-  await invoke('cw_delete_file', { workspaceRoot, path });
-}
-
-export interface CheckpointSummary {
-  run_id: string;
-  created_at: number;
-  file_count: number;
-}
-
-export interface CheckpointManifest {
-  run_id: string;
-  created_at: number;
-  workspace_root: string;
-  files: Array<{
-    path: string;
-    action: 'write' | 'create' | 'delete';
-    existed: boolean;
-    snapshot_rel?: string | null;
-  }>;
+  await (await tools()).deleteFile(workspaceRoot, path);
 }
 
 export async function cwCheckpointBegin(workspaceRoot: string): Promise<string> {
-  return invoke<string>('cw_checkpoint_begin', { workspaceRoot });
+  return (await tools()).checkpointBegin(workspaceRoot);
 }
 
 export async function cwCheckpointSnapshotWrite(
@@ -131,7 +164,7 @@ export async function cwCheckpointSnapshotWrite(
   runId: string,
   path: string,
 ): Promise<void> {
-  await invoke('cw_checkpoint_snapshot_write', { workspaceRoot, runId, path });
+  await (await tools()).checkpointSnapshotWrite(workspaceRoot, runId, path);
 }
 
 export async function cwCheckpointSnapshotDelete(
@@ -139,15 +172,17 @@ export async function cwCheckpointSnapshotDelete(
   runId: string,
   path: string,
 ): Promise<void> {
-  await invoke('cw_checkpoint_snapshot_delete', { workspaceRoot, runId, path });
+  await (await tools()).checkpointSnapshotDelete(workspaceRoot, runId, path);
 }
 
-export async function cwListCheckpoints(workspaceRoot: string): Promise<CheckpointSummary[]> {
-  return invoke<CheckpointSummary[]>('cw_list_checkpoints', { workspaceRoot });
+export async function cwListCheckpoints(
+  workspaceRoot: string,
+): Promise<import('./codeWorkspaceTypes').CheckpointSummary[]> {
+  return (await tools()).listCheckpoints(workspaceRoot);
 }
 
 export async function cwRestoreCheckpoint(workspaceRoot: string, runId: string): Promise<number> {
-  return invoke<number>('cw_restore_checkpoint', { workspaceRoot, runId });
+  return (await tools()).restoreCheckpoint(workspaceRoot, runId);
 }
 
 export async function cwRestoreCheckpointFile(
@@ -155,14 +190,14 @@ export async function cwRestoreCheckpointFile(
   runId: string,
   path: string,
 ): Promise<void> {
-  await invoke('cw_restore_checkpoint_file', { workspaceRoot, runId, path });
+  await (await tools()).restoreCheckpointFile(workspaceRoot, runId, path);
 }
 
 export async function cwCheckpointManifest(
   workspaceRoot: string,
   runId: string,
-): Promise<CheckpointManifest> {
-  return invoke<CheckpointManifest>('cw_checkpoint_manifest', { workspaceRoot, runId });
+): Promise<import('./codeWorkspaceTypes').CheckpointManifest> {
+  return (await tools()).checkpointManifest(workspaceRoot, runId);
 }
 
 export async function cwApplyEditPreview(
@@ -171,12 +206,7 @@ export async function cwApplyEditPreview(
   oldString: string,
   newString: string,
 ): Promise<EditPreview> {
-  return invoke<EditPreview>('cw_apply_edit_preview', {
-    workspaceRoot,
-    path,
-    oldString,
-    newString,
-  });
+  return (await tools()).applyEditPreview(workspaceRoot, path, oldString, newString);
 }
 
 export async function cwApplyEditWrite(
@@ -184,33 +214,40 @@ export async function cwApplyEditWrite(
   path: string,
   content: string,
 ): Promise<void> {
-  await invoke('cw_apply_edit_write', { workspaceRoot, path, content });
+  await (await tools()).applyEditWrite(workspaceRoot, path, content);
 }
 
 export async function cwRunSandbox(
   workspaceRoot: string,
   request: SandboxPendingRequest,
 ): Promise<SandboxRunResult> {
-  if (request.mode === 'cli') {
-    return invoke<SandboxRunResult>('cw_run_sandbox', {
-      workspaceRoot,
-      language: null,
-      script: null,
-      args: null,
-      argv: request.argv,
-    });
-  }
-  return invoke<SandboxRunResult>('cw_run_sandbox', {
-    workspaceRoot,
-    language: request.language,
-    script: request.code,
-    args: request.args ?? null,
-    argv: null,
-  });
+  return (await tools()).runSandbox(workspaceRoot, request);
 }
 
 export async function cwListRunners(): Promise<RunnersStatus> {
-  return invoke<RunnersStatus>('cw_list_runners');
+  return (await tools()).listRunners();
+}
+
+export async function cwTerminalStart(
+  workspaceRoot: string,
+  request: TerminalStartRequest,
+): Promise<TerminalStartInfo> {
+  return (await tools()).terminalStart(workspaceRoot, request);
+}
+
+export async function cwTerminalRead(
+  id: string,
+  tailBytes: number | null = null,
+): Promise<TerminalSnapshot> {
+  return (await tools()).terminalRead(id, tailBytes);
+}
+
+export async function cwTerminalKill(id: string): Promise<TerminalSnapshot> {
+  return (await tools()).terminalKill(id);
+}
+
+export async function cwTerminalList(): Promise<TerminalSnapshot[]> {
+  return (await tools()).terminalList();
 }
 
 export async function cwPlanWrite(
@@ -221,24 +258,17 @@ export async function cwPlanWrite(
   todos: string[],
   status?: string | null,
 ): Promise<PocketCodePlan> {
-  return invoke<PocketCodePlan>('cw_plan_write', {
-    workspaceRoot,
-    id,
-    title,
-    markdown,
-    todos,
-    status: status ?? null,
-  });
+  return (await tools()).planWrite(workspaceRoot, id, title, markdown, todos, status);
 }
 
 export async function cwPlanRead(workspaceRoot: string, id: string): Promise<PocketCodePlan> {
-  return invoke<PocketCodePlan>('cw_plan_read', { workspaceRoot, id });
+  return (await tools()).planRead(workspaceRoot, id);
 }
 
 export async function cwPlanList(
   workspaceRoot: string,
 ): Promise<Array<{ id: string; title: string; status: string; updated_at: number; todo_count: number }>> {
-  return invoke('cw_plan_list', { workspaceRoot });
+  return (await tools()).planList(workspaceRoot);
 }
 
 export async function cwPlanUpdateMarkdown(
@@ -247,12 +277,7 @@ export async function cwPlanUpdateMarkdown(
   markdown: string,
   todos?: PocketCodePlanTodo[] | null,
 ): Promise<PocketCodePlan> {
-  return invoke<PocketCodePlan>('cw_plan_update_markdown', {
-    workspaceRoot,
-    id,
-    markdown,
-    todos: todos ?? null,
-  });
+  return (await tools()).planUpdateMarkdown(workspaceRoot, id, markdown, todos);
 }
 
 export async function cwPlanUpdateStatus(
@@ -261,35 +286,28 @@ export async function cwPlanUpdateStatus(
   status: string,
   checkpointRunId?: string | null,
 ): Promise<PocketCodePlan> {
-  return invoke<PocketCodePlan>('cw_plan_update_status', {
-    workspaceRoot,
-    id,
-    status,
-    checkpointRunId: checkpointRunId ?? null,
-  });
+  return (await tools()).planUpdateStatus(workspaceRoot, id, status, checkpointRunId);
 }
 
-export interface CwOcrResult {
-  text: string;
-  engine: string;
-  ok: boolean;
-  message: string;
-}
-
-export async function cwOcrImage(path: string): Promise<CwOcrResult> {
-  return invoke<CwOcrResult>('cw_ocr_image', { path });
+/** OCR stays on the desktop (local image path) — not part of workspace tool transport. */
+export async function cwOcrImage(path: string): Promise<import('./codeWorkspaceTypes').CwOcrResult> {
+  return invoke('cw_ocr_image', { path });
 }
 
 export async function cwImageBase64(path: string): Promise<[string, string]> {
   return invoke<[string, string]>('cw_image_base64', { path });
 }
 
-export interface CwPdfPageImage {
-  page: number;
-  mime: string;
-  base64: string;
+export async function cwSaveTempImage(base64: string, mime?: string | null): Promise<string> {
+  return invoke<string>('cw_save_temp_image', {
+    base64,
+    mime: mime ?? null,
+  });
 }
 
-export async function cwPdfPageImages(path: string, maxPages = 3): Promise<CwPdfPageImage[]> {
-  return invoke<CwPdfPageImage[]>('cw_pdf_page_images', { path, maxPages });
+export async function cwPdfPageImages(
+  path: string,
+  maxPages = 3,
+): Promise<import('./codeWorkspaceTypes').CwPdfPageImage[]> {
+  return invoke('cw_pdf_page_images', { path, maxPages });
 }

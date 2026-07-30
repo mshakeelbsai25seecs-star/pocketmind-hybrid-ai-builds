@@ -944,6 +944,7 @@ impl RemoteBackend {
                 } else {
                     Some(tool_calls)
                 },
+                reasoning: None,
             })
             .await;
         Ok(())
@@ -1016,6 +1017,7 @@ impl RemoteBackend {
                 } else {
                     Some(tool_calls)
                 },
+                reasoning: None,
             })
             .await;
         Ok(())
@@ -1039,18 +1041,30 @@ impl InferenceBackend for RemoteBackend {
             return self.generate_anthropic(request, tx).await;
         }
 
+        // DeepSeek V4 thinking can run for several minutes before any final answer tokens.
+        // A short whole-request timeout makes the UI look "stuck" then truncate mid-reply.
+        let is_deepseek = self.provider == "deepseek"
+            || self.model_id.contains("deepseek");
+        let request_timeout_secs: u64 = if is_deepseek { 600 } else { 180 };
         let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
+            .timeout(std::time::Duration::from_secs(request_timeout_secs))
             .build()
             .map_err(|e| AppError::NetworkError(e.to_string()))?;
-        
+
+        // Thinking models spend many tokens on reasoning_content. Cap max_tokens too low
+        // and the visible answer is cut off mid-sentence / mid-markdown.
+        let mut max_tokens = request.params.max_tokens;
+        if is_deepseek {
+            max_tokens = max_tokens.max(4096);
+        }
+
         let mut body = serde_json::json!({
             "model": self.model_id,
             "messages": self.build_openai_messages(&request),
             "stream": true,
             "temperature": request.params.temperature,
             "top_p": request.params.top_p,
-            "max_tokens": request.params.max_tokens,
+            "max_tokens": max_tokens,
         });
         if !request.tools.is_empty() {
             body["tools"] = serde_json::to_value(&request.tools)
@@ -1098,27 +1112,57 @@ impl InferenceBackend for RemoteBackend {
         let mut buffer = String::new();
         let mut pending_tools: Vec<PendingToolCall> = Vec::new();
         let mut last_finish: Option<String> = None;
+        let mut saw_answer = false;
 
         while let Some(chunk) = stream.next().await {
             let chunk = chunk.map_err(|e| AppError::NetworkError(e.to_string()))?;
             buffer.push_str(&String::from_utf8_lossy(&chunk));
+            // Providers may use LF or CRLF; normalize so SSE framing stays reliable.
+            if buffer.contains('\r') {
+                buffer = buffer.replace("\r\n", "\n").replace('\r', "\n");
+            }
             while let Some(pos) = buffer.find('\n') {
                 let line = buffer[..pos].trim().to_string();
                 buffer = buffer[pos + 1..].to_string();
-                if !line.starts_with("data: ") { continue; }
-                let data = line.trim_start_matches("data: ").trim();
-                if data == "[DONE]" { continue; }
+                if !line.starts_with("data:") { continue; }
+                let data = line.trim_start_matches("data:").trim();
+                if data.is_empty() || data == "[DONE]" { continue; }
                 if let Ok(json) = serde_json::from_str::<Value>(data) {
+                    // Usage-only tail events (stream_options.include_usage) may have empty choices.
                     let choice = json.get("choices").and_then(|c| c.get(0));
+                    if choice.is_none() {
+                        continue;
+                    }
                     if let Some(fr) = choice
                         .and_then(|c| c.get("finish_reason"))
                         .and_then(|v| v.as_str())
                     {
-                        last_finish = Some(fr.to_string());
+                        if !fr.is_empty() && fr != "null" {
+                            last_finish = Some(fr.to_string());
+                        }
                     }
                     if let Some(delta) = choice.and_then(|c| c.get("delta")) {
+                        // DeepSeek V4 / reasoner: stream real reasoning text for the Thought UI.
+                        let reasoning = delta
+                            .get("reasoning_content")
+                            .or_else(|| delta.get("reasoning"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("");
+                        if !reasoning.is_empty() && !saw_answer {
+                            let _ = tx
+                                .send(GenerationChunk {
+                                    text: String::new(),
+                                    finish_reason: Some("reasoning".to_string()),
+                                    tokens_generated: 0,
+                                    tokens_per_sec: 0.0,
+                                    tool_calls: None,
+                                    reasoning: Some(reasoning.to_string()),
+                                })
+                                .await;
+                        }
                         if let Some(content) = delta.get("content").and_then(|v| v.as_str()) {
                             if !content.is_empty() {
+                                saw_answer = true;
                                 let _ = tx
                                     .send(GenerationChunk {
                                         text: content.to_string(),
@@ -1126,6 +1170,7 @@ impl InferenceBackend for RemoteBackend {
                                         tokens_generated: 0,
                                         tokens_per_sec: 0.0,
                                         tool_calls: None,
+                                        reasoning: None,
                                     })
                                     .await;
                             }
@@ -1164,6 +1209,7 @@ impl InferenceBackend for RemoteBackend {
                     tokens_generated: 0,
                     tokens_per_sec: 0.0,
                     tool_calls: Some(calls),
+                    reasoning: None,
                 })
                 .await;
         } else if let Some(fr) = last_finish {
@@ -1174,6 +1220,7 @@ impl InferenceBackend for RemoteBackend {
                     tokens_generated: 0,
                     tokens_per_sec: 0.0,
                     tool_calls: None,
+                    reasoning: None,
                 })
                 .await;
         }

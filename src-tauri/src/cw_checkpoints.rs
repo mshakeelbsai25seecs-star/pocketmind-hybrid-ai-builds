@@ -2,6 +2,7 @@
 
 use crate::code_workspace::{resolve_under_root, standardize};
 use crate::error::{AppError, AppResult};
+use pocketcode_workspace::WorkspaceSidecar;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -48,8 +49,10 @@ fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
-fn checkpoint_root(workspace_root: &Path) -> PathBuf {
-    workspace_root.join(CHECKPOINT_DIR)
+fn checkpoint_root(workspace_root: &Path) -> AppResult<PathBuf> {
+    Ok(WorkspaceSidecar::for_workspace(workspace_root)
+        .map_err(|e| AppError::Unknown(e.to_string()))?
+        .checkpoints_dir())
 }
 
 fn run_dir(workspace_root: &Path, run_id: &str) -> AppResult<PathBuf> {
@@ -57,7 +60,7 @@ fn run_dir(workspace_root: &Path, run_id: &str) -> AppResult<PathBuf> {
     if id.is_empty() || id.contains("..") || id.contains('/') || id.contains('\\') {
         return Err(AppError::Unknown("Invalid checkpoint run id.".to_string()));
     }
-    Ok(checkpoint_root(workspace_root).join(id))
+    Ok(checkpoint_root(workspace_root)?.join(id))
 }
 
 fn load_manifest(dir: &Path) -> AppResult<CheckpointManifest> {
@@ -182,7 +185,7 @@ pub fn list_checkpoints(workspace_root: &Path) -> AppResult<Vec<CheckpointSummar
     let root = workspace_root
         .canonicalize()
         .unwrap_or_else(|_| workspace_root.to_path_buf());
-    let base = checkpoint_root(&root);
+    let base = checkpoint_root(&root)?;
     if !base.is_dir() {
         return Ok(vec![]);
     }

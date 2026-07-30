@@ -51,12 +51,15 @@ interface AppState {
   deploymentConfig: DeploymentConfig | null;
   productConfig: ProductConfig | null;
   workspaceEpoch: number;
+  /** Bumped when user requests a blank PocketCode agent session. */
+  pocketcodeNewSessionNonce: number;
 
   defaultParams: GenerationParams;
 
   setSidebarOpen: (open: boolean) => void;
   setActiveConversation: (id: string | null) => void;
   rememberConversationForMode: (mode: string | null | undefined, id: string | null) => void;
+  requestNewPocketcodeSession: () => void;
   setActiveCharacter: (id: string | null) => void;
   setActiveView: (view: AppView) => void;
   setTheme: (theme: ThemeMode) => void;
@@ -127,9 +130,9 @@ export const useAppStore = create<AppState>()(
       activeConversationId: null,
       lastConversationIdByMode: {},
       activeCharacterId: null,
-      activeView: 'chat',
+      activeView: 'home',
       theme: 'system',
-      accentColor: '#22c55e',
+      accentColor: '#4ade80',
       performanceMode: 'balanced',
       conversations: [],
       messages: {},
@@ -157,6 +160,7 @@ export const useAppStore = create<AppState>()(
       deploymentConfig: null,
       productConfig: null,
       workspaceEpoch: 0,
+      pocketcodeNewSessionNonce: 0,
 
       defaultParams: SAFE_DEFAULT_PARAMS,
 
@@ -178,6 +182,11 @@ export const useAppStore = create<AppState>()(
           lastConversationIdByMode: { ...state.lastConversationIdByMode, [key]: id },
         };
       }),
+      requestNewPocketcodeSession: () => set((state) => ({
+        lastConversationIdByMode: { ...state.lastConversationIdByMode, pocketcode: null },
+        activeConversationId: state.activeView === 'code-workspace' ? null : state.activeConversationId,
+        pocketcodeNewSessionNonce: state.pocketcodeNewSessionNonce + 1,
+      })),
       setActiveCharacter: (id) => set({ activeCharacterId: id }),
       setActiveView: (view) => set({ activeView: view }),
       setTheme: (theme) => set({ theme }),
@@ -336,6 +345,19 @@ export const useAppStore = create<AppState>()(
       }),
       onRehydrateStorage: () => (state) => {
         if (!state) return;
+        // Clear stale local GGUF selection if the file vanished (async check after rehydrate).
+        const selected = state.currentModel;
+        if (selected && !selected.startsWith('remote:') && !selected.startsWith('enterprise:')) {
+          void import('@tauri-apps/api/tauri').then(({ invoke }) => {
+            invoke<boolean>('path_exists', { path: selected })
+              .then(ok => {
+                if (!ok) {
+                  useAppStore.getState().setCurrentModel(null);
+                }
+              })
+              .catch(() => { /* ignore */ });
+          });
+        }
         if (!state.socDenseEmbeddingSettings?.modelPath?.trim()) {
           state.socDenseEmbeddingSettings = {
             ...SOC_DEFAULT_DENSE_EMBEDDING_SETTINGS,

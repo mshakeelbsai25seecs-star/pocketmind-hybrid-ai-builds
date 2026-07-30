@@ -17,12 +17,21 @@ const GREP_TIMEOUT_SECS: u64 = 20;
 const GREP_MAX_OUTPUT_BYTES: usize = 200 * 1024;
 pub const READ_MAX_BYTES: usize = 2 * 1024 * 1024;
 const GLOB_MAX_RESULTS: usize = 500;
+/// Cap list_dir entries so huge roots (models/, indexes/) do not flood agent context.
+const LIST_DIR_MAX_ENTRIES: usize = 80;
+const BINARY_PEEK_BYTES: usize = 8 * 1024;
 /// Default lines when the agent omits limit or passes 0 (never "whole file").
 pub const READ_DEFAULT_LINES: usize = 120;
 /// Hard cap on lines returned by a single agent read_file call.
 pub const READ_MAX_LINES: usize = 400;
 /// Cap for UI preview reads (editor pane), not for the agent tool loop.
 pub const READ_UI_MAX_LINES: usize = 4_000;
+
+const BINARY_EXTENSIONS: &[&str] = &[
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "ico", "jar", "exe", "dll", "wasm", "pdf",
+    "zip", "7z", "gguf", "bin", "so", "dylib", "class", "o", "a", "lib", "pdb", "woff",
+    "woff2", "ttf", "otf", "mp3", "mp4", "wav", "webm", "avi",
+];
 
 pub use sandbox_runners::{RunnerInfo, RunnersStatus, SandboxRunResult};
 
@@ -300,6 +309,7 @@ fn glob_match_recursive(pat: &[u8], text: &[u8]) -> bool {
 // ── Tools ───────────────────────────────────────────────────────────────────
 
 /// List entries in `rel` under `workspace_root`.
+/// Sorted dirs-first then name; capped at [`LIST_DIR_MAX_ENTRIES`] with a truncation hint.
 pub fn list_dir(workspace_root: &Path, rel: &str) -> AppResult<Vec<DirEntryInfo>> {
     let dir = resolve_under_root(workspace_root, rel)?;
     if !dir.is_dir() {
@@ -314,17 +324,45 @@ pub fn list_dir(workspace_root: &Path, rel: &str) -> AppResult<Vec<DirEntryInfo>
         .map_err(|e| AppError::Unknown(format!("Cannot list directory: {e}")))?
         .filter_map(|e| e.ok())
         .collect();
-    entries.sort_by_key(|e| e.file_name());
+    // Dirs first, then name (case-insensitive).
+    entries.sort_by(|a, b| {
+        let a_dir = a.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        let b_dir = b.file_type().map(|t| t.is_dir()).unwrap_or(false);
+        match (a_dir, b_dir) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => a
+                .file_name()
+                .to_string_lossy()
+                .to_lowercase()
+                .cmp(&b.file_name().to_string_lossy().to_lowercase()),
+        }
+    });
 
+    let mut total = 0usize;
     for entry in entries {
         let name = entry.file_name().to_string_lossy().to_string();
         if name == "." || name == ".." {
+            continue;
+        }
+        total += 1;
+        if out.len() >= LIST_DIR_MAX_ENTRIES {
             continue;
         }
         let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
         let abs = entry.path();
         let path = to_rel_display(&root_canon, &abs);
         out.push(DirEntryInfo { name, is_dir, path });
+    }
+    if total > LIST_DIR_MAX_ENTRIES {
+        out.push(DirEntryInfo {
+            name: format!(
+                "…[truncated: showing {} of {} entries — use glob_file_search with a pattern when looking for a named file]",
+                LIST_DIR_MAX_ENTRIES, total
+            ),
+            is_dir: false,
+            path: String::new(),
+        });
     }
     Ok(out)
 }
@@ -472,6 +510,56 @@ pub async fn grep(
     )))
 }
 
+fn path_has_binary_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| BINARY_EXTENSIONS.iter().any(|x| e.eq_ignore_ascii_case(x)))
+        .unwrap_or(false)
+}
+
+fn reject_if_binary_file(file: &Path, display: &str) -> AppResult<()> {
+    if path_has_binary_extension(file) {
+        return Err(AppError::Unknown(format!(
+            "Not a text file: {display}. Do not call read_file on images/binaries; use OCR/attachment text for screenshots."
+        )));
+    }
+    use std::io::Read;
+    let mut fh = std::fs::File::open(file)
+        .map_err(|e| AppError::Unknown(format!("Cannot open file: {e}")))?;
+    let mut buf = vec![0u8; BINARY_PEEK_BYTES];
+    let n = fh
+        .read(&mut buf)
+        .map_err(|e| AppError::Unknown(format!("Cannot read file: {e}")))?;
+    if buf[..n].contains(&0) {
+        return Err(AppError::Unknown(format!(
+            "Not a text file (binary content detected): {display}. Do not call read_file on binaries."
+        )));
+    }
+    Ok(())
+}
+
+fn normalize_newlines(s: &str) -> String {
+    s.replace("\r\n", "\n").replace('\r', "\n")
+}
+
+fn dominant_eol(s: &str) -> &'static str {
+    if s.contains("\r\n") {
+        "\r\n"
+    } else {
+        "\n"
+    }
+}
+
+fn escape_for_error(s: &str) -> String {
+    let n = normalize_newlines(s);
+    let preview: String = n.chars().take(120).collect();
+    let mut out = preview.replace('\n', "\\n");
+    if n.chars().count() > 120 {
+        out.push_str("…");
+    }
+    out
+}
+
 /// Read file with line `offset` (0-based) and `limit` lines.
 /// `limit == 0` means default window ([`READ_DEFAULT_LINES`]), never the whole file.
 /// Hard-capped at `line_cap` (default [`READ_MAX_LINES`]) and [`READ_MAX_BYTES`] bytes.
@@ -489,6 +577,8 @@ pub fn read_file(
             to_rel_display(workspace_root, &file)
         )));
     }
+    let display = to_rel_display(workspace_root, &file);
+    reject_if_binary_file(&file, &display)?;
 
     let hard_cap = line_cap
         .unwrap_or(READ_MAX_LINES)
@@ -597,19 +687,30 @@ pub fn apply_edit_preview(
             "old_string must not be empty when editing an existing file (use a unique snippet to replace).".to_string(),
         ));
     }
-    let matches: Vec<_> = original.match_indices(old_string).collect();
+    // Match on LF-normalized text so model copies from read_file (LF) work on Windows CRLF files.
+    let eol = dominant_eol(&original);
+    let norm_file = normalize_newlines(&original);
+    let norm_old = normalize_newlines(old_string);
+    let norm_new = normalize_newlines(new_string);
+    let matches: Vec<_> = norm_file.match_indices(&norm_old).collect();
     if matches.is_empty() {
-        return Err(AppError::Unknown(
-            "old_string not found in file.".to_string(),
-        ));
+        return Err(AppError::Unknown(format!(
+            "old_string not found in file (after CRLF/LF normalization). Preview of old_string: \"{}\". Hint: re-read_file the target lines and copy old_string exactly; if a prior edit already changed the file, re-read before editing again.",
+            escape_for_error(old_string)
+        )));
     }
     if matches.len() > 1 {
         return Err(AppError::Unknown(format!(
-            "old_string matched {} times; must be unique.",
+            "old_string matched {} times after CRLF/LF normalization; must be unique. Use a longer unique snippet.",
             matches.len()
         )));
     }
-    let modified = original.replacen(old_string, new_string, 1);
+    let norm_modified = norm_file.replacen(&norm_old, &norm_new, 1);
+    let modified = if eol == "\r\n" {
+        norm_modified.replace('\n', "\r\n")
+    } else {
+        norm_modified
+    };
     Ok(EditPreview { original, modified })
 }
 
@@ -803,15 +904,18 @@ fn is_large_online_model(model_path: &str) -> bool {
 }
 
 /// Minimum local model size (billions of parameters) for PocketCode write/run tools.
-pub const POCKETCODE_MIN_LOCAL_B: f32 = 30.0;
+pub const POCKETCODE_MIN_LOCAL_B: f32 = 20.0;
 
-/// Gate PocketCode write/run tools to ≥30B local, large online, or any org enterprise model.
+/// ~18 GiB+ files pass the gate when the filename has no reliable Nb marker (e.g. a ~22 GB GGUF).
+pub const POCKETCODE_MIN_LOCAL_BYTES: u64 = 18 * 1024 * 1024 * 1024;
+
+/// Gate PocketCode write/run tools to ≥20B local, local VL+mmproj, large online, or org enterprise.
 pub fn can_use_code_workspace(model_path: &str, params: Option<f32>) -> (bool, String) {
     let model_path = model_path.trim();
     if model_path.is_empty() {
         return (
             false,
-            "Select a model of 30B+ parameters, an online model, or an org server model for PocketCode."
+            "Select a 20B+ local model, a local vision GGUF with mmproj, an online model, or an org server model for PocketCode."
                 .to_string(),
         );
     }
@@ -830,6 +934,18 @@ pub fn can_use_code_workspace(model_path: &str, params: Option<f32>) -> (bool, S
             },
         );
     }
+    // Offline vision: any local GGUF with a paired mmproj projector is PocketCode-eligible
+    // (screenshot/debugging workflows). Text-only locals still need ≥20B (or ~18 GB+ file).
+    if let Some(mm) = crate::llm::local::find_mmproj_for_model(model_path) {
+        let leaf = std::path::Path::new(&mm)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("mmproj");
+        return (
+            true,
+            format!("Local vision model (mmproj: {leaf})"),
+        );
+    }
     let params = params.or_else(|| parse_params_billions(model_path));
     if let Some(p) = params {
         if p >= POCKETCODE_MIN_LOCAL_B {
@@ -838,13 +954,23 @@ pub fn can_use_code_workspace(model_path: &str, params: Option<f32>) -> (bool, S
         return (
             false,
             format!(
-                "Local model ≈ {p}B is below the 30B PocketCode gate. Use Knowledge Chat Codebase Explorer (read-only) or switch to a 30B+ GGUF / org server."
+                "Local model ≈ {p}B is below the {POCKETCODE_MIN_LOCAL_B}B PocketCode gate. Use a ≥{POCKETCODE_MIN_LOCAL_B}B GGUF for coding tools, or place an mmproj next to a VL GGUF for offline vision. Text chat still works with this model."
             ),
         );
     }
+    if let Ok(meta) = std::fs::metadata(model_path) {
+        if meta.is_file() && meta.len() >= POCKETCODE_MIN_LOCAL_BYTES {
+            return (
+                true,
+                "Local GGUF ≥ ~18 GB (treated as PocketCode-capable)".to_string(),
+            );
+        }
+    }
     (
         false,
-        "Could not determine model size. PocketCode requires an explicit ≥30B local GGUF, an online model, or an org server model.".to_string(),
+        format!(
+            "Could not determine model size. PocketCode requires a ≥{POCKETCODE_MIN_LOCAL_B}B local GGUF (~18 GB+), a local VL GGUF with mmproj beside it, an online model, or an org server model."
+        ),
     )
 }
 
@@ -898,6 +1024,102 @@ mod tests {
             .filter(|l| !l.starts_with('…'))
             .count();
         assert!(body_lines <= READ_MAX_LINES + 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn apply_edit_preview_matches_lf_old_string_on_crlf_file() {
+        let dir = make_temp_workspace("crlf_edit");
+        let path = dir.join("auth.rs");
+        let disk = "fn a() {\r\n    let x = 1;\r\n    let y = 2;\r\n}\r\n";
+        std::fs::write(&path, disk).unwrap();
+        let old = "    let x = 1;\n    let y = 2;";
+        let new = "    let x = 10;\n    let y = 20;";
+        let preview = apply_edit_preview(&dir, "auth.rs", old, new).unwrap();
+        assert!(preview.modified.contains("\r\n"));
+        assert!(preview.modified.contains("let x = 10;"));
+        assert!(preview.modified.contains("let y = 20;"));
+        assert!(!preview.modified.contains("let x = 1;"));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn apply_edit_preview_lf_file_still_works() {
+        let dir = make_temp_workspace("lf_edit");
+        let path = dir.join("a.rs");
+        std::fs::write(&path, "hello\nworld\n").unwrap();
+        let preview = apply_edit_preview(&dir, "a.rs", "hello\nworld", "hi\nthere").unwrap();
+        assert_eq!(preview.modified, "hi\nthere\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn apply_edit_preview_single_line_on_crlf() {
+        let dir = make_temp_workspace("crlf_one");
+        let path = dir.join("a.txt");
+        std::fs::write(&path, "aaa\r\nbbb\r\n").unwrap();
+        let preview = apply_edit_preview(&dir, "a.txt", "bbb", "ccc").unwrap();
+        assert_eq!(preview.modified, "aaa\r\nccc\r\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn apply_edit_preview_not_found() {
+        let dir = make_temp_workspace("nf");
+        let path = dir.join("a.txt");
+        std::fs::write(&path, "aaa\r\nbbb\r\n").unwrap();
+        let err = apply_edit_preview(&dir, "a.txt", "zzz", "q").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("old_string not found"), "{msg}");
+        assert!(msg.contains("CRLF/LF"), "{msg}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn apply_edit_preview_new_file_empty_old() {
+        let dir = make_temp_workspace("newf");
+        let preview = apply_edit_preview(&dir, "new.py", "", "print(1)\n").unwrap();
+        assert!(preview.original.is_empty());
+        assert_eq!(preview.modified, "print(1)\n");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_file_rejects_png_extension() {
+        let dir = make_temp_workspace("bin_png");
+        let path = dir.join("pic.png");
+        std::fs::write(&path, b"\x89PNG\r\n\x1a\n\0fake").unwrap();
+        let err = read_file(&dir, "pic.png", 0, 20, Some(READ_MAX_LINES)).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Not a text file"), "{msg}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_file_rejects_nul_bytes() {
+        let dir = make_temp_workspace("bin_nul");
+        let path = dir.join("blob.dat");
+        std::fs::write(&path, b"hello\0world").unwrap();
+        let err = read_file(&dir, "blob.dat", 0, 20, Some(READ_MAX_LINES)).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("binary"), "{msg}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn list_dir_caps_and_hints() {
+        let dir = make_temp_workspace("listdir");
+        for i in 0..100 {
+            std::fs::write(dir.join(format!("f{i}.txt")), b"x").unwrap();
+        }
+        let entries = list_dir(&dir, ".").unwrap();
+        assert!(
+            entries.len() == LIST_DIR_MAX_ENTRIES + 1,
+            "expected {} entries + hint, got {}",
+            LIST_DIR_MAX_ENTRIES,
+            entries.len()
+        );
+        assert!(entries.last().unwrap().name.contains("truncated"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

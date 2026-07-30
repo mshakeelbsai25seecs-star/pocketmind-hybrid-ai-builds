@@ -10,8 +10,13 @@ import {
   cwCheckpointSnapshotDelete,
   cwCheckpointSnapshotWrite,
 } from '../../api/codeWorkspace';
-import type { SandboxPendingRequest } from '../../codeWorkspace/sandboxTypes';
-import { describeSandboxRequest } from '../../codeWorkspace/sandboxTypes';
+import type { SandboxGateResult, SandboxPendingRequest } from '../../codeWorkspace/sandboxTypes';
+import {
+  describeSandboxRequest,
+  sandboxCancelled,
+  sandboxFailed,
+  sandboxOk,
+} from '../../codeWorkspace/sandboxTypes';
 import type { PocketCodeAgentMode } from '../../codeWorkspace/agentModes';
 import type {
   AgentStep,
@@ -25,7 +30,7 @@ import type { GenerationParams } from '../../types';
 import { getSetting } from '../../api/powerFeatures';
 import { loadEnabledSkillsMarkdown } from '../../codeWorkspace/skills';
 import { formatMcpToolsCatalog, getEnabledMcpServerIds, mcpListTools } from '../../codeWorkspace/mcp';
-import { runCodeWorkspaceAgent, runSandboxConfirmed, type AgentImagePayload } from './agentLoop';
+import { formatInvokeError, runCodeWorkspaceAgent, runSandboxConfirmed, type AgentImagePayload } from './agentLoop';
 
 export type EditDecision = 'accepted' | 'rejected';
 
@@ -55,7 +60,7 @@ class AgentSession {
   private listeners = new Set<Listener>();
   private abort: AbortController | null = null;
   private deleteResolver: ((d: EditDecision) => void) | null = null;
-  private sandboxResolver: ((d: SandboxRunResult | null) => void) | null = null;
+  private sandboxResolver: ((d: SandboxGateResult) => void) | null = null;
   private mcpResolver: ((d: EditDecision) => void) | null = null;
   /** Per-session always-allow keys: `server.tool` */
   private mcpAlwaysAllow = new Set<string>();
@@ -237,10 +242,19 @@ class AgentSession {
 
   /**
    * Block until user confirms/cancels sandbox, or auto-approve runs it.
+   * Failures are never reported as user cancel.
    */
-  async waitForSandbox(payload: SandboxPendingRequest): Promise<SandboxRunResult | null> {
-    this.sandboxResolver?.(null);
-    this.sandboxResolver = null;
+  async waitForSandbox(payload: SandboxPendingRequest): Promise<SandboxGateResult> {
+    // One sandbox at a time — do not resolve a prior waiter as "cancelled".
+    if (this.waitingFor === 'sandbox' && this.sandboxResolver) {
+      return sandboxFailed(
+        'Another sandbox request is already waiting for permission. Finish or cancel it first.',
+      );
+    }
+    if (this.sandboxConfirming) {
+      return sandboxFailed('A sandbox run is already in progress.');
+    }
+
     const label = describeSandboxRequest(payload);
     this.setPartial({
       sandboxPending: payload,
@@ -254,7 +268,7 @@ class AgentSession {
       return this.runSandboxNow(payload);
     }
 
-    return new Promise<SandboxRunResult | null>((resolve) => {
+    return new Promise<SandboxGateResult>((resolve) => {
       this.sandboxResolver = resolve;
     });
   }
@@ -273,65 +287,81 @@ class AgentSession {
     this.sandboxResolver = null;
     this.setPartial({ sandboxConfirming: true, status: 'Running sandbox…' });
     try {
-      const result = await runSandboxConfirmed(this.workspaceRoot, request);
+      const result = await runSandboxConfirmed(this.workspaceRoot, request, {
+        signal: this.abort?.signal,
+        onStatus: msg => this.setPartial({ status: msg }),
+      });
       this.sandboxResolver = resolve;
-      this.finishSandbox(result);
+      this.finishSandbox(sandboxOk(result));
     } catch (err) {
       this.sandboxResolver = resolve;
-      this.setPartial({ status: `Sandbox failed: ${String(err)}` });
-      this.finishSandbox(null);
+      const gate = sandboxFailed(formatInvokeError(err));
+      this.setPartial({ status: gate.message });
+      this.finishSandbox(gate);
     }
   }
 
   cancelSandbox() {
-    this.finishSandbox(null);
+    this.finishSandbox(sandboxCancelled());
   }
 
-  private finishSandbox(result: SandboxRunResult | null) {
+  private finishSandbox(gate: SandboxGateResult) {
     const resolve = this.sandboxResolver;
     this.sandboxResolver = null;
+    let status = this.status;
+    if (gate.ok) {
+      status = 'Sandbox finished — agent continuing…';
+    } else if (this.running) {
+      status = gate.reason === 'cancelled'
+        ? 'Sandbox cancelled — agent continuing…'
+        : `${gate.message} — agent continuing…`;
+    }
     this.setPartial({
       sandboxPending: null,
-      sandboxResult: result,
+      sandboxResult: gate.ok ? gate.result : null,
       sandboxConfirming: false,
       waitingFor: this.running ? 'model' : 'idle',
-      status: result
-        ? 'Sandbox finished — agent continuing…'
-        : this.running
-          ? 'Sandbox cancelled — agent continuing…'
-          : this.status,
+      status,
     });
-    resolve?.(result);
+    resolve?.(gate);
   }
 
-  private async runSandboxNow(request: SandboxPendingRequest): Promise<SandboxRunResult | null> {
+  private async runSandboxNow(request: SandboxPendingRequest): Promise<SandboxGateResult> {
     if (!this.workspaceRoot) {
+      const gate = sandboxFailed('no workspace root.');
       this.setPartial({
         sandboxPending: null,
         waitingFor: 'model',
-        status: 'Sandbox failed: no workspace root.',
+        status: gate.message,
       });
-      return null;
+      return gate;
     }
     this.setPartial({ sandboxConfirming: true });
     try {
-      const result = await runSandboxConfirmed(this.workspaceRoot, request);
+      const result = await runSandboxConfirmed(this.workspaceRoot, request, {
+        signal: this.abort?.signal,
+        // Live command status ("Running npm run test · 12s") while the process streams.
+        onStatus: msg => this.setPartial({ status: msg, sandboxConfirming: true }),
+      });
       this.setPartial({
         sandboxPending: null,
         sandboxResult: result,
         sandboxConfirming: false,
         waitingFor: 'model',
-        status: 'Sandbox finished — agent continuing…',
+        status: result.still_running
+          ? `Background process running (${result.command || result.language}) — agent continuing…`
+          : 'Command finished — agent continuing…',
       });
-      return result;
+      return sandboxOk(result);
     } catch (err) {
+      const gate = sandboxFailed(formatInvokeError(err));
       this.setPartial({
         sandboxPending: null,
         sandboxConfirming: false,
         waitingFor: 'model',
-        status: `Sandbox failed: ${String(err)}`,
+        status: gate.message,
       });
-      return null;
+      return gate;
     }
   }
 
@@ -341,7 +371,7 @@ class AgentSession {
     void invoke('stop_generation').catch(() => undefined);
     this.deleteResolver?.('rejected');
     this.deleteResolver = null;
-    this.sandboxResolver?.(null);
+    this.sandboxResolver?.(sandboxCancelled('Sandbox run cancelled because the agent was stopped.'));
     this.sandboxResolver = null;
     this.mcpResolver?.('rejected');
     this.mcpResolver = null;
@@ -365,6 +395,8 @@ class AgentSession {
     mode?: PocketCodeAgentMode;
     images?: AgentImagePayload[];
     onApplyWrite: (path: string, content: string) => Promise<void>;
+    /** Refresh explorer / close preview after a confirmed delete. */
+    onFileDeleted?: (path: string) => Promise<void>;
     onAfterDone?: (summary: string, steps: AgentStep[], checkpointRunId: string | null) => Promise<void>;
   }): Promise<void> {
     if (this.running) this.stop();
@@ -475,6 +507,7 @@ class AgentSession {
             }
             return decision;
           },
+          onFileDeleted: input.onFileDeleted,
           onSandboxRequest: (payload) => this.waitForSandbox(payload),
           onMcpRequest: (req) => this.waitForMcpDecision(req),
           onStatus: (msg) => {
@@ -507,7 +540,7 @@ class AgentSession {
       this.abort = null;
       this.deleteResolver?.('rejected');
       this.deleteResolver = null;
-      this.sandboxResolver?.(null);
+      this.sandboxResolver?.(sandboxCancelled('Sandbox run cancelled because the agent ended.'));
       this.sandboxResolver = null;
       this.mcpResolver?.('rejected');
       this.mcpResolver = null;

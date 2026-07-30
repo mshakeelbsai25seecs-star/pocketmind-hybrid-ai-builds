@@ -1,10 +1,24 @@
 /**
- * Gates PocketCode write/run tools to ≥30B local models, large online models,
- * or any organization (enterprise:) server model.
- * Smaller models keep read-only Knowledge Chat / Codebase Explorer.
+ * Gates PocketCode write/run tools to ≥20B local models, local VL+mmproj models,
+ * large online models, or any organization (enterprise:) server model.
+ * Smaller text-only models keep read-only Knowledge Chat / Codebase Explorer.
  */
 
-export const POCKETCODE_MIN_LOCAL_B = 30;
+import { modelSupportsVision } from './codeWorkspace/visionCapability';
+
+export const POCKETCODE_MIN_LOCAL_B = 20;
+
+/** ~18 GiB+ GGUFs are treated as PocketCode-eligible when the filename has no Nb marker. */
+export const POCKETCODE_MIN_LOCAL_BYTES = 18 * 1024 * 1024 * 1024;
+
+/** Path/name heuristic for offline VL GGUFs (mmproj presence is checked on the Rust side). */
+export function looksLikeLocalVisionModel(modelPath: string | null | undefined): boolean {
+  if (!modelPath || modelPath.startsWith('remote:') || modelPath.startsWith('enterprise:')) {
+    return false;
+  }
+  return /\b(vl|llava|vision|qwen2\.5-vl|qwen2-vl|qwen3-vl|qwen3\.5|instinctrazor|minimax-m3|kimi-k2|kimi-k3|llama-4-maverick|maverick|minicpm-v)\b/i.test(modelPath)
+    || modelSupportsVision(modelPath);
+}
 
 const LARGE_ONLINE_IDS = [
   'gpt-5.5',
@@ -32,13 +46,18 @@ const LARGE_ONLINE_IDS = [
   'llama-3.1-70b',
   'llama-3.1-405b',
   'meta-llama-3.1-405b',
+  'llama-4-maverick',
   'qwen2.5-72b',
   'qwen-2.5-72b',
   'qwen2.5-coder-32b',
+  'qwen3-coder',
   'command-r-plus',
   'glm-5.2',
   'glm-5',
   'z-ai/glm',
+  'kimi-k3',
+  'kimi-k2.6',
+  'kimi-k2',
   'gemini-2.5-pro',
   'gemini-2.5-flash',
   'gemini-2.0-flash',
@@ -62,11 +81,20 @@ export function isLargeOnlineModel(modelPath: string | null | undefined): boolea
 
 export function canUseCodeWorkspaceAgent(
   modelPath: string | null | undefined,
-  opts?: { paramsBillions?: number | null; forceAllow?: boolean },
+  opts?: {
+    paramsBillions?: number | null;
+    forceAllow?: boolean;
+    localVisionReady?: boolean;
+    /** File size in bytes (from Local Model Library) when the path has no Nb token. */
+    sizeBytes?: number | null;
+  },
 ): { allowed: boolean; reason: string } {
   if (opts?.forceAllow) return { allowed: true, reason: 'Override enabled' };
   if (!modelPath) {
-    return { allowed: false, reason: 'Select a 30B+ local model, an online model, or an org server model for PocketCode.' };
+    return {
+      allowed: false,
+      reason: 'Select a 20B+ local model, a local vision GGUF with mmproj, an online model, or an org server model for PocketCode.',
+    };
   }
   if (modelPath.startsWith('enterprise:')) {
     return { allowed: true, reason: 'Organization server model' };
@@ -78,18 +106,27 @@ export function canUseCodeWorkspaceAgent(
       reason: isLargeOnlineModel(modelPath) ? 'Online model' : 'Online model (user selected)',
     };
   }
+  // Trust disk probe (mmproj beside GGUF). Path heuristics alone are not enough —
+  // Rust `cw_can_use` is the source of truth for the Send gate.
+  if (opts?.localVisionReady) {
+    return { allowed: true, reason: 'Local vision model (mmproj ready)' };
+  }
   const params = opts?.paramsBillions ?? parseParamsBillions(modelPath);
   if (params != null && params >= POCKETCODE_MIN_LOCAL_B) {
     return { allowed: true, reason: `Local model ≈ ${params}B` };
   }
+  const sizeBytes = opts?.sizeBytes;
+  if (sizeBytes != null && sizeBytes >= POCKETCODE_MIN_LOCAL_BYTES) {
+    return { allowed: true, reason: 'Local GGUF ≥ ~18 GB (treated as PocketCode-capable)' };
+  }
   if (params != null) {
     return {
       allowed: false,
-      reason: `Local model ≈ ${params}B is below the 30B PocketCode gate. Use Knowledge Chat Codebase Explorer (read-only) or switch to a 30B+ GGUF / org server.`,
+      reason: `Local model ≈ ${params}B is below the ${POCKETCODE_MIN_LOCAL_B}B PocketCode gate. Use a ≥${POCKETCODE_MIN_LOCAL_B}B GGUF, a VL GGUF with mmproj beside it (for vision), or an online/org model.`,
     };
   }
   return {
     allowed: false,
-    reason: 'Could not determine model size. PocketCode requires an explicit ≥30B local GGUF, an online model, or an org server model.',
+    reason: `Could not determine model size. PocketCode requires a ≥${POCKETCODE_MIN_LOCAL_B}B local GGUF (~18 GB+), a local VL GGUF with mmproj beside it, an online model, or an org server model.`,
   };
 }

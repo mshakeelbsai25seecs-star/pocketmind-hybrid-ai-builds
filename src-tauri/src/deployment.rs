@@ -5,9 +5,28 @@ use std::path::{Path, PathBuf};
 pub const DEPLOY_MODE_WORKSTATION: &str = "workstation";
 pub const DEPLOY_MODE_SERVER: &str = "server";
 
-/// Dev-tree Windows storage root — used only when it already exists (local developer installs).
+/// Dev-tree Windows storage: repo-adjacent `runtime-data` or `NEXUS_DEV_DATA_ROOT`.
 #[cfg(target_os = "windows")]
-pub const WINDOWS_DEV_DATA_ROOT: &str = r"D:\nexus-ai-deep-fixed\runtime-data";
+fn windows_dev_data_root_candidate() -> Option<PathBuf> {
+    if let Ok(value) = std::env::var("NEXUS_DEV_DATA_ROOT") {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            let path = PathBuf::from(trimmed);
+            if path.is_dir() {
+                return Some(path);
+            }
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        for ancestor in cwd.ancestors() {
+            let candidate = ancestor.join("runtime-data");
+            if candidate.is_dir() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
 
 /// Previous brand folder name — kept so upgrades still find existing installs.
 #[cfg(target_os = "windows")]
@@ -109,13 +128,12 @@ pub fn preferred_data_root() -> PathBuf {
         let portable = dirs::data_local_dir()
             .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"))
             .join("PocketMind");
-        let dev = PathBuf::from(WINDOWS_DEV_DATA_ROOT);
         let legacy = PathBuf::from(WINDOWS_LEGACY_DATA_ROOT);
         // Prefer an already-initialized install so upgrades do not relocate data.
         if portable.exists() {
             return portable;
         }
-        if dev.exists() {
+        if let Some(dev) = windows_dev_data_root_candidate() {
             return dev;
         }
         if legacy.exists() {

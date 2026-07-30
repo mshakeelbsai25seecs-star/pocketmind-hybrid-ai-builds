@@ -2,6 +2,7 @@ export type CodeWorkspaceToolName =
   | 'list_dir'
   | 'glob_file_search'
   | 'grep'
+  | 'codebase_search'
   | 'repo_map'
   | 'find_symbol'
   | 'read_symbol'
@@ -9,6 +10,8 @@ export type CodeWorkspaceToolName =
   | 'apply_edit'
   | 'delete_file'
   | 'run_command'
+  | 'read_terminal'
+  | 'kill_terminal'
   | 'ask_followup'
   | 'create_plan'
   | 'update_plan'
@@ -49,6 +52,8 @@ export interface PocketCodeImageAttach {
   understand: 'vision' | 'doc-text' | 'unavailable' | 'ocr';
   ocrText?: string;
   notice?: string;
+  /** data: URL for composer thumbnail preview (clipboard paste / loaded image). */
+  previewDataUrl?: string;
 }
 
 export interface PendingDelete {
@@ -78,6 +83,15 @@ export interface SandboxRunResult {
   stderr: string;
   timed_out: boolean;
   duration_ms: number;
+  /** Set when the command ran as a terminal session (streaming/background). */
+  session_id?: string;
+  /** Command line as executed, for the terminal panel and agent messages. */
+  command?: string;
+  /** True while a background process is still alive. */
+  still_running?: boolean;
+  killed?: boolean;
+  /** Output was trimmed to the tail. */
+  truncated?: boolean;
 }
 
 export interface RunnerInfo {

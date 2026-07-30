@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/pocketcode-workspace",
+    "enterprise-server/agent-host",
+]
+# Keep desktop app + Full RAG gateway as independent Cargo packages.
+exclude = [
+    "src-tauri",
+    "enterprise-server/full-rag/gateway",
+]
+
+[workspace.package]
+edition = "2021"
+license = "Proprietary"
+publish = false

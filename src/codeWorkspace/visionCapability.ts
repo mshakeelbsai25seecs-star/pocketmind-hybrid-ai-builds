@@ -42,14 +42,22 @@ export function modelSupportsVision(modelPath: string | null | undefined): boole
       || lower.includes('claude-3')
       || lower.includes('claude-sonnet')
       || lower.includes('claude-opus')
+      // DeepSeek V4 is multimodal (Flash / Pro + legacy IDs that route to V4).
+      || lower.includes('deepseek-v4')
+      || lower.includes('deepseek/deepseek-chat')
+      || lower.includes('deepseek/deepseek-reasoner')
+      || lower.includes('deepseek/deepseek-v4')
+      || lower.includes('kimi-k3')
+      || lower.includes('kimi-k2.6')
+      || lower.includes('llama-4-maverick')
     );
   }
 
   if (localVisionCache.has(modelPath)) {
     return localVisionCache.get(modelPath)!;
   }
-  // Heuristic until async probe fills cache
-  return /\b(vl|llava|vision|mmproj)\b/i.test(modelPath);
+  // Heuristic until async probe fills cache (native multimodal MoE names included).
+  return /\b(vl|llava|vision|mmproj|qwen3\.5|minimax-m3|kimi-k2|kimi-k3|llama-4-maverick|maverick)\b/i.test(modelPath);
 }
 
 /** Probe disk for mmproj next to a local GGUF and cache the result. */

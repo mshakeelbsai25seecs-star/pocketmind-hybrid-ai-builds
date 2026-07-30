@@ -36,7 +36,7 @@ export function shouldSkipLlmForExtractive(
 
 /**
  * Build the best available extractive answer from hits, Tree-sitter entities,
- * and/or already-attached source file bodies (the handleSend failure mode).
+ * and/or already-attached source file bodies (the submitForm failure mode).
  */
 export function resolveBestExtractiveAnswer(
   question: string,

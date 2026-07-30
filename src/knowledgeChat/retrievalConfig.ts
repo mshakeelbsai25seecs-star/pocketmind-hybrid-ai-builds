@@ -89,4 +89,79 @@ export const MODEL_DOWNLOAD_LINKS = {
   docEmbedding: 'https://huggingface.co/gpustack/bge-m3-GGUF',
   /** Prefer a llama.cpp-correct conversion with cls.output.weight. */
   reranker: 'https://huggingface.co/Voodisss/Qwen3-Reranker-4B-GGUF-llama_cpp',
+  unlimitedOcr: 'https://huggingface.co/baidu/Unlimited-OCR',
 } as const;
+
+export type SupportModelKind = 'code_embedding' | 'doc_embedding' | 'reranker' | 'unlimited_ocr';
+
+export interface SupportModelCatalogEntry {
+  id: SupportModelKind;
+  title: string;
+  description: string;
+  /** Relative under modelsDir, e.g. embeddings or rerankers. Empty for OCR (uses app data root). */
+  destSubdir: string;
+  fileName: string;
+  /** Direct HTTPS URL for GGUF downloads; empty for HF snapshot downloads (OCR). */
+  url: string;
+  repoPage: string;
+  /** Approximate size label for UI. */
+  sizeLabel: string;
+  /** How the app downloads this asset. */
+  downloadMode: 'gguf' | 'hf_snapshot';
+  requiredFor: string;
+}
+
+/**
+ * On-demand support models (not bundled in the installer).
+ * Chat GGUFs stay in Models; these power Knowledge Chat + optional OCR.
+ */
+export const SUPPORT_MODEL_CATALOG: SupportModelCatalogEntry[] = [
+  {
+    id: 'doc_embedding',
+    title: 'Document embeddings (BGE-M3)',
+    description: 'Recommended for Knowledge Chat PDFs, docs, and runbooks.',
+    destSubdir: 'embeddings',
+    fileName: 'bge-m3-Q4_K_M.gguf',
+    url: 'https://huggingface.co/gpustack/bge-m3-GGUF/resolve/main/bge-m3-Q4_K_M.gguf?download=true',
+    repoPage: MODEL_DOWNLOAD_LINKS.docEmbedding,
+    sizeLabel: '~418 MB',
+    downloadMode: 'gguf',
+    requiredFor: 'Knowledge Chat document search',
+  },
+  {
+    id: 'code_embedding',
+    title: 'Code embeddings (Qwen3-Embedding-8B)',
+    description: 'For Knowledge Chat / code partition. Large — skip on low-RAM PCs.',
+    destSubdir: 'embeddings',
+    fileName: 'Qwen3-Embedding-8B-Q4_K_M.gguf',
+    url: 'https://huggingface.co/Qwen/Qwen3-Embedding-8B-GGUF/resolve/main/Qwen3-Embedding-8B-Q4_K_M.gguf?download=true',
+    repoPage: MODEL_DOWNLOAD_LINKS.codeEmbedding,
+    sizeLabel: '~4.4 GB',
+    downloadMode: 'gguf',
+    requiredFor: 'Knowledge Chat code search',
+  },
+  {
+    id: 'reranker',
+    title: 'Reranker (Qwen3-Reranker-4B)',
+    description: 'Improves answer ranking (llama.cpp RANK). Optional but recommended.',
+    destSubdir: 'rerankers',
+    fileName: 'Qwen3-Reranker-4B-Q4_K_M.gguf',
+    url: 'https://huggingface.co/Voodisss/Qwen3-Reranker-4B-GGUF-llama_cpp/resolve/main/Qwen3-Reranker-4B-Q4_K_M.gguf?download=true',
+    repoPage: MODEL_DOWNLOAD_LINKS.reranker,
+    sizeLabel: '~2.3 GB',
+    downloadMode: 'gguf',
+    requiredFor: 'Knowledge Chat ranking quality',
+  },
+  {
+    id: 'unlimited_ocr',
+    title: 'Unlimited-OCR weights',
+    description: 'Optional high-accuracy scanned PDF/image OCR. Needs NVIDIA CUDA + Python torch.',
+    destSubdir: '',
+    fileName: '(Hugging Face snapshot)',
+    url: '',
+    repoPage: MODEL_DOWNLOAD_LINKS.unlimitedOcr,
+    sizeLabel: 'multi-GB',
+    downloadMode: 'hf_snapshot',
+    requiredFor: 'Optional Unlimited-OCR engine',
+  },
+];
