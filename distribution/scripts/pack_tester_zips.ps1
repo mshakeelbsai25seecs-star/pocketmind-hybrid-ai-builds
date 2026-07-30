@@ -70,8 +70,8 @@ USE THE PORTABLE FOLDER (recommended):
 5. Point Models at your .gguf files (chat, embeddings, reranker).
 6. Knowledge Chat → folder → Scan → Build Index → ask in your own words.
 
-Do NOT rely on setup.exe/MSI alone for testers — those installers may not include
-bin\llama.cpp. If you install via setup.exe, also copy bin\llama.cpp next to the app.
+Do NOT rely on setup.exe alone for portable tester zips — use the unzipped folder with bin\llama.cpp.
+The NSIS installer (~2 GB) bundles all engines under resources\llama.cpp\ (cpu, vulkan, cuda).
 
 Models are not included (too large).
 If Windows blocks the app: More info → Run anyway (unsigned tester build).

@@ -128,6 +128,7 @@ async fn try_spawn_embedding_attempt(
         .as_llama_arg();
 
     let mut command = Command::new(runtime);
+    crate::process_util::no_window_tokio(&mut command);
     command
         .arg("-m")
         .arg(model_path)

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { open } from '@tauri-apps/api/dialog';
 import { listen } from '@tauri-apps/api/event';
 import {
@@ -27,6 +27,7 @@ import { embeddingModelPlaceholder, joinPath, pathPlaceholder } from '../../plat
 import type { KcCollection, KcCollectionHealth, KcFolderCategory, KcIndexProgress, KcIndexResult, KcPartitionMix } from '../../knowledgeChat/types';
 import { KC_STATUS_LABELS, QA_CORPUS_NAME } from '../../knowledgeChat/types';
 import { setCollectionImageRag } from '../../ocrImageRagConfig';
+import RefreshButton from '../RefreshButton';
 
 const FOLDER_CATEGORY_LABELS: Record<KcFolderCategory, string> = {
   mixed: 'Mixed (code + documents)',
@@ -158,6 +159,89 @@ export default function CollectionPanel() {
   const [previewing, setPreviewing] = useState(false);
   const [collectionWarnings, setCollectionWarnings] = useState<string[]>([]);
   const [collectionHealth, setCollectionHealth] = useState<KcCollectionHealth | null>(null);
+  const [collectionsRefreshBusy, setCollectionsRefreshBusy] = useState(false);
+
+  const loadCollections = useCallback(async (opts?: { manual?: boolean }) => {
+    if (opts?.manual) setCollectionsRefreshBusy(true);
+    try {
+      const serverCreds = await loadServerRagCredentials();
+      if (serverCreds) {
+        const items = await serverRagListCollections(serverCreds);
+        setCollections(items);
+        const persistedId = useKnowledgeChatStore.getState().activeCollectionId;
+        const validPersisted = persistedId && items.some(item => item.id === persistedId);
+        if (validPersisted) {
+          setActiveCollectionId(persistedId);
+        } else if (items[0]) {
+          setActiveCollectionId(items[0].id);
+        }
+        if (opts?.manual) setNotice('Collections refreshed from the organization gateway.');
+        else setNotice('Server RAG mode: collections loaded from the organization gateway.');
+        return;
+      }
+
+      const items = await kcListCollections();
+      setCollections(items);
+
+      const qaCollection = items.find(item => item.name === QA_CORPUS_NAME);
+      const persistedId = useKnowledgeChatStore.getState().activeCollectionId;
+      const validPersisted = persistedId && items.some(item => item.id === persistedId);
+
+      if (validPersisted) {
+        setActiveCollectionId(persistedId);
+      } else if (qaCollection) {
+        setActiveCollectionId(qaCollection.id);
+      } else if (items[0]) {
+        setActiveCollectionId(items[0].id);
+      }
+
+      if (!opts?.manual) {
+        const defaultModel = await kcGetDefaultEmbeddingModel();
+        const discovered = await kcDiscoverEmbeddingModels();
+        let resolved = '';
+        if (defaultModel) {
+          try {
+            resolved = await kcResolveEmbeddingModel(defaultModel);
+          } catch {
+            resolved = '';
+          }
+        }
+        if (!resolved && discovered.length > 0) {
+          resolved = discovered.find(looksLikeQwen3Embed) || discovered[0];
+        }
+        const bgeModel = discovered.find(looksLikeBge) || '';
+        if (bgeModel) {
+          setKnowledgeModelPath(bgeModel);
+        }
+        if (resolved) {
+          setEmbeddingModelPath(resolved);
+          setEmbeddingSetupHint(null);
+        } else {
+          const hintPath = joinPath(
+            pathPlaceholder(deploymentConfig, 'embeddings'),
+            'Qwen3-Embedding-8B-Q4_K_M.gguf',
+          );
+          setEmbeddingModelPath(deploymentConfig?.embeddingModelPath || '');
+          setEmbeddingSetupHint(
+            `No code search model found. Place Qwen3-Embedding-8B-Q4_K_M.gguf at ${hintPath}, or click Browse. Word search still works without it.`,
+          );
+        }
+      } else {
+        setNotice('Collections refreshed.');
+      }
+    } catch (err) {
+      setError(humanError(err));
+    } finally {
+      if (opts?.manual) setCollectionsRefreshBusy(false);
+    }
+  }, [
+    deploymentConfig,
+    setActiveCollectionId,
+    setCollections,
+    setEmbeddingModelPath,
+    setError,
+    setNotice,
+  ]);
 
   const activeCollection = useMemo(
     () => collections.find(item => item.id === activeCollectionId) || null,
@@ -196,80 +280,8 @@ export default function CollectionPanel() {
   }, [activeCollectionId, activeCollection?.updated_at, activeCollection?.status]);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const serverCreds = await loadServerRagCredentials();
-        if (serverCreds) {
-          const items = await serverRagListCollections(serverCreds);
-          if (cancelled) return;
-          setCollections(items);
-          const persistedId = useKnowledgeChatStore.getState().activeCollectionId;
-          const validPersisted = persistedId && items.some(item => item.id === persistedId);
-          if (validPersisted) {
-            setActiveCollectionId(persistedId);
-          } else if (items[0]) {
-            setActiveCollectionId(items[0].id);
-          }
-          setNotice('Server RAG mode: collections loaded from the organization gateway.');
-          return;
-        }
-
-        // Do not auto-index/embed on mount — use Scan Folder / Build Index (or kc_ensure_qa_corpus) manually.
-        const items = await kcListCollections();
-
-        if (cancelled) return;
-        setCollections(items);
-
-        const qaCollection = items.find(item => item.name === QA_CORPUS_NAME);
-        const persistedId = useKnowledgeChatStore.getState().activeCollectionId;
-        const validPersisted = persistedId && items.some(item => item.id === persistedId);
-
-        if (validPersisted) {
-          setActiveCollectionId(persistedId);
-        } else if (qaCollection) {
-          setActiveCollectionId(qaCollection.id);
-        } else if (items[0]) {
-          setActiveCollectionId(items[0].id);
-        }
-        const defaultModel = await kcGetDefaultEmbeddingModel();
-        const discovered = await kcDiscoverEmbeddingModels();
-        let resolved = '';
-        if (defaultModel) {
-          try {
-            resolved = await kcResolveEmbeddingModel(defaultModel);
-          } catch {
-            resolved = '';
-          }
-        }
-        if (!resolved && discovered.length > 0) {
-          resolved = discovered.find(looksLikeQwen3Embed) || discovered[0];
-        }
-        const bgeModel = discovered.find(looksLikeBge) || '';
-        if (!cancelled) {
-          if (bgeModel) {
-            setKnowledgeModelPath(bgeModel);
-          }
-          if (resolved) {
-            setEmbeddingModelPath(resolved);
-            setEmbeddingSetupHint(null);
-          } else {
-            const hintPath = joinPath(
-              pathPlaceholder(deploymentConfig, 'embeddings'),
-              'Qwen3-Embedding-8B-Q4_K_M.gguf',
-            );
-            setEmbeddingModelPath(deploymentConfig?.embeddingModelPath || '');
-            setEmbeddingSetupHint(
-              `No code search model found. Place Qwen3-Embedding-8B-Q4_K_M.gguf at ${hintPath}, or click Browse. Word search still works without it.`,
-            );
-          }
-        }
-      } catch (err) {
-        if (!cancelled) setError(humanError(err));
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [deploymentConfig?.embeddingModelPath, setActiveCollectionId, setCollections, setEmbeddingModelPath, setError, setNotice]);
+    void loadCollections();
+  }, [loadCollections]);
 
   useEffect(() => {
     const unlisten = listen<KcIndexProgress>('kc-index-progress', (event) => {
@@ -531,7 +543,14 @@ export default function CollectionPanel() {
             Scan a local folder so Knowledge Chat can search it and cite answers.
           </p>
         </div>
-        <Database className="w-5 h-5 text-primary-500 shrink-0" />
+        <div className="flex items-center gap-2 shrink-0">
+          <RefreshButton
+            title="Refresh"
+            onClick={() => loadCollections({ manual: true })}
+            busy={collectionsRefreshBusy}
+          />
+          <Database className="w-5 h-5 text-primary-500" />
+        </div>
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">

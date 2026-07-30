@@ -60,6 +60,10 @@ export async function probeDocExport(): Promise<DocExportProbe> {
   return invoke<DocExportProbe>('probe_doc_export');
 }
 
+export async function installDocExportSupport(): Promise<DocExportProbe> {
+  return invoke<DocExportProbe>('install_doc_export_support');
+}
+
 export async function generateDocumentSpec(args: GenerateDocumentArgs): Promise<DocSpecResult> {
   return invoke<DocSpecResult>('generate_document_spec', {
     request: {

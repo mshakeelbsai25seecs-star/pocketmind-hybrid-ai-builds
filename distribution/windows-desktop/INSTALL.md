@@ -27,12 +27,11 @@ On Windows the app prefers **`D:\PocketMind`** when the D: drive exists (models,
 If D: is missing, it falls back to a user-writable location.  
 `C:\ProgramData\PocketMind` is **not** the primary app data root.
 
-## About setup.exe / MSI
+## About setup.exe / NSIS installer
 
-The NSIS/MSI installers (if present) install the app binary. They **do not always include** the `bin\llama.cpp` runtimes next to the installed app.
+The NSIS installer (~2 GB) includes **all llama.cpp runtimes** (`cpu`, `vulkan`, and `cuda`) under `resources/llama.cpp/` next to the installed app. You do not need to copy `bin\llama.cpp` manually when installing via setup.exe.
 
-- Prefer the **portable `.exe` + `bin\`** layout from this zip for tester builds.
-- If you use setup.exe, also copy the zip’s `bin\llama.cpp` tree next to the installed executable, or keep using the portable folder.
+For portable tester zips, the folder still ships `bin\llama.cpp\` beside the `.exe` — both layouts work.
 
 ## Optional: faster GPU
 

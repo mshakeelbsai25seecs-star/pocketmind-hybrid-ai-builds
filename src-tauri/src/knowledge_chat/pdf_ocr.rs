@@ -74,7 +74,9 @@ pub fn resolve_python_executable() -> Option<PathBuf> {
     // Prefer real interpreters; skip Windows Store python stubs that "succeed"
     // --version but cannot run scripts.
     for candidate in ["python3", "python", "py"] {
-        let Ok(output) = std::process::Command::new(candidate)
+        let mut probe = std::process::Command::new(candidate);
+        crate::process_util::no_window_std(&mut probe);
+        let Ok(output) = probe
             .args(["-c", "import sys; print(sys.executable)"])
             .stdout(Stdio::piped())
             .stderr(Stdio::null())
@@ -103,7 +105,9 @@ fn python_probe_import(module: &str) -> bool {
         return false;
     };
     let code = format!("import {module}");
-    std::process::Command::new(python)
+    let mut probe = std::process::Command::new(python);
+    crate::process_util::no_window_std(&mut probe);
+    probe
         .args(["-c", &code])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -237,6 +241,7 @@ pub fn ocr_pdf_to_markdown_sync(pdf_path: &str) -> AppResult<String> {
         other => other.as_str(),
     };
     let mut cmd = std::process::Command::new(&python);
+    crate::process_util::no_window_std(&mut cmd);
     cmd.arg(&script)
         .arg(&pdf)
         .arg("--output")

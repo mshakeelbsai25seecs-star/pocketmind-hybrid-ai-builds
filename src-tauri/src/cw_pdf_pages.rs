@@ -82,7 +82,9 @@ except Exception as e:
     sys.exit(1)
 "#;
 
-    let output = std::process::Command::new(&python)
+    let mut cmd = std::process::Command::new(&python);
+    crate::process_util::no_window_std(&mut cmd);
+    let output = cmd
         .args([
             "-c",
             script,

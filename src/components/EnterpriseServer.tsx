@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import {
   Building2, CheckCircle2, Copy, ExternalLink, KeyRound, Loader2,
@@ -8,6 +8,7 @@ import { useAppStore } from '../store';
 import { Conversation, EnterpriseEmbeddingProbe, EnterpriseModelInfo, EnterpriseServerConfig, EnterpriseServerTestResult } from '../types';
 import { probeServerRag } from '../knowledgeChat/serverRag';
 import EnterpriseServerHostPanel from './EnterpriseServerHostPanel';
+import RefreshButton from './RefreshButton';
 
 function humanError(err: unknown): string {
   if (!err) return 'Unknown error';
@@ -42,28 +43,56 @@ export default function EnterpriseServer() {
   const [embeddingProbes, setEmbeddingProbes] = useState<EnterpriseEmbeddingProbe[]>([]);
   const [serverRagEnabled, setServerRagEnabled] = useState(false);
   const [serverRagReachable, setServerRagReachable] = useState<boolean | null>(null);
+  const [refreshBusy, setRefreshBusy] = useState(false);
+
+  const loadConfig = useCallback(async () => {
+    const config = await invoke<EnterpriseServerConfig>('get_enterprise_server_config');
+    setBaseUrl(config.base_url || '');
+    setSelectedModel(config.selected_model || '');
+    setApiKeySaved(config.api_key_saved);
+    setEmbeddingsEnabled(Boolean(config.embeddings_enabled));
+    setCodeEmbedModel(config.code_embedding_model || '');
+    setKnowledgeEmbedModel(config.knowledge_embedding_model || '');
+    setEmbeddingsBaseUrl(config.embeddings_base_url || '');
+    setServerRagEnabled(Boolean(config.server_rag_enabled));
+    return config;
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
     const load = async () => {
       try {
-        const config = await invoke<EnterpriseServerConfig>('get_enterprise_server_config');
-        if (cancelled) return;
-        setBaseUrl(config.base_url || '');
-        setSelectedModel(config.selected_model || '');
-        setApiKeySaved(config.api_key_saved);
-        setEmbeddingsEnabled(Boolean(config.embeddings_enabled));
-        setCodeEmbedModel(config.code_embedding_model || '');
-        setKnowledgeEmbedModel(config.knowledge_embedding_model || '');
-        setEmbeddingsBaseUrl(config.embeddings_base_url || '');
-        setServerRagEnabled(Boolean(config.server_rag_enabled));
+        await loadConfig();
       } catch (err) {
         if (!cancelled) setError(humanError(err));
       }
     };
     load();
     return () => { cancelled = true; };
-  }, []);
+  }, [loadConfig]);
+
+  const refreshEnterprise = async () => {
+    setRefreshBusy(true);
+    setError(null);
+    try {
+      const config = await loadConfig();
+      const url = (config.base_url || '').trim();
+      if (url) {
+        const list = await invoke<EnterpriseModelInfo[]>('list_enterprise_server_models', {
+          baseUrl: url,
+          apiKey: apiKey.trim() ? apiKey.trim() : null,
+        });
+        setModels(list);
+        setStatus(`Refreshed — ${list.length} model(s) from the organization server.`);
+      } else {
+        setStatus('Organization server settings refreshed.');
+      }
+    } catch (err) {
+      setError(humanError(err));
+    } finally {
+      setRefreshBusy(false);
+    }
+  };
 
   const serverReady = useMemo(() => Boolean(baseUrl.trim() && selectedModel.trim()), [baseUrl, selectedModel]);
 
@@ -228,7 +257,9 @@ export default function EnterpriseServer() {
               Connect PocketMind Hybrid AI to a company-owned OpenAI-compatible inference server. Employees keep using the same Windows, macOS, and mobile clients while large models run on internal GPU servers with centralized access control.
             </p>
           </div>
-          <div className="grid grid-cols-2 gap-3 text-sm min-w-[18rem]">
+          <div className="flex flex-col gap-3 min-w-[18rem]">
+            <RefreshButton title="Refresh" onClick={refreshEnterprise} busy={refreshBusy} className="self-end" />
+            <div className="grid grid-cols-2 gap-3 text-sm">
             <div className="premium-card p-4">
               <Zap className="w-5 h-5 text-primary-500 mb-2" />
               <div className="font-bold">Large models</div>
@@ -239,6 +270,7 @@ export default function EnterpriseServer() {
               <div className="font-bold">Private network</div>
               <div className="text-xs text-surface-500">Data can stay inside the company environment</div>
             </div>
+          </div>
           </div>
         </div>
       </div>

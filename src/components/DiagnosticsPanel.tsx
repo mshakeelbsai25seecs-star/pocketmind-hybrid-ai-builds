@@ -14,6 +14,44 @@ function fmtBytes(bytes?: number | null) {
   return `${v.toFixed(i ? 1 : 0)} ${units[i]}`;
 }
 
+const BUNDLED_TOOL_IDS = new Set(['python', 'node', 'rg', 'ripgrep', 'javascript']);
+
+const HOST_INSTALL_COMMANDS: Record<string, string> = {
+  python: 'Install Python 3 from https://www.python.org/downloads/ (or use Repair bundled tooling in Diagnostics).',
+  node: 'Install Node.js from https://nodejs.org/ (or use Repair bundled tooling in Diagnostics).',
+  javascript: 'Install Node.js from https://nodejs.org/ (or use Repair bundled tooling in Diagnostics).',
+  rg: 'Install ripgrep: cargo install ripgrep  # Windows: choco install ripgrep  macOS: brew install ripgrep',
+  ripgrep: 'Install ripgrep: cargo install ripgrep  # Windows: choco install ripgrep  macOS: brew install ripgrep',
+  cargo: 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh',
+  npm: 'Install Node.js from https://nodejs.org/ (includes npm).',
+  npx: 'Install Node.js from https://nodejs.org/ (includes npx).',
+  yarn: 'npm install -g yarn',
+  pnpm: 'npm install -g pnpm',
+  bun: 'curl -fsSL https://bun.sh/install | bash',
+  deno: 'curl -fsSL https://deno.land/install.sh | sh',
+  go: 'Install Go from https://go.dev/dl/',
+  java: 'Install a JDK (Temurin/OpenJDK) and ensure javac/java are on PATH.',
+  dotnet: 'Install .NET SDK from https://dotnet.microsoft.com/download',
+  pip: 'python -m ensurepip --upgrade  # then: python -m pip install --upgrade pip',
+  pytest: 'python -m pip install pytest',
+  make: 'Install build tools for your OS (Xcode CLT, build-essential, or Visual Studio Build Tools).',
+  cmake: 'Install CMake from https://cmake.org/download/',
+  gcc: 'Install GCC/clang build tools for your OS.',
+  flutter: 'Install Flutter SDK from https://docs.flutter.dev/get-started/install',
+  git: 'Install Git from https://git-scm.com/downloads',
+};
+
+function hostInstallCommand(runnerId: string): string {
+  return HOST_INSTALL_COMMANDS[runnerId]
+    || `Install ${runnerId} and ensure it is on PATH for PocketCode runners.`;
+}
+
+function bundledToolLabel(tool: 'rg' | 'python' | 'node'): string {
+  if (tool === 'rg') return 'Ripgrep';
+  if (tool === 'python') return 'Python';
+  return 'Node';
+}
+
 export default function DiagnosticsPanel() {
   const store = useAppStore();
   const [diag, setDiag] = useState<RuntimeDiagnostics | null>(null);
@@ -47,18 +85,38 @@ export default function DiagnosticsPanel() {
     }
   };
 
+  const rescanRunners = async () => {
+    setBusy(true);
+    setMessage('Re-scanning allowlisted runners…');
+    try {
+      setRunners(await cwListRunners());
+      setMessage('Runner scan complete.');
+    } catch (e) {
+      setMessage(String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const repairBundledTooling = async () => {
     setBusy(true);
     setMessage('Repairing bundled tooling…');
     try {
       const status = await repairTooling();
       setTooling(status);
+      setRunners(await cwListRunners());
       setMessage(status.message);
     } catch (e) {
       setMessage(String(e));
     } finally {
       setBusy(false);
     }
+  };
+
+  const copyInstallCommand = async (runnerId: string) => {
+    const cmd = hostInstallCommand(runnerId);
+    await navigator.clipboard.writeText(cmd);
+    setMessage(`Copied install notes for ${runnerId}.`);
   };
 
   const report = useMemo(() => {
@@ -139,6 +197,14 @@ export default function DiagnosticsPanel() {
     }
   };
 
+  const bundledTools: Array<{ id: 'rg' | 'python' | 'node'; ok: boolean; path: string | null }> = tooling
+    ? [
+        { id: 'rg', ok: tooling.rg_ok, path: tooling.rg_path },
+        { id: 'python', ok: tooling.python_ok, path: tooling.python_path },
+        { id: 'node', ok: tooling.node_ok, path: tooling.node_path },
+      ]
+    : [];
+
   return (
     <div className="flex-1 overflow-y-auto p-6">
       <div className="max-w-6xl mx-auto space-y-6">
@@ -169,14 +235,32 @@ export default function DiagnosticsPanel() {
             <h2 className="font-bold text-xl flex items-center gap-2"><Hammer className="w-5 h-5 text-primary-500" /> PocketCode tooling</h2>
             <div className="flex gap-2">
               <button onClick={() => void loadTooling()} className="btn-secondary text-sm" disabled={busy}>Refresh</button>
-              <button onClick={() => void repairBundledTooling()} className="btn-primary text-sm" disabled={busy}>Repair tooling</button>
+              <button onClick={() => void rescanRunners()} className="btn-secondary text-sm" disabled={busy}>Re-scan runners</button>
+              <button onClick={() => void repairBundledTooling()} className="btn-primary text-sm" disabled={busy}>Repair all bundled</button>
             </div>
           </div>
           {tooling ? (
             <div className="grid md:grid-cols-3 gap-3 text-sm">
-              <Info label="Ripgrep" value={tooling.rg_ok ? tooling.rg_path : 'Missing'} />
-              <Info label="Python" value={tooling.python_ok ? tooling.python_path : 'Missing'} />
-              <Info label="Node" value={tooling.node_ok ? tooling.node_path : 'Missing'} />
+              {bundledTools.map(tool => (
+                <div
+                  key={tool.id}
+                  className={`rounded-xl p-3 border ${tool.ok ? 'border-emerald-300/40 bg-emerald-50/50 dark:bg-emerald-950/20' : 'border-surface-300/60 bg-surface-100/80 dark:bg-surface-900/60 opacity-80'}`}
+                >
+                  <p className="text-xs text-surface-500 mb-1">{bundledToolLabel(tool.id)}</p>
+                  <p className="font-medium break-all text-sm">{tool.ok ? tool.path : 'Missing'}</p>
+                  {!tool.ok && (
+                    <button
+                      type="button"
+                      onClick={() => void repairBundledTooling()}
+                      disabled={busy}
+                      className="btn-secondary text-xs mt-2 w-full"
+                      title="Copy bundled python/node/rg from app resources into runtime-data/tooling"
+                    >
+                      Install / Repair
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
           ) : (
             <p className="text-sm text-surface-500">Tooling status unavailable. Run Repair tooling after `scripts/fetch-tooling`.</p>
@@ -201,17 +285,43 @@ export default function DiagnosticsPanel() {
             <div className="space-y-2 pt-2 border-t border-surface-200 dark:border-surface-800">
               <p className="text-sm font-semibold">Allowlisted runners</p>
               <p className="text-xs text-surface-500">{runners.message}</p>
-              <div className="max-h-48 overflow-y-auto grid sm:grid-cols-2 gap-1 text-xs font-mono">
-                {runners.runners.map(r => (
-                  <div
-                    key={r.id}
-                    className={r.available ? 'text-primary-700 dark:text-primary-300' : 'text-surface-400'}
-                    title={r.binary || r.note}
-                  >
-                    {r.available ? '✓' : '·'} {r.id}
-                    <span className="text-surface-500"> ({r.kind})</span>
-                  </div>
-                ))}
+              <div className="max-h-48 overflow-y-auto grid sm:grid-cols-2 gap-2 text-xs">
+                {runners.runners.map(r => {
+                  const bundled = BUNDLED_TOOL_IDS.has(r.id);
+                  return (
+                    <div
+                      key={r.id}
+                      className={`rounded-lg px-2 py-1.5 flex items-center justify-between gap-2 ${r.available ? 'text-primary-700 dark:text-primary-300' : 'text-surface-400 bg-surface-100/70 dark:bg-surface-900/50'}`}
+                      title={r.binary || r.note}
+                    >
+                      <span className="truncate font-mono">
+                        {r.available ? '✓' : '·'} {r.id}
+                        <span className="text-surface-500"> ({r.kind})</span>
+                      </span>
+                      {!r.available && !bundled && (
+                        <button
+                          type="button"
+                          className="btn-secondary text-[10px] py-0.5 px-1.5 shrink-0"
+                          onClick={() => void copyInstallCommand(r.id)}
+                          title="Copy host install command"
+                        >
+                          Copy install
+                        </button>
+                      )}
+                      {!r.available && bundled && (
+                        <button
+                          type="button"
+                          className="btn-secondary text-[10px] py-0.5 px-1.5 shrink-0"
+                          onClick={() => void repairBundledTooling()}
+                          disabled={busy}
+                          title="Install bundled tooling via tooling_repair"
+                        >
+                          Install / Repair
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </div>
           )}

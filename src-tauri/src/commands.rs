@@ -31,6 +31,8 @@ pub struct AppState {
     pub local_backend: Arc<crate::llm::local::LlamaCppBackend>,
     pub kc_embed_pool: Arc<crate::knowledge_chat::runtime::KcEmbedPool>,
     pub kc_rerank_pool: Arc<crate::knowledge_chat::llama_rerank::KcRerankPool>,
+    /// User requested Stop on an in-flight generation stream.
+    pub generation_cancel: Arc<AtomicBool>,
     /// User requested Stop on an in-flight model download.
     pub download_cancel: Arc<AtomicBool>,
     /// Final + `.part` paths belonging to the current download job (cleared on Stop).
@@ -513,8 +515,10 @@ pub async fn stream_generate(
     request: GenerationRequest,
     window: tauri::Window,
 ) -> AppResult<()> {
+    state.generation_cancel.store(false, Ordering::SeqCst);
     // Larger buffer so fast remote streams (and occasional reasoning status) do not stall.
     let (tx, mut rx) = mpsc::channel::<GenerationChunk>(256);
+    let generation_cancel = state.generation_cancel.clone();
 
     if request.backend == "enterprise"
         || request
@@ -524,10 +528,11 @@ pub async fn stream_generate(
             .unwrap_or(false)
     {
         let backend = Arc::new(resolve_enterprise_backend(&state, request.model_path.as_ref()).await?);
+        let cancel = generation_cancel.clone();
 
         tokio::spawn(async move {
             let tx_for_error = tx.clone();
-            let result = backend.generate_stream(request, tx).await;
+            let result = backend.generate_stream_cancellable(request, tx, cancel).await;
             if let Err(e) = result {
                 let _ = tx_for_error.send(GenerationChunk {
                     text: format!("\n\n**Generation error:** {e}"),
@@ -563,10 +568,11 @@ pub async fn stream_generate(
         );
         // #endregion
         let backend = Arc::new(crate::llm::remote::RemoteBackend::new(&provider, &key, &model_id));
+        let cancel = generation_cancel.clone();
 
         tokio::spawn(async move {
             let tx_for_error = tx.clone();
-            let result = backend.generate_stream(request, tx).await;
+            let result = backend.generate_stream_cancellable(request, tx, cancel).await;
             if let Err(e) = result {
                 // #region agent log
                 crate::knowledge_chat::debug_session::agent_log(
@@ -592,6 +598,7 @@ pub async fn stream_generate(
         let model_path = request.model_path.clone()
             .ok_or_else(|| AppError::InferenceError("No local model selected. Go to Models, import/scan a .gguf file, then click Use.".to_string()))?;
         let backend = state.local_backend.clone();
+        let cancel = generation_cancel.clone();
 
         let model_label = std::path::Path::new(&model_path)
             .file_name()
@@ -621,7 +628,7 @@ pub async fn stream_generate(
 
         tokio::spawn(async move {
             let tx_for_error = tx.clone();
-            let result = backend.generate_stream(request, tx).await;
+            let result = backend.generate_stream_cancellable(request, tx, cancel).await;
             if let Err(e) = result {
                 let _ = tx_for_error.send(GenerationChunk {
                     text: format!("\n\n**Generation error:** {e}"),
@@ -648,7 +655,8 @@ pub async fn stream_generate(
 
 #[tauri::command]
 pub async fn stop_generation(state: State<'_, AppState>) -> AppResult<()> {
-    state.local_backend.unload_model().await
+    state.generation_cancel.store(true, Ordering::SeqCst);
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1483,7 +1491,11 @@ pub async fn get_runtime_diagnostics(
     };
 
     let llama_server_help_ok = if let Some(path) = &llama_server_path {
-        match StdCommand::new(path).arg("--help").output() {
+        match {
+            let mut cmd = StdCommand::new(path);
+            crate::process_util::no_window_std(&mut cmd);
+            cmd.arg("--help").output()
+        } {
             Ok(output) => output.status.success(),
             Err(_) => false,
         }
@@ -1579,7 +1591,9 @@ pub async fn kill_llama_servers(state: State<'_, AppState>) -> AppResult<()> {
     let _ = state.local_backend.unload_model().await;
     #[cfg(target_os = "windows")]
     {
-        let _ = StdCommand::new("taskkill").args(["/IM", "llama-server.exe", "/F"]).output();
+        let mut cmd = StdCommand::new("taskkill");
+        crate::process_util::no_window_std(&mut cmd);
+        let _ = cmd.args(["/IM", "llama-server.exe", "/F"]).output();
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -2774,8 +2788,9 @@ fn resolve_soc_pdf_ocr_script() -> Option<PathBuf> {
 
 fn resolve_python_executable() -> Option<PathBuf> {
     for candidate in ["python", "python3", "py"] {
-        if StdCommand::new(candidate)
-            .arg("--version")
+        let mut cmd = StdCommand::new(candidate);
+        crate::process_util::no_window_std(&mut cmd);
+        if cmd.arg("--version")
             .output()
             .map(|output| output.status.success())
             .unwrap_or(false)
@@ -2854,6 +2869,7 @@ pub async fn ocr_soc_pdf(
     })?;
 
     let mut command = StdCommand::new(&python);
+    crate::process_util::no_window_std(&mut command);
     command.arg(&script).arg(&clean_pdf).arg("--output").arg(&output);
     if let Some(pages) = max_pages {
         command.arg("--max-pages").arg(pages.to_string());
@@ -2969,7 +2985,9 @@ fn gpu_check(id: &str, label: &str, status: &str, message: &str, detail: Option<
 }
 
 fn run_command_for_gpu_probe(command: &str, args: &[&str], timeout_label: &str) -> (bool, Option<String>) {
-    match StdCommand::new(command).args(args).output() {
+    let mut cmd = StdCommand::new(command);
+    crate::process_util::no_window_std(&mut cmd);
+    match cmd.args(args).output() {
         Ok(output) => {
             let mut text = String::new();
             text.push_str(&String::from_utf8_lossy(&output.stdout));
@@ -3173,7 +3191,11 @@ pub async fn get_gpu_runtime_report(
 
     let mut help_text = String::new();
     if let Some(path) = &runtime_path {
-        match StdCommand::new(path).arg("--help").output() {
+        match {
+            let mut cmd = StdCommand::new(path);
+            crate::process_util::no_window_std(&mut cmd);
+            cmd.arg("--help").output()
+        } {
             Ok(output) => {
                 help_text.push_str(&String::from_utf8_lossy(&output.stdout));
                 help_text.push_str(&String::from_utf8_lossy(&output.stderr));

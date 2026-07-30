@@ -1,7 +1,10 @@
+import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { Activity, Bot, CheckCircle, Code2, Cpu, Download, FileText, HardDrive, MessageSquare, ShieldCheck } from 'lucide-react';
 import { useAppStore } from '../store';
-import { Conversation, Message } from '../types';
+import { Conversation, LocalModelRecord, Message, SystemInfo } from '../types';
+import RefreshButton from './RefreshButton';
+import { filterChatSelectableLocalModels } from '../localModels';
 
 function fmtBytes(bytes?: number | null) {
   if (!bytes || bytes <= 0) return 'Unknown';
@@ -23,6 +26,26 @@ export default function HomeDashboard() {
   const setMessages = useAppStore(s => s.setMessages);
   const setConversations = useAppStore(s => s.setConversations);
   const setActiveView = useAppStore(s => s.setActiveView);
+  const setSystemInfo = useAppStore(s => s.setSystemInfo);
+  const setLocalModels = useAppStore(s => s.setLocalModels);
+  const setCharacters = useAppStore(s => s.setCharacters);
+  const [refreshBusy, setRefreshBusy] = useState(false);
+
+  const refreshDashboard = async () => {
+    setRefreshBusy(true);
+    try {
+      const [nextInfo, models, chars] = await Promise.all([
+        invoke<SystemInfo>('get_system_info'),
+        invoke<LocalModelRecord[]>('get_local_models'),
+        invoke<typeof characters>('get_characters'),
+      ]);
+      setSystemInfo(nextInfo);
+      setLocalModels(filterChatSelectableLocalModels(models));
+      setCharacters(chars);
+    } finally {
+      setRefreshBusy(false);
+    }
+  };
 
   const selectedModel = currentModel?.split(/[\\/]/).pop() || 'No model selected';
   const selectedCharacter = characters.find(c => c.id === activeCharacterId)?.name || 'Default assistant';
@@ -54,7 +77,7 @@ export default function HomeDashboard() {
       <div className="max-w-7xl mx-auto space-y-5">
         <section className="premium-card p-6 sm:p-7">
           <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-            <div className="space-y-3">
+            <div className="space-y-3 flex-1 min-w-0">
               <h1 className="app-brand-name text-3xl sm:text-4xl font-black tracking-tight text-primary-400 dark:text-primary-300">PocketMind Hybrid AI Desktop</h1>
               <p className="max-w-xl text-surface-600 dark:text-surface-300">
                 Local AI for security analysts and developers: Fortinet Copilot, Knowledge Chat, PocketCode agent workspace, and on-device models.
@@ -66,12 +89,20 @@ export default function HomeDashboard() {
               </div>
               {!currentModel && <p className="text-sm text-amber-500">Select a model before chatting.</p>}
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 min-w-[min(320px,100%)]">
+            <div className="flex flex-col gap-3 min-w-[min(320px,100%)]">
+              <RefreshButton
+                title="Refresh"
+                onClick={refreshDashboard}
+                busy={refreshBusy}
+                className="self-end lg:self-start"
+              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Stat label="Active model" value={selectedModel} icon={HardDrive} />
               <Stat label="Local models" value={`${localModels.length}`} icon={Download} />
               <Stat label="Character" value={selectedCharacter} icon={Bot} />
               <Stat label="Memory free" value={fmtBytes(info?.memory.available_bytes)} icon={Activity} />
-              <Stat label="CPU cores" value={info ? String(info.cpu.cores_logical) : 'Unknown'} icon={Cpu} />
+              <Stat label="CPU" value={info ? `${info.cpu.cores_physical} cores / ${info.cpu.cores_logical} threads` : 'Unknown'} icon={Cpu} />
+              </div>
             </div>
           </div>
         </section>
