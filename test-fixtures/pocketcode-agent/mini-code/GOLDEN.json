@@ -1,0 +1,12 @@
+{
+  "collection": "mini-code-golden",
+  "tasks": [
+    {
+      "id": "add-edit",
+      "prompt": "In src/math.ts, change add so it returns a + b + 1. Keep greet unchanged.",
+      "must_find": ["export function add", "a + b"],
+      "max_steps": 8,
+      "max_duplicate_reads": 1
+    }
+  ]
+}

@@ -31,6 +31,7 @@ import { getSetting } from '../../api/powerFeatures';
 import { loadEnabledSkillsMarkdown } from '../../codeWorkspace/skills';
 import { formatMcpToolsCatalog, getEnabledMcpServerIds, mcpListTools } from '../../codeWorkspace/mcp';
 import { formatInvokeError, runCodeWorkspaceAgent, runSandboxConfirmed, type AgentImagePayload } from './agentLoop';
+import type { ToolRunMetrics } from '../../codeWorkspace/toolFingerprint';
 
 export type EditDecision = 'accepted' | 'rejected';
 
@@ -54,6 +55,8 @@ export interface AgentSessionSnapshot {
   lastPlan: PocketCodePlan | null;
   followupQuestion: string | null;
   lastError: string | null;
+  /** Per-run fingerprint metrics from the last completed agent turn. */
+  lastToolMetrics: ToolRunMetrics | null;
 }
 
 class AgentSession {
@@ -83,6 +86,7 @@ class AgentSession {
   private lastPlan: PocketCodePlan | null = null;
   private followupQuestion: string | null = null;
   private lastError: string | null = null;
+  private lastToolMetrics: ToolRunMetrics | null = null;
   /** Stable reference for useSyncExternalStore — must not allocate on every getSnapshot(). */
   private snapshot: AgentSessionSnapshot = {
     running: false,
@@ -102,6 +106,7 @@ class AgentSession {
     lastPlan: null,
     followupQuestion: null,
     lastError: null,
+    lastToolMetrics: null,
   };
 
   subscribe(fn: Listener): () => void {
@@ -134,6 +139,7 @@ class AgentSession {
       lastPlan: this.lastPlan,
       followupQuestion: this.followupQuestion,
       lastError: this.lastError,
+      lastToolMetrics: this.lastToolMetrics,
     };
   }
 
@@ -160,6 +166,7 @@ class AgentSession {
     if (patch.lastPlan !== undefined) this.lastPlan = patch.lastPlan;
     if (patch.followupQuestion !== undefined) this.followupQuestion = patch.followupQuestion;
     if (patch.lastError !== undefined) this.lastError = patch.lastError;
+    if (patch.lastToolMetrics !== undefined) this.lastToolMetrics = patch.lastToolMetrics;
     this.emit();
   }
 
@@ -461,7 +468,7 @@ class AgentSession {
     const mcpCatalog = mcpBundle.catalog;
 
     try {
-      const { summary, steps } = await runCodeWorkspaceAgent({
+      const { summary, steps, toolMetrics } = await runCodeWorkspaceAgent({
         workspaceRoot: input.workspaceRoot,
         task: input.task,
         modelPath: input.modelPath,
@@ -523,10 +530,14 @@ class AgentSession {
         },
       });
       if (!this.abort?.signal.aborted) {
+        if (toolMetrics) {
+          console.info('[pocketcode]', `run metrics: calls=${toolMetrics.calls} duplicates=${toolMetrics.duplicates} refused=${toolMetrics.refused}`);
+        }
         this.setPartial({
           status: summary,
           waitingFor: 'idle',
           lastSummary: summary,
+          lastToolMetrics: toolMetrics || null,
         });
         if (input.onAfterDone) {
           await input.onAfterDone(summary, steps, runId);

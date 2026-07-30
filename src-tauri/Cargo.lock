@@ -2652,6 +2652,7 @@ dependencies = [
  "pocketcode-workspace",
  "rand 0.8.6",
  "rayon",
+ "regex",
  "reqwest",
  "rusqlite",
  "serde",

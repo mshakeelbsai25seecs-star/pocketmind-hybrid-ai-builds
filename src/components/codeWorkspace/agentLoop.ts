@@ -88,9 +88,9 @@ async function runMcpWithPermission(
 }
 
 /** Soft ceiling to stop retry storms / runaway tool loops without blocking normal edits. */
-const MAX_STEPS = 20;
+const MAX_STEPS = 28;
 /** How many turns before the ceiling the model is told to wrap up. */
-const WRAP_UP_LEAD = 3;
+const WRAP_UP_LEAD = 4;
 /** Grep / maps may be larger; reads stay tight. */
 const TOOL_RESULT_MAX_DEFAULT = 48_000;
 const TOOL_RESULT_MAX_READ = 32_000;

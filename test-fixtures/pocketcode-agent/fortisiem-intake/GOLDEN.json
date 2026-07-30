@@ -1,0 +1,16 @@
+{
+  "collection": "fortisiem-golden",
+  "tasks": [
+    {
+      "id": "logon-time-qa",
+      "prompt": "What is the logon time outside business hours rule? Include rule id, event type, and severity.",
+      "must_find": [
+        "PH_RULE_Logon_Time_Outside_Business",
+        "Win-Security-4624",
+        "severity"
+      ],
+      "max_steps": 6,
+      "max_duplicate_reads": 1
+    }
+  ]
+}

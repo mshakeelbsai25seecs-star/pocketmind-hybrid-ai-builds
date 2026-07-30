@@ -4,7 +4,7 @@ import type { ToolProtocol } from './toolSchemas';
 const SHARED_FORMAT_JSON = `CRITICAL OUTPUT FORMAT:
 - Every assistant reply MUST be exactly one JSON object and nothing else.
 - No markdown fences, no prose before/after the JSON, no explanations outside JSON.
-- Call exactly one tool per turn.`;
+- Call exactly one tool per turn (JSON protocol cannot batch). Plan a short sequence: brief → codebase_search/grep → read_file → done — never thrash.`;
 
 const SHARED_FORMAT_NATIVE = `TOOL USE:
 - Use the provided function tools via the API (native tool calling).
@@ -50,7 +50,7 @@ const FINISH_POLICY = `FINISHING — the summary you pass to done IS what the us
 - No tool JSON, no raw file dumps, and no "I grepped then read the file" narration in the summary.
 - If evidence is incomplete, say what you found and exactly what is missing — then finish anyway.
 - Fenced code blocks only for real code/config; inline backticks for single identifiers.
-- Your tool budget is about 20 turns. Duplicate calls burn it for nothing.`;
+- Your tool budget is about 28 turns. Duplicate calls burn it for nothing.`;
 
 const EFFICIENCY_RULES = `EDIT EFFICIENCY:
 - Prefer one turn: locate → read_file → apply_edit (batching tools in one turn is good).

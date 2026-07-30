@@ -6,10 +6,12 @@ use crate::error::{AppError, AppResult};
 use pocketcode_workspace::WorkspaceSidecar;
 use crate::knowledge_chat::code_languages::is_code_extension;
 use crate::knowledge_chat::code_parser::parse_code_file;
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
@@ -32,6 +34,9 @@ const SKIP_DIRS: &[&str] = &[
     ".venv",
     "venv",
 ];
+
+/// Docs/config/data files indexed as text anchors (headings, XML ids, JSON keys).
+const TEXT_DOC_EXTS: &[&str] = &["xml", "md", "markdown", "json", "yml", "yaml", "txt", "csv", "toml"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IndexedSymbol {
@@ -117,9 +122,117 @@ fn should_skip_dir(name: &str) -> bool {
     SKIP_DIRS.iter().any(|s| *s == name)
 }
 
+fn is_indexable_extension(ext: &str) -> bool {
+    is_code_extension(ext) || TEXT_DOC_EXTS.iter().any(|e| *e == ext)
+}
+
+fn line_of(source: &str, byte_offset: usize) -> i32 {
+    (source[..byte_offset.min(source.len())]
+        .bytes()
+        .filter(|b| *b == b'\n')
+        .count()
+        + 1) as i32
+}
+
+fn parse_text_doc_symbols(source: &str, ext: &str, rel: &str) -> Vec<IndexedSymbol> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let mut push = |name: String, kind: &str, line_start: i32| {
+        if name.is_empty() || name.len() > 120 || !seen.insert(name.clone()) {
+            return;
+        }
+        out.push(IndexedSymbol {
+            path: rel.to_string(),
+            name: name.clone(),
+            kind: kind.to_string(),
+            line_start,
+            line_end: line_start + 4,
+            signature: format!("{kind} {name}"),
+        });
+    };
+
+    match ext {
+        "md" | "markdown" => {
+            static RE: OnceLock<Regex> = OnceLock::new();
+            let re = RE.get_or_init(|| Regex::new(r"(?m)^(#{1,6})\s+(.+?)\s*$").unwrap());
+            for caps in re.captures_iter(source) {
+                let name = caps.get(2).map(|m| m.as_str().trim()).unwrap_or("").to_string();
+                let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
+                push(name, "heading", line_of(source, start));
+                if out.len() >= 64 {
+                    break;
+                }
+            }
+        }
+        "xml" => {
+            static RE_ID: OnceLock<Regex> = OnceLock::new();
+            static RE_NAME: OnceLock<Regex> = OnceLock::new();
+            let re_id = RE_ID.get_or_init(|| {
+                Regex::new(r#"(?i)<([A-Za-z_][\w:-]*)\b[^>]*\bid\s*=\s*["']([^"']+)["']"#).unwrap()
+            });
+            let re_name =
+                RE_NAME.get_or_init(|| Regex::new(r"(?i)<name>\s*([^<]{2,80})\s*</name>").unwrap());
+            for caps in re_id.captures_iter(source) {
+                let tag = caps.get(1).map(|m| m.as_str()).unwrap_or("tag");
+                let id = caps.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
+                let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
+                push(id, &format!("xml-{tag}"), line_of(source, start));
+                if out.len() >= 64 {
+                    break;
+                }
+            }
+            for caps in re_name.captures_iter(source) {
+                let name = caps.get(1).map(|m| m.as_str().trim()).unwrap_or("").to_string();
+                let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
+                push(name, "xml-name", line_of(source, start));
+                if out.len() >= 64 {
+                    break;
+                }
+            }
+        }
+        "json" => {
+            static RE: OnceLock<Regex> = OnceLock::new();
+            let re =
+                RE.get_or_init(|| Regex::new(r#"(?m)^\s{0,4}"([A-Za-z_][\w.-]{1,60})"\s*:"#).unwrap());
+            for caps in re.captures_iter(source) {
+                let name = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
+                let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
+                push(name, "json-key", line_of(source, start));
+                if out.len() >= 64 {
+                    break;
+                }
+            }
+        }
+        "yml" | "yaml" | "toml" => {
+            static RE: OnceLock<Regex> = OnceLock::new();
+            let re =
+                RE.get_or_init(|| Regex::new(r"(?m)^\s{0,4}([A-Za-z_][\w.-]{1,60})\s*:").unwrap());
+            for caps in re.captures_iter(source) {
+                let name = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
+                let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
+                push(name, "config-key", line_of(source, start));
+                if out.len() >= 64 {
+                    break;
+                }
+            }
+        }
+        "txt" | "csv" => {
+            for (i, line) in source.lines().enumerate() {
+                let t = line.trim();
+                if t.len() >= 4 && t.len() <= 100 {
+                    push(t.to_string(), "doc-line", (i + 1) as i32);
+                    break;
+                }
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
 fn parse_file_symbols(abs: &Path, rel: &str) -> Vec<IndexedSymbol> {
     let ext = extension_of(abs);
-    if !is_code_extension(&ext) {
+    if !is_indexable_extension(&ext) {
         return Vec::new();
     }
     let meta = match fs::metadata(abs) {
@@ -133,6 +246,9 @@ fn parse_file_symbols(abs: &Path, rel: &str) -> Vec<IndexedSymbol> {
         Ok(s) => s,
         Err(_) => return Vec::new(),
     };
+    if !is_code_extension(&ext) {
+        return parse_text_doc_symbols(&source, &ext, rel);
+    }
     let name = abs
         .file_name()
         .and_then(|n| n.to_str())
@@ -190,7 +306,7 @@ pub fn ensure_index(workspace_root: &Path) -> AppResult<(usize, usize)> {
         }
         let abs = entry.path();
         let ext = extension_of(abs);
-        if !is_code_extension(&ext) {
+        if !is_indexable_extension(&ext) {
             continue;
         }
         file_count += 1;

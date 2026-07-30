@@ -18,6 +18,7 @@ import {
   toggleSkillEnabled,
   type SkillInfo,
 } from '../../codeWorkspace/skills';
+import { ALWAYS_ON_SKILL_IDS } from '../../codeWorkspace/builtinSkills';
 import {
   getEnabledMcpServerIds,
   mcpListServers,
@@ -165,7 +166,8 @@ export default function ComposerModelBar({
               <p className="px-3 py-1.5 text-[11px] text-surface-400">No skills found.</p>
             )}
             {skills.map(s => {
-              const on = enabledSkills.includes(s.id);
+              const alwaysOn = ALWAYS_ON_SKILL_IDS.includes(s.id as typeof ALWAYS_ON_SKILL_IDS[number]);
+              const on = alwaysOn || enabledSkills.includes(s.id);
               return (
                 <label
                   key={s.id}
@@ -176,12 +178,16 @@ export default function ComposerModelBar({
                     type="checkbox"
                     className="mt-0.5"
                     checked={on}
+                    disabled={alwaysOn}
                     onChange={() => {
+                      if (alwaysOn) return;
                       void toggleSkillEnabled(s.id, !on).then(setEnabledSkills);
                     }}
                   />
                   <span className="min-w-0">
-                    <span className="font-medium block truncate">{s.name}</span>
+                    <span className="font-medium block truncate">
+                      {s.name}{alwaysOn ? ' · always on' : ''}
+                    </span>
                     <span className="text-[10px] text-surface-400">{s.source}</span>
                   </span>
                 </label>
