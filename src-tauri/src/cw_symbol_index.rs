@@ -134,22 +134,31 @@ fn line_of(source: &str, byte_offset: usize) -> i32 {
         + 1) as i32
 }
 
+fn push_text_symbol(
+    out: &mut Vec<IndexedSymbol>,
+    seen: &mut std::collections::HashSet<String>,
+    rel: &str,
+    name: String,
+    kind: &str,
+    line_start: i32,
+) -> bool {
+    if name.is_empty() || name.len() > 120 || !seen.insert(name.clone()) {
+        return out.len() >= 64;
+    }
+    out.push(IndexedSymbol {
+        path: rel.to_string(),
+        name: name.clone(),
+        kind: kind.to_string(),
+        line_start,
+        line_end: line_start + 4,
+        signature: format!("{kind} {name}"),
+    });
+    out.len() >= 64
+}
+
 fn parse_text_doc_symbols(source: &str, ext: &str, rel: &str) -> Vec<IndexedSymbol> {
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
-    let mut push = |name: String, kind: &str, line_start: i32| {
-        if name.is_empty() || name.len() > 120 || !seen.insert(name.clone()) {
-            return;
-        }
-        out.push(IndexedSymbol {
-            path: rel.to_string(),
-            name: name.clone(),
-            kind: kind.to_string(),
-            line_start,
-            line_end: line_start + 4,
-            signature: format!("{kind} {name}"),
-        });
-    };
 
     match ext {
         "md" | "markdown" => {
@@ -158,8 +167,14 @@ fn parse_text_doc_symbols(source: &str, ext: &str, rel: &str) -> Vec<IndexedSymb
             for caps in re.captures_iter(source) {
                 let name = caps.get(2).map(|m| m.as_str().trim()).unwrap_or("").to_string();
                 let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
-                push(name, "heading", line_of(source, start));
-                if out.len() >= 64 {
+                if push_text_symbol(
+                    &mut out,
+                    &mut seen,
+                    rel,
+                    name,
+                    "heading",
+                    line_of(source, start),
+                ) {
                     break;
                 }
             }
@@ -176,16 +191,22 @@ fn parse_text_doc_symbols(source: &str, ext: &str, rel: &str) -> Vec<IndexedSymb
                 let tag = caps.get(1).map(|m| m.as_str()).unwrap_or("tag");
                 let id = caps.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
                 let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
-                push(id, &format!("xml-{tag}"), line_of(source, start));
-                if out.len() >= 64 {
+                let kind = format!("xml-{tag}");
+                if push_text_symbol(&mut out, &mut seen, rel, id, &kind, line_of(source, start)) {
                     break;
                 }
             }
             for caps in re_name.captures_iter(source) {
                 let name = caps.get(1).map(|m| m.as_str().trim()).unwrap_or("").to_string();
                 let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
-                push(name, "xml-name", line_of(source, start));
-                if out.len() >= 64 {
+                if push_text_symbol(
+                    &mut out,
+                    &mut seen,
+                    rel,
+                    name,
+                    "xml-name",
+                    line_of(source, start),
+                ) {
                     break;
                 }
             }
@@ -197,8 +218,14 @@ fn parse_text_doc_symbols(source: &str, ext: &str, rel: &str) -> Vec<IndexedSymb
             for caps in re.captures_iter(source) {
                 let name = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
                 let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
-                push(name, "json-key", line_of(source, start));
-                if out.len() >= 64 {
+                if push_text_symbol(
+                    &mut out,
+                    &mut seen,
+                    rel,
+                    name,
+                    "json-key",
+                    line_of(source, start),
+                ) {
                     break;
                 }
             }
@@ -210,8 +237,14 @@ fn parse_text_doc_symbols(source: &str, ext: &str, rel: &str) -> Vec<IndexedSymb
             for caps in re.captures_iter(source) {
                 let name = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
                 let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
-                push(name, "config-key", line_of(source, start));
-                if out.len() >= 64 {
+                if push_text_symbol(
+                    &mut out,
+                    &mut seen,
+                    rel,
+                    name,
+                    "config-key",
+                    line_of(source, start),
+                ) {
                     break;
                 }
             }
@@ -220,7 +253,14 @@ fn parse_text_doc_symbols(source: &str, ext: &str, rel: &str) -> Vec<IndexedSymb
             for (i, line) in source.lines().enumerate() {
                 let t = line.trim();
                 if t.len() >= 4 && t.len() <= 100 {
-                    push(t.to_string(), "doc-line", (i + 1) as i32);
+                    let _ = push_text_symbol(
+                        &mut out,
+                        &mut seen,
+                        rel,
+                        t.to_string(),
+                        "doc-line",
+                        (i + 1) as i32,
+                    );
                     break;
                 }
             }
