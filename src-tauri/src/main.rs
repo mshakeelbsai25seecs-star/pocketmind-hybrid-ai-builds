@@ -24,6 +24,7 @@ mod cw_terminal;
 mod cw_plans;
 mod cw_ocr;
 mod cw_pdf_pages;
+mod cw_pdf_prepare;
 mod cw_skills;
 mod mcp_host;
 mod llama_server_host;
@@ -220,6 +221,8 @@ fn main() {
             power_commands::cw_plan_update_markdown,
             power_commands::cw_plan_update_status,
             power_commands::cw_ocr_image,
+            power_commands::cw_prepare_pdfs,
+            power_commands::cw_prepare_pdf,
             power_commands::cw_image_base64,
             power_commands::cw_save_temp_image,
             power_commands::cw_pdf_page_images,

@@ -30,7 +30,8 @@ const SEARCH_POLICY = `SEARCH POLICY — always pick the cheapest tool that can 
 4. You know WHAT you want but not WHERE it is → one codebase_search with the user's own wording; it returns ranked files with line numbers. Then read_file those windows.
 5. You know the exact literal (error string, key, tag name) → one grep from the workspace root, with a glob to narrow file types.
 6. list_dir / glob_file_search only when you still do not know what exists.
-7. Data/doc workspaces (xml, md, json, csv, txt) have few or no code symbols — use codebase_search / grep + read_file instead of repo_map/find_symbol.`;
+7. Data/doc workspaces (xml, md, json, csv, txt, pdf) have few or no code symbols — use codebase_search / grep + read_file instead of repo_map/find_symbol.
+8. PDFs: embedded text or Unlimited-OCR is prepared into app sidecars when you open the folder. Call read_file on a .pdf path (paginated) or grep/codebase_search — do not treat PDFs as opaque binaries.`;
 
 const NO_REPEAT_POLICY = `NO REPEATED WORK — hard rules, not suggestions:
 - Every tool result you already received is still in this conversation. Calling a tool again with the same arguments returns identical bytes, wastes your budget, and is flagged as a duplicate.
@@ -41,7 +42,8 @@ const NO_REPEAT_POLICY = `NO REPEATED WORK — hard rules, not suggestions:
 
 const CONTEXT_RULES = `CONTEXT RULES:
 - NEVER dump a whole large file. Default read_file window is 120 lines; max useful limit is 400. Page with offset.
-- Never read_file images/binaries; screenshot OCR/attachment text is already in the user message when provided.
+- Never read_file images or non-PDF binaries; screenshot OCR/attachment text is already in the user message when provided.
+- PDFs are readable: read_file returns OCR/extracted text (Unlimited-OCR preferred). Page with offset.
 - Never invent file paths, symbol names, or code you did not receive in a tool result.`;
 
 const FINISH_POLICY = `FINISHING — the summary you pass to done IS what the user reads:

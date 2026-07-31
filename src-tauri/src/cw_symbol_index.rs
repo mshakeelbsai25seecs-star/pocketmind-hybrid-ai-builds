@@ -311,7 +311,8 @@ fn inventory_map_text(root: &Path) -> String {
     let mut sections = vec![format!(
         "# Repo map (no code symbols)\n\nRoot: `{}`\nFiles: {} | File types: {}\n\n\
          This workspace has no parseable source symbols, so there is nothing for find_symbol/read_symbol to return.\n\
-         Use one grep from the root (add a glob to narrow file types), then read_file a small window around the hits.\n",
+         Use one grep / codebase_search from the root (add a glob to narrow file types), then read_file a small window around the hits.\n\
+         PDFs: PocketCode extracts/OCR (Unlimited-OCR preferred) into app sidecars — call read_file on a `.pdf` path or run prepare after opening the folder.\n",
         root.to_string_lossy(),
         total,
         if ext_line.is_empty() { "(none)".to_string() } else { ext_line }

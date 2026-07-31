@@ -294,6 +294,20 @@ export async function cwOcrImage(path: string): Promise<import('./codeWorkspaceT
   return invoke('cw_ocr_image', { path });
 }
 
+/** Extract/OCR all PDFs in a PocketCode workspace into app-data sidecars (Unlimited-OCR preferred). */
+export async function cwPreparePdfs(
+  workspaceRoot: string,
+): Promise<import('./codeWorkspaceTypes').CwPdfPrepareReport> {
+  return invoke('cw_prepare_pdfs', { workspaceRoot });
+}
+
+export async function cwPreparePdf(
+  workspaceRoot: string,
+  path: string,
+): Promise<import('./codeWorkspaceTypes').CwPdfPrepareItem> {
+  return invoke('cw_prepare_pdf', { workspaceRoot, path });
+}
+
 export async function cwImageBase64(path: string): Promise<[string, string]> {
   return invoke<[string, string]>('cw_image_base64', { path });
 }

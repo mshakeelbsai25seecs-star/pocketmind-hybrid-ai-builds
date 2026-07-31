@@ -94,6 +94,11 @@ impl WorkspaceSidecar {
         self.base.join("skills")
     }
 
+    /// OCR / extracted PDF text sidecars (never written into the user's project).
+    pub fn ocr_dir(&self) -> PathBuf {
+        self.base.join("ocr")
+    }
+
     pub fn rules_file(&self) -> PathBuf {
         self.base.join("rules.md")
     }

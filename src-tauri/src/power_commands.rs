@@ -620,6 +620,32 @@ pub async fn cw_ocr_image(path: String) -> AppResult<cw_ocr::OcrResult> {
     cw_ocr::ocr_image(&path).await
 }
 
+/// OCR/extract all PDFs under a PocketCode workspace into app-data sidecars (Unlimited-OCR preferred).
+#[tauri::command]
+pub async fn cw_prepare_pdfs(workspace_root: String) -> AppResult<crate::cw_pdf_prepare::PdfPrepareReport> {
+    let root = workspace_root.trim().to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::cw_pdf_prepare::prepare_workspace_pdfs(Path::new(&root))
+    })
+    .await
+    .map_err(|e| AppError::Unknown(format!("PDF prepare task failed: {e}")))?
+}
+
+/// Ensure one PDF is OCR/extracted and return a short status for the agent/UI.
+#[tauri::command]
+pub async fn cw_prepare_pdf(
+    workspace_root: String,
+    path: String,
+) -> AppResult<crate::cw_pdf_prepare::PdfPrepareItem> {
+    let root = workspace_root.trim().to_string();
+    let path = path.trim().to_string();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::cw_pdf_prepare::ensure_pdf_text(Path::new(&root), &path).map(|(_, item)| item)
+    })
+    .await
+    .map_err(|e| AppError::Unknown(format!("PDF prepare task failed: {e}")))?
+}
+
 #[tauri::command]
 pub async fn cw_image_base64(path: String) -> AppResult<(String, String)> {
     cw_ocr::image_to_base64(&path)

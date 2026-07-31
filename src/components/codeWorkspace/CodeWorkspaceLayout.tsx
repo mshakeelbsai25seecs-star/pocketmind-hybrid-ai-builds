@@ -17,6 +17,7 @@ import {
   cwPlanUpdateMarkdown,
   cwPlanUpdateStatus,
   cwImageBase64,
+  cwPreparePdfs,
   cwReadFile,
   cwRestoreCheckpoint,
   cwSaveTempImage,
@@ -584,6 +585,17 @@ export default function CodeWorkspaceLayout() {
     agentSession.setLastPlan(null);
   }, [pocketcodeNewSessionNonce]);
 
+  const prepareWorkspacePdfs = useCallback(async (root: string) => {
+    if (!root || thinClient || remoteWorkspace) return;
+    setLocalStatus('Preparing PDFs (extract / Unlimited-OCR)…');
+    try {
+      const report = await cwPreparePdfs(root);
+      setLocalStatus(report.summary);
+    } catch (err) {
+      setLocalStatus(`PDF prepare skipped: ${formatInvokeError(err)}`);
+    }
+  }, [thinClient, remoteWorkspace]);
+
   const pickFolder = async () => {
     if (thinClient || remoteWorkspace) {
       setLocalStatus(
@@ -601,6 +613,8 @@ export default function CodeWorkspaceLayout() {
     setOpenFilePath(null);
     setEditorContent('');
     await refreshTree(selected);
+    // Background OCR/extract so agents can read_file/grep PDFs without a full Knowledge Chat index.
+    void prepareWorkspacePdfs(selected);
   };
 
   const openFile = async (path: string) => {

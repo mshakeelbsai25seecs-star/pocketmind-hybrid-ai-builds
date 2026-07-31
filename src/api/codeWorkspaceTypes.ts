@@ -37,3 +37,22 @@ export interface CwPdfPageImage {
   mime: string;
   base64: string;
 }
+
+export interface CwPdfPrepareItem {
+  path: string;
+  status: string;
+  engine: string;
+  chars: number;
+  message: string;
+}
+
+export interface CwPdfPrepareReport {
+  workspace_root: string;
+  pdf_count: number;
+  ready: number;
+  ocr_used: number;
+  failed: number;
+  skipped: number;
+  items: CwPdfPrepareItem[];
+  summary: string;
+}

@@ -493,6 +493,51 @@ pub async fn grep(
     };
 
     let mut stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    // Also search OCR/extract PDF sidecars when grepping the workspace root.
+    let searching_root = path.map(|p| p.trim().is_empty()).unwrap_or(true)
+        || path.map(|p| p.trim() == "." || p.trim() == "./").unwrap_or(false);
+    if searching_root {
+        if let Some(ocr_dir) = crate::cw_pdf_prepare::ocr_corpus_dir(&root_canon) {
+            let mut ocr_cmd = Command::new(&rg);
+            ocr_cmd
+                .arg("--line-number")
+                .arg("--with-filename")
+                .arg("--color")
+                .arg("never")
+                .arg("--no-heading")
+                .arg("--max-columns")
+                .arg("500")
+                .arg("--max-columns-preview")
+                .arg("--glob")
+                .arg("*.md");
+            if case_insensitive {
+                ocr_cmd.arg("-i");
+            }
+            ocr_cmd.arg("--").arg(pattern).arg(&ocr_dir);
+            ocr_cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+            ocr_cmd.kill_on_drop(true);
+            if let Ok(mut child) = ocr_cmd.spawn() {
+                if let Ok(Ok(ocr_out)) = tokio::time::timeout(
+                    Duration::from_secs(GREP_TIMEOUT_SECS),
+                    child.wait_with_output(),
+                )
+                .await
+                {
+                    if ocr_out.status.success() || ocr_out.status.code() == Some(1) {
+                        let ocr_stdout = String::from_utf8_lossy(&ocr_out.stdout);
+                        for line in ocr_stdout.lines() {
+                            // Rewrite sidecar filename → original PDF relative path when possible.
+                            let rewritten = rewrite_ocr_grep_line(&root_canon, line);
+                            stdout.push_str(&rewritten);
+                            stdout.push('\n');
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     if stdout.len() > GREP_MAX_OUTPUT_BYTES {
         stdout.truncate(GREP_MAX_OUTPUT_BYTES);
         stdout.push_str("\n…[truncated at 200KB]");
@@ -508,6 +553,33 @@ pub async fn grep(
         "ripgrep error (exit {:?}): {stderr}",
         output.status.code()
     )))
+}
+
+fn path_is_pdf(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("pdf"))
+        .unwrap_or(false)
+}
+
+/// Rewrite an OCR-corpus ripgrep hit so the agent sees the original PDF path.
+fn rewrite_ocr_grep_line(workspace_root: &Path, line: &str) -> String {
+    // Prefer matching `*.md:` near the start after an optional Windows drive.
+    let md_idx = line.find(".md:");
+    let Some(idx) = md_idx else {
+        return line.to_string();
+    };
+    let file_part = &line[..=idx + 2]; // include .md
+    let rest = &line[idx + 3..]; // after .md
+    let name = Path::new(file_part)
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("");
+    if let Some(pdf_rel) = crate::cw_pdf_prepare::pdf_rel_for_sidecar_name(workspace_root, name) {
+        format!("{pdf_rel}{rest}")
+    } else {
+        line.to_string()
+    }
 }
 
 fn path_has_binary_extension(path: &Path) -> bool {
@@ -560,6 +632,61 @@ fn escape_for_error(s: &str) -> String {
     out
 }
 
+fn read_text_window_from_string(
+    body: &str,
+    display: &str,
+    offset: usize,
+    limit: usize,
+    line_cap: Option<usize>,
+) -> AppResult<String> {
+    let hard_cap = line_cap
+        .unwrap_or(READ_MAX_LINES)
+        .clamp(READ_DEFAULT_LINES, READ_UI_MAX_LINES);
+    let want = if limit == 0 {
+        READ_DEFAULT_LINES.min(hard_cap)
+    } else {
+        limit.min(hard_cap)
+    };
+    let start = offset;
+    let lines: Vec<&str> = normalize_newlines(body).lines().collect();
+    let slice = if start >= lines.len() {
+        &[][..]
+    } else {
+        let end = (start + want).min(lines.len());
+        &lines[start..end]
+    };
+    let end_excl = start + slice.len();
+    let end_inclusive = if slice.is_empty() {
+        start
+    } else {
+        end_excl.saturating_sub(1)
+    };
+    let mut total_bytes = 0usize;
+    let mut collected = Vec::new();
+    let mut truncated_bytes = false;
+    for line in slice {
+        let add = line.len() + 1;
+        if total_bytes + add > READ_MAX_BYTES {
+            truncated_bytes = true;
+            break;
+        }
+        total_bytes += add;
+        collected.push(*line);
+    }
+    let header = format!(
+        "// PocketCode PDF text: `{display}` lines {start}-{end_inclusive} (offset={start}, window={want})\n",
+    );
+    let mut out = format!("{header}{}", collected.join("\n"));
+    if truncated_bytes {
+        out.push_str("\n…[truncated at byte cap — use a smaller window or offset]");
+    } else if end_excl < lines.len() {
+        out.push_str(&format!(
+            "\n…[more lines after {end_inclusive} — call read_file with offset={end_excl}]"
+        ));
+    }
+    Ok(out)
+}
+
 /// Read file with line `offset` (0-based) and `limit` lines.
 /// `limit == 0` means default window ([`READ_DEFAULT_LINES`]), never the whole file.
 /// Hard-capped at `line_cap` (default [`READ_MAX_LINES`]) and [`READ_MAX_BYTES`] bytes.
@@ -578,6 +705,13 @@ pub fn read_file(
         )));
     }
     let display = to_rel_display(workspace_root, &file);
+
+    // PDFs: serve OCR/extract sidecar text (Unlimited-OCR preferred) instead of rejecting as binary.
+    if path_is_pdf(&file) {
+        let (body, _item) = crate::cw_pdf_prepare::ensure_pdf_text(workspace_root, &display)?;
+        return read_text_window_from_string(&body, &display, offset, limit, line_cap);
+    }
+
     reject_if_binary_file(&file, &display)?;
 
     let hard_cap = line_cap
