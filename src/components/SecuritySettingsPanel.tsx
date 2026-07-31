@@ -443,7 +443,7 @@ function OcrImageRagSettingsBlock() {
           onChange={e => setCfg({ ...cfg, ocr_engine: e.target.value })}
         >
           <option value="auto">Automatic (Unlimited → Docling → Legacy)</option>
-          <option value="unlimited">Unlimited-OCR (CUDA GPU, high accuracy)</option>
+          <option value="unlimited">Unlimited-OCR (CUDA preferred; CPU supported, slower)</option>
           <option value="legacy">Built-in reader</option>
           <option value="docling">Layout-aware reader (if installed)</option>
         </select>

@@ -110,7 +110,7 @@ pub async fn ocr_image(path: &str) -> AppResult<OcrResult> {
         engine: "none".to_string(),
         ok: false,
         message: if matches!(engine, crate::ocr_settings::OcrEngine::Unlimited) {
-            "Unlimited-OCR failed or unavailable. Install CUDA + weights (Settings → Scanned PDFs), or switch OCR engine to Auto/Legacy.".to_string()
+            "Unlimited-OCR failed or unavailable. Install Python torch + transformers and weights (Settings → Scanned PDFs). CPU works without a GPU; CUDA is faster. Or switch OCR engine to Auto/Legacy.".to_string()
         } else {
             "No local OCR engine found. Install Tesseract OCR and ensure `tesseract` is on PATH, or use an org/online vision model.".to_string()
         },

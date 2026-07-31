@@ -245,7 +245,13 @@ pub fn probe_ocr_capabilities(config: &OcrImageRagConfig) -> OcrCapabilities {
     }
     if matches!(OcrEngine::parse(&config.ocr_engine), OcrEngine::Unlimited) && !unlimited_available {
         warnings.push(
-            "Unlimited-OCR requested but not ready (needs CUDA + torch + downloaded weights)."
+            "Unlimited-OCR requested but not ready (needs Python torch + transformers + downloaded weights; CUDA optional)."
+                .to_string(),
+        );
+    }
+    if unlimited_available && !unlimited_cuda {
+        warnings.push(
+            "Unlimited-OCR will run on CPU (slower). CUDA is optional for speed."
                 .to_string(),
         );
     }

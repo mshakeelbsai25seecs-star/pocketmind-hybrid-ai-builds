@@ -55,6 +55,16 @@ def cuda_available() -> bool:
         return False
 
 
+def resolve_device() -> str:
+    """auto → cuda if present else cpu. Override with NEXUS_UNLIMITED_OCR_DEVICE=cpu|cuda|auto."""
+    raw = (os.environ.get("NEXUS_UNLIMITED_OCR_DEVICE") or "auto").strip().lower()
+    if raw in {"cpu", "cuda"}:
+        if raw == "cuda" and not cuda_available():
+            return "cpu"
+        return raw
+    return "cuda" if cuda_available() else "cpu"
+
+
 def cmd_probe(model_dir: Path) -> None:
     torch_ok = False
     transformers_ok = False
@@ -81,6 +91,11 @@ def cmd_probe(model_dir: Path) -> None:
 
     ready = model_ready(model_dir)
     cuda = cuda_available() if torch_ok else False
+    device = resolve_device() if torch_ok else "none"
+    warn = err
+    if torch_ok and transformers_ok and ready and not cuda:
+        note = "Running Unlimited-OCR on CPU (slower). Set NEXUS_UNLIMITED_OCR_DEVICE=cpu to force."
+        warn = f"{warn}; {note}" if warn else note
     emit(
         {
             "ok": True,
@@ -89,10 +104,12 @@ def cmd_probe(model_dir: Path) -> None:
             "transformers": transformers_ok,
             "pymupdf": pymupdf_ok,
             "cuda": cuda,
+            "device": device,
             "model_dir": str(model_dir),
             "model_ready": ready,
-            "available": torch_ok and transformers_ok and ready and cuda,
-            "warning": err,
+            # CUDA preferred but not required — CPU works with torch CPU builds.
+            "available": torch_ok and transformers_ok and ready,
+            "warning": warn,
         }
     )
 
@@ -205,20 +222,16 @@ def cmd_ocr(
             },
             5,
         )
-    if not cuda_available():
-        emit(
-            {
-                "ok": False,
-                "error": "CUDA GPU required for Unlimited-OCR. Use Legacy/Docling on CPU machines.",
-            },
-            6,
-        )
 
     try:
         import torch
         from transformers import AutoModel, AutoTokenizer
     except Exception as e:
         emit({"ok": False, "error": f"Missing deps: {e}"}, 7)
+
+    device = resolve_device()
+    # bfloat16 is for CUDA; CPU path uses float32 for broader compatibility.
+    dtype = torch.bfloat16 if device == "cuda" else torch.float32
 
     model_name = resolve_model_path(model_dir)
     work_dir = Path(tempfile.mkdtemp(prefix="pm_uo_out_"))
@@ -228,9 +241,9 @@ def cmd_ocr(
             model_name,
             trust_remote_code=True,
             use_safetensors=True,
-            torch_dtype=torch.bfloat16,
+            torch_dtype=dtype,
         )
-        model = model.eval().cuda()
+        model = model.eval().to(device)
 
         ext = input_path.suffix.lower()
         if ext == ".pdf":
@@ -283,6 +296,7 @@ def cmd_ocr(
             f"# OCR: {input_path.name}\n\n"
             f"Source: {input_path}\n"
             f"Engine: unlimited-ocr\n"
+            f"Device: {device}\n"
             f"Pages: {pages}\n\n"
         )
         output_md.write_text(header + text.strip() + "\n", encoding="utf-8")
@@ -290,6 +304,7 @@ def cmd_ocr(
             {
                 "ok": True,
                 "engine": "unlimited-ocr",
+                "device": device,
                 "output": str(output_md),
                 "pages": pages,
                 "chars": len(text),

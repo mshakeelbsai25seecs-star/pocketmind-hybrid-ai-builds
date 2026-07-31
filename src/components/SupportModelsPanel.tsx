@@ -136,8 +136,10 @@ export default function SupportModelsPanel({ compact = false }: { compact?: bool
         setUoProbe(probe);
         setPresent(prev => ({ ...prev, unlimited_ocr: probe.model_ready }));
         setMsg(probe.available
-          ? 'Unlimited-OCR ready (CUDA + weights).'
-          : `Weights saved to ${probe.model_dir}. CUDA/torch still required for use.`);
+          ? (probe.cuda
+            ? 'Unlimited-OCR ready (CUDA + weights).'
+            : 'Unlimited-OCR ready on CPU (slower than CUDA). Weights + torch OK.')
+          : `Weights saved to ${probe.model_dir}. Install Python torch + transformers to use (CPU works; CUDA is faster).`);
         return;
       }
 

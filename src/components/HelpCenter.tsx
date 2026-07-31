@@ -35,7 +35,7 @@ const sections = [
       'Setup includes a Support models step; the same list lives under Settings → Deployment.',
       'Download BGE-M3 (docs), Qwen3-Embedding-8B (code), Qwen3-Reranker-4B, and optional Unlimited-OCR weights — the app handles the downloads.',
       'Chat GGUFs are still under Models. Support models are not packaged inside the installer.',
-      'Unlimited-OCR also appears under Settings → Security (probe + CUDA status). Needs NVIDIA CUDA + Python torch on this PC.',
+      'Unlimited-OCR also appears under Settings → Security (probe + device status). Needs Python torch + transformers; CUDA is optional and faster.',
     ],
   },
   {

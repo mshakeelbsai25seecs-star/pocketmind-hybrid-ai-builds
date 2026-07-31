@@ -155,7 +155,7 @@ export const SUPPORT_MODEL_CATALOG: SupportModelCatalogEntry[] = [
   {
     id: 'unlimited_ocr',
     title: 'Unlimited-OCR weights',
-    description: 'Optional high-accuracy scanned PDF/image OCR. Needs NVIDIA CUDA + Python torch.',
+    description: 'Optional high-accuracy scanned PDF/image OCR. Works on CPU (slower) or NVIDIA CUDA. Needs Python torch + transformers.',
     destSubdir: '',
     fileName: '(Hugging Face snapshot)',
     url: '',
