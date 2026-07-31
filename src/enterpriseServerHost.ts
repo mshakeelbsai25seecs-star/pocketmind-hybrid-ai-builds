@@ -129,6 +129,15 @@ export async function startLlamaServer(
   });
 }
 
+export async function fetchLlamaServerLogs(
+  adminUrl: string,
+  token: string,
+  tail = 100,
+): Promise<string> {
+  const data = await adminFetch<{ logs?: string }>(adminUrl, `/api/logs?tail=${tail}`, token);
+  return data.logs || '';
+}
+
 export async function scanGgufFolder(
   adminUrl: string,
   token: string,

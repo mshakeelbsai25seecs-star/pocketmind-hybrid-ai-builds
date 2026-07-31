@@ -916,7 +916,7 @@ export default function ModelManager() {
                       onClick={() => void startDownload(item)}
                       className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-primary-600 hover:bg-primary-500 text-white"
                       disabled={!!downloadingId || !item.url}
-                      title={item.url ? `${item.name} (${item.size})` : 'No direct URL available'}
+                      title={item.url ? `${item.name} (${item.size})` : 'Import-only catalog entry — paste a direct .gguf URL above or import a local file in Models.'}
                     >
                       Download {item.quant}{item.params ? ` · ${item.params}` : ''}
                     </button>
@@ -1020,7 +1020,7 @@ export default function ModelManager() {
                   <td className="px-4 py-4 text-sm">{model.ram}</td>
                   <td className="px-4 py-4 text-sm"><div>{model.speed}</div><div className="text-xs text-surface-500">{model.quality}</div></td>
                   <td className="px-4 py-4 text-right">
-                    <button onClick={() => startDownload(model)} disabled={!!downloadingId || !model.url} className="p-2 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800 text-primary-600 dark:text-primary-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" title={model.url ? 'Download with progress details' : 'No direct URL available. Paste a direct GGUF URL above.'}>
+                    <button onClick={() => startDownload(model)} disabled={!!downloadingId || !model.url} className="p-2 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800 text-primary-600 dark:text-primary-400 transition-colors disabled:opacity-40 disabled:cursor-not-allowed" title={model.url ? 'Download with progress details' : 'Import-only catalog entry — no direct download URL. Paste a direct .gguf link above or import a local file in Models.'}>
                       <Download className={`w-4 h-4 ${downloadingId === model.id ? 'animate-pulse' : ''}`} />
                     </button>
                   </td>

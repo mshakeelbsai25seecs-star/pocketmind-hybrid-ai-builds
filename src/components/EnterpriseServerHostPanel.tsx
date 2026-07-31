@@ -5,6 +5,7 @@ import { fetchDeploymentPaths } from '../deploymentConfig';
 import { openExternal } from '../openExternal';
 import {
   fetchLlamaServerBootstrap,
+  fetchLlamaServerLogs,
   fetchLlamaServerStatus,
   importLocalGguf,
   loadStoredAdminToken,
@@ -33,6 +34,9 @@ export default function EnterpriseServerHostPanel() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [liveLogs, setLiveLogs] = useState(false);
+  const [logs, setLogs] = useState('—');
+  const [logsBusy, setLogsBusy] = useState(false);
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -56,12 +60,33 @@ export default function EnterpriseServerHostPanel() {
     }
   }, [token]);
 
+  const loadLogs = useCallback(async () => {
+    if (!hint?.admin_url) return;
+    setLogsBusy(true);
+    try {
+      const tok = token.trim() || hint.admin_token || '';
+      const text = await fetchLlamaServerLogs(hint.admin_url, tok, 120);
+      setLogs(text || '(no logs)');
+    } catch (err) {
+      setLogs(humanError(err));
+    } finally {
+      setLogsBusy(false);
+    }
+  }, [hint, token]);
+
   useEffect(() => {
     void refresh();
     void fetchDeploymentPaths().then(paths => {
       if (!scanFolder.trim() && paths.modelsDir) setScanFolder(paths.modelsDir);
     }).catch(() => undefined);
   }, [refresh]);
+
+  useEffect(() => {
+    if (!liveLogs) return;
+    void loadLogs();
+    const timer = window.setInterval(() => { void loadLogs(); }, 3000);
+    return () => window.clearInterval(timer);
+  }, [liveLogs, loadLogs]);
 
   const saveToken = () => {
     saveStoredAdminToken(token);
@@ -107,12 +132,13 @@ export default function EnterpriseServerHostPanel() {
     if (!hint) return;
     setBusy(true);
     setError(null);
-    setMessage(mode === 'cpu' ? 'Starting CPU server…' : 'Starting server with auto-optimize (CUDA if available)…');
+    setMessage(mode === 'cpu' ? 'Starting CPU-only server…' : 'Starting server with auto GPU optimizer…');
     try {
       const tok = token.trim() || hint.admin_token || '';
       const res = await startLlamaServer(hint.admin_url, tok, mode);
       setMessage(res.message || 'Server start requested.');
       await refresh();
+      if (liveLogs) await loadLogs();
       if (hint.chat_url) {
         setMessage(prev => `${prev || ''} Client URL: ${hint.chat_url}`);
       }
@@ -138,11 +164,11 @@ export default function EnterpriseServerHostPanel() {
         </div>
         <div className="flex flex-wrap gap-2">
           <button type="button" className="btn-secondary" onClick={() => void refresh()} disabled={busy}>
-            <RefreshCw className="w-4 h-4" /> Refresh
+            <RefreshCw className="w-4 h-4" /> Refresh status
           </button>
           {hint?.admin_url && (
-            <button type="button" className="btn-secondary" onClick={() => void openExternal(hint.admin_url)}>
-              <ExternalLink className="w-4 h-4" /> Full admin UI
+            <button type="button" className="btn-secondary" onClick={() => void openExternal(hint.admin_url)} title="Open the full admin UI in your browser (port 8090)">
+              <ExternalLink className="w-4 h-4" /> Open admin UI
             </button>
           )}
         </div>
@@ -175,8 +201,8 @@ export default function EnterpriseServerHostPanel() {
               onChange={e => setImportPath(e.target.value)}
               placeholder="D:\models\your-model.gguf"
             />
-            <button type="button" className="btn-primary" disabled={busy || !importPath.trim()} onClick={() => void doImport(importPath)}>
-              Import
+            <button type="button" className="btn-primary" disabled={busy || !importPath.trim()} onClick={() => void doImport(importPath)} title="Hard-link or copy into server models folder and select">
+              Import &amp; select
             </button>
           </div>
         </label>
@@ -186,7 +212,7 @@ export default function EnterpriseServerHostPanel() {
         <span className="text-sm font-bold flex items-center gap-2"><FolderOpen className="w-4 h-4" /> Scan folder for GGUFs</span>
         <div className="flex gap-2">
           <input className="input-field flex-1" value={scanFolder} onChange={e => setScanFolder(e.target.value)} placeholder="D:\PocketMind\models" />
-          <button type="button" className="btn-secondary" disabled={busy || !scanFolder.trim()} onClick={() => void doScan()}>Scan</button>
+          <button type="button" className="btn-secondary" disabled={busy || !scanFolder.trim()} onClick={() => void doScan()} title="List .gguf files without importing">Scan folder</button>
         </div>
         {scanRows.length > 0 && (
           <ul className="text-sm space-y-1 max-h-40 overflow-y-auto">
@@ -229,13 +255,51 @@ export default function EnterpriseServerHostPanel() {
       )}
 
       <div className="flex flex-wrap gap-2">
-        <button type="button" className="btn-primary" disabled={busy} onClick={() => void doStart()}>
+        <button
+          type="button"
+          className="btn-primary"
+          disabled={busy}
+          onClick={() => void doStart()}
+          title="Start llama.cpp with auto GPU optimizer (CUDA when Docker + NVIDIA are ready, else CPU)"
+        >
           {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
-          Start (auto-optimize / CUDA)
+          Start server (auto GPU)
         </button>
-        <button type="button" className="btn-secondary" disabled={busy} onClick={() => void doStart('cpu')}>
-          <Cpu className="w-4 h-4" /> Start CPU only
+        <button
+          type="button"
+          className="btn-secondary"
+          disabled={busy}
+          onClick={() => void doStart('cpu')}
+          title="Force CPU-only mode — slower but works without NVIDIA Docker"
+        >
+          <Cpu className="w-4 h-4" /> Start CPU-only
         </button>
+      </div>
+
+      <div className="rounded-2xl border border-surface-200 dark:border-surface-800 p-4 space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="text-sm font-bold">Container logs</span>
+          <div className="flex flex-wrap gap-2">
+            <label className="inline-flex items-center gap-2 text-xs text-surface-600 dark:text-surface-300">
+              <input
+                type="checkbox"
+                checked={liveLogs}
+                onChange={e => setLiveLogs(e.target.checked)}
+              />
+              Live logs (3s)
+            </label>
+            <button
+              type="button"
+              className="btn-secondary text-xs py-1 px-2"
+              disabled={logsBusy || !hint?.admin_url}
+              onClick={() => void loadLogs()}
+              title="Fetch the latest docker compose logs once"
+            >
+              {logsBusy ? 'Loading…' : 'Refresh logs'}
+            </button>
+          </div>
+        </div>
+        <pre className="text-xs whitespace-pre-wrap break-words max-h-56 overflow-y-auto rounded-xl bg-surface-950/90 text-surface-100 p-3 font-mono">{logs}</pre>
       </div>
 
       {message && <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200">{message}</div>}

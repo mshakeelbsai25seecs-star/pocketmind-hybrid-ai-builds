@@ -122,8 +122,9 @@ pub fn candidate_roots() -> Vec<PathBuf> {
 
 /// True when an NVIDIA driver is present (so CUDA runtimes should be preferred).
 pub fn has_nvidia_driver() -> bool {
-    std::process::Command::new("nvidia-smi")
-        .arg("-L")
+    let mut cmd = std::process::Command::new("nvidia-smi");
+    crate::process_util::no_window_std(&mut cmd);
+    cmd.arg("-L")
         .output()
         .map(|out| out.status.success())
         .unwrap_or(false)
@@ -392,7 +393,14 @@ Linux:   npm run setup:linux-runtimes && npm run verify:linux-runtimes"
 // ---------------------------------------------------------------------------
 
 pub fn model_size_bytes(path: &str) -> u64 {
-    std::fs::metadata(path).map(|m| m.len()).unwrap_or(0)
+    crate::gguf::model_total_bytes(path)
+}
+
+/// Layer count from GGUF metadata when available, else size-based guess.
+pub fn model_block_count(model_path: &str) -> i32 {
+    crate::gguf::gguf_block_count(model_path)
+        .map(|n| n as i32)
+        .unwrap_or_else(|| estimate_layer_count(model_size_bytes(model_path)))
 }
 
 /// True when macOS hardware is worth attempting Metal LLM offload: Apple Silicon
@@ -442,23 +450,28 @@ pub fn estimate_layer_count(model_size_bytes: u64) -> i32 {
 
 /// Estimate how many layers fit in free VRAM, keeping a safety reserve.
 /// Returns 999 when the whole model fits (full offload), 0 when nothing fits.
-pub fn estimate_partial_gpu_layers(model_size_bytes: u64, free_vram_bytes: u64) -> i32 {
-    if model_size_bytes == 0 || free_vram_bytes == 0 { return 0; }
+pub fn estimate_partial_gpu_layers(model_path: &str, free_vram_bytes: u64) -> i32 {
+    let model_size_bytes = model_size_bytes(model_path);
+    if model_size_bytes == 0 || free_vram_bytes == 0 {
+        return 0;
+    }
 
-    let two_gb = 2u64 * 1024 * 1024 * 1024;
-    let usable = if free_vram_bytes > two_gb {
-        free_vram_bytes.saturating_sub(two_gb)
+    let block_count = model_block_count(model_path).max(1) as u64;
+    let reserve = 2u64 * 1024 * 1024 * 1024;
+    let usable = if free_vram_bytes > reserve {
+        ((free_vram_bytes - reserve) as f64 * 0.9) as u64
     } else {
         ((free_vram_bytes as f64) * 0.75) as u64
     };
 
-    if usable >= ((model_size_bytes as f64) * 1.15) as u64 {
-        return 999;
-    }
+    let per_layer = (model_size_bytes / block_count).max(1);
+    let fit = (usable / per_layer) as i32;
 
-    let total_layers = estimate_layer_count(model_size_bytes);
-    let ratio = (usable as f64 / model_size_bytes as f64).clamp(0.0, 0.95);
-    ((total_layers as f64 * ratio * 0.92).floor() as i32).clamp(0, total_layers.saturating_sub(1))
+    if fit >= block_count as i32 {
+        999
+    } else {
+        fit.max(0)
+    }
 }
 
 pub fn unique_descending_layers(values: Vec<i32>) -> Vec<i32> {
@@ -484,15 +497,16 @@ pub fn gpu_layer_attempts(model_path: &str, requested_gpu_layers: i32, force_cpu
     }
 
     let model_size = model_size_bytes(model_path);
-    let (_, _, free_vram, _) = hardware_memory_snapshot();
-    let mut partial = estimate_partial_gpu_layers(model_size, free_vram);
+    let block_count = model_block_count(model_path);
+    let (_, _, free_vram, gpu_count) = hardware_memory_snapshot();
+    let mut partial = estimate_partial_gpu_layers(model_path, free_vram);
+    let has_gpu_runtime = !force_cpu && gpu_layer_runtime_available();
 
     // While chat owns the GPU, stay at or below the remaining-VRAM estimate.
     if chat_holds_gpu() && partial > 0 && partial < 999 {
         // leave partial as-is (already from current free VRAM)
     } else if chat_holds_gpu() && partial >= 999 {
-        // Free-VRAM probe can lag right after chat load; prefer a safe mid ladder.
-        partial = estimate_partial_gpu_layers(model_size, free_vram.saturating_div(2)).max(16);
+        partial = estimate_partial_gpu_layers(model_path, free_vram.saturating_div(2)).max(16);
     }
 
     if requested_gpu_layers > 0 {
@@ -511,20 +525,50 @@ pub fn gpu_layer_attempts(model_path: &str, requested_gpu_layers: i32, force_cpu
         ]);
     }
 
-    if partial >= 999 {
-        // Whole model fits — try full offload, then a short safety ladder.
-        return unique_descending_layers(vec![999, 120, 96, 80, 64, 48, 0]);
+    // Unknown VRAM but a GPU runtime exists: try aggressive full offload first.
+    if free_vram == 0 && has_gpu_runtime && gpu_count == 0 {
+        return unique_descending_layers(vec![
+            999,
+            block_count,
+            ((block_count as f32) * 0.75) as i32,
+            ((block_count as f32) * 0.5) as i32,
+            ((block_count as f32) * 0.25) as i32,
+            0,
+        ]);
     }
 
-    // Does not fully fit: never attempt above `partial` (avoids ~120s timeouts
-    // per doomed oversized spawn). Final successful layers unchanged.
-    unique_descending_layers(vec![
-        partial,
-        ((partial as f32) * 0.85) as i32,
-        ((partial as f32) * 0.65) as i32,
-        ((partial as f32) * 0.45) as i32,
-        16.min(partial.max(0)),
-        8.min(partial.max(0)),
-        0,
-    ])
+    if partial >= 999 {
+        return unique_descending_layers(vec![999, block_count, 120, 96, 80, 64, 48, 0]);
+    }
+
+    if partial > 0 {
+        return unique_descending_layers(vec![
+            999,
+            partial,
+            ((partial as f32) * 0.85) as i32,
+            ((partial as f32) * 0.65) as i32,
+            ((partial as f32) * 0.45) as i32,
+            16.min(partial.max(0)),
+            8.min(partial.max(0)),
+            0,
+        ]);
+    }
+
+    if has_gpu_runtime {
+        return unique_descending_layers(vec![
+            999,
+            block_count,
+            ((block_count as f32) * 0.75) as i32,
+            ((block_count as f32) * 0.5) as i32,
+            0,
+        ]);
+    }
+
+    vec![0]
+}
+
+fn gpu_layer_runtime_available() -> bool {
+    ordered_runtime_candidates(-1)
+        .map(|r| r.into_iter().any(|c| !c.force_cpu))
+        .unwrap_or(false)
 }

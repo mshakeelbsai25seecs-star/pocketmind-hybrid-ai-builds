@@ -437,6 +437,7 @@ pub async fn grep(
     }
 
     let mut cmd = Command::new(&rg);
+    crate::process_util::no_window_tokio(&mut cmd);
     cmd.arg("--line-number")
         .arg("--with-filename")
         .arg("--color")

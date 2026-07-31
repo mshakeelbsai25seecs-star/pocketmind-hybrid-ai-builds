@@ -60,7 +60,9 @@ impl CryptoVault {
 
     pub fn derive_key_from_device() -> String {
         let mut seed = String::new();
-        if let Ok(hostname) = std::process::Command::new("hostname").output() {
+        let mut hostname_cmd = std::process::Command::new("hostname");
+        crate::process_util::no_window_std(&mut hostname_cmd);
+        if let Ok(hostname) = hostname_cmd.output() {
             seed.push_str(&String::from_utf8_lossy(&hostname.stdout));
         }
         seed.push_str(std::env::consts::OS);

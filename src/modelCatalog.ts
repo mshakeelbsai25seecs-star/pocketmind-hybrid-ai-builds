@@ -173,7 +173,7 @@ export const OFFLINE_CHAT_CATALOG: OfflineChatModelCatalogItem[] = [
     recommendedUse: 'Qwen flagship MoE VLM (397B / ~17B active) — strongest offline alternative to DeepSeek for charts/PDFs/math-from-images. 6 shards + mmproj.',
     url: QWEN35_397B_Q4.url,
     shardUrls: QWEN35_397B_Q4.shardUrls,
-    mmprojUrl: 'https://huggingface.co/unsloth/Qwen3.5-397B-A17B-GGUF/resolve/main/mmproj-F16.gguf?download=true',
+    mmprojUrl: 'https://huggingface.co/Serpen/Minimax_M3_MMPROJ_GGUF/resolve/main/M3-mmproj.gguf?download=true',
     visionCapable: true,
   },
   {
@@ -382,7 +382,7 @@ export const OFFLINE_CHAT_CATALOG: OfflineChatModelCatalogItem[] = [
     params: '7B', quant: 'Q4_K_M', size: '4.4 GB', ram: '8 GB', speed: 'Medium', quality: 'Medical domain',
     categories: ['medical', 'large-quality'],
     recommendedUse: 'Medical-domain educational Q&A. Not a diagnosis tool.',
-    url: '',
+    url: 'https://huggingface.co/QuantFactory/BioMistral-7B-GGUF/resolve/main/BioMistral-7B.Q4_K_M.gguf?download=true',
   },
 
   {
@@ -391,7 +391,7 @@ export const OFFLINE_CHAT_CATALOG: OfflineChatModelCatalogItem[] = [
     params: '7B', quant: 'Q4_K_M', size: '4.4 GB', ram: '8 GB', speed: 'Medium', quality: 'Strong instruction',
     categories: ['general', 'writing', 'business', 'large-quality'],
     recommendedUse: 'Friendly general assistant, writing, roleplay-style personas, and business drafting.',
-    url: '',
+    url: 'https://huggingface.co/TheBloke/OpenHermes-2.5-Mistral-7B-GGUF/resolve/main/openhermes-2.5-mistral-7b.Q4_K_M.gguf?download=true',
   },
   {
     id: 'neural-chat-7b-q4',
@@ -399,7 +399,7 @@ export const OFFLINE_CHAT_CATALOG: OfflineChatModelCatalogItem[] = [
     params: '7B', quant: 'Q4_K_M', size: '4.1 GB', ram: '8 GB', speed: 'Medium', quality: 'Good chat',
     categories: ['general', 'writing', 'small-fast'],
     recommendedUse: 'Reliable general chat and writing on average laptops.',
-    url: '',
+    url: 'https://huggingface.co/TheBloke/neural-chat-7b-v3-1-GGUF/resolve/main/neural-chat-7b-v3-1.Q4_K_M.gguf?download=true',
   },
   {
     id: 'deepseek-coder-67b-q4',
@@ -407,7 +407,7 @@ export const OFFLINE_CHAT_CATALOG: OfflineChatModelCatalogItem[] = [
     params: '6.7B', quant: 'Q4_K_M', size: '3.8 GB', ram: '8 GB', speed: 'Medium', quality: 'Strong coding',
     categories: ['coding', 'small-fast'],
     recommendedUse: 'Offline coding, bug fixing, API integration help, and code review.',
-    url: '',
+    url: 'https://huggingface.co/TheBloke/deepseek-coder-6.7B-instruct-GGUF/resolve/main/deepseek-coder-6.7b-instruct.Q4_K_M.gguf?download=true',
   },
   {
     id: 'sqlcoder-7b-q4',
@@ -415,7 +415,7 @@ export const OFFLINE_CHAT_CATALOG: OfflineChatModelCatalogItem[] = [
     params: '7B', quant: 'Q4_K_M', size: '4.0 GB', ram: '8 GB', speed: 'Medium', quality: 'SQL specialist',
     categories: ['coding', 'business'],
     recommendedUse: 'SQL query generation, database explanations, and analytics workflows.',
-    url: '',
+    url: 'https://huggingface.co/TheBloke/sqlcoder-7b-GGUF/resolve/main/sqlcoder-7b.Q4_K_M.gguf?download=true',
   },
   {
     id: 'wizardmath-7b-q4',
@@ -423,7 +423,7 @@ export const OFFLINE_CHAT_CATALOG: OfflineChatModelCatalogItem[] = [
     params: '7B', quant: 'Q4_K_M', size: '4.0 GB', ram: '8 GB', speed: 'Medium', quality: 'Math specialist',
     categories: ['math', 'large-quality'],
     recommendedUse: 'Offline math practice, exam explanations, and symbolic reasoning.',
-    url: '',
+    url: 'https://huggingface.co/TheBloke/WizardMath-7B-V1.1-GGUF/resolve/main/wizardmath-7b-v1.1.Q4_K_M.gguf?download=true',
   },
   {
     id: 'nous-capybara-7b-q4',
@@ -431,7 +431,7 @@ export const OFFLINE_CHAT_CATALOG: OfflineChatModelCatalogItem[] = [
     params: '7B', quant: 'Q4_K_M', size: '4.2 GB', ram: '8 GB', speed: 'Medium', quality: 'Good assistant',
     categories: ['general', 'writing', 'business'],
     recommendedUse: 'General assistant, structured responses, and professional writing.',
-    url: '',
+    url: 'https://huggingface.co/TheBloke/Nous-Capybara-7B-v1.9-GGUF/resolve/main/nous-capybara-7b-v1.9.Q4_K_M.gguf?download=true',
   },
   {
     id: 'law-chat-7b-q4',
@@ -439,7 +439,7 @@ export const OFFLINE_CHAT_CATALOG: OfflineChatModelCatalogItem[] = [
     params: '7B', quant: 'Q4_K_M', size: '4–5 GB', ram: '8 GB', speed: 'Medium', quality: 'Legal domain',
     categories: ['law', 'business'],
     recommendedUse: 'Legal drafting assistance and study. Not legal advice.',
-    url: '',
+    url: 'https://huggingface.co/TheBloke/law-chat-GGUF/resolve/main/law-chat.Q4_K_M.gguf?download=true',
   },
 
   {
@@ -448,7 +448,7 @@ export const OFFLINE_CHAT_CATALOG: OfflineChatModelCatalogItem[] = [
     params: '46.7B', quant: 'Q4_K_M', size: '26–30 GB', ram: '32–48 GB', speed: 'Heavy', quality: 'High',
     categories: ['general', 'business', 'writing', 'large-quality'],
     recommendedUse: 'Enterprise-grade local assistant use on high-RAM workstations or CPU+GPU split systems.',
-    url: '',
+    url: 'https://huggingface.co/TheBloke/Mixtral-8x7B-Instruct-v0.1-GGUF/resolve/main/mixtral-8x7b-instruct-v0.1.Q4_K_M.gguf?download=true',
   },
   {
     id: 'qwen25-32b-instruct-q4',
@@ -456,7 +456,7 @@ export const OFFLINE_CHAT_CATALOG: OfflineChatModelCatalogItem[] = [
     params: '32B', quant: 'Q4_K_M', size: '18–22 GB', ram: '32 GB+', speed: 'Heavy', quality: 'Very high',
     categories: ['general', 'coding', 'math', 'business', 'large-quality'],
     recommendedUse: 'High-quality local reasoning, coding, math, and business analysis for professional hardware.',
-    url: '',
+    url: 'https://huggingface.co/bartowski/Qwen2.5-32B-Instruct-GGUF/resolve/main/Qwen2.5-32B-Instruct-Q4_K_M.gguf?download=true',
   },
   {
     id: 'llama31-70b-instruct-q4',
@@ -464,7 +464,7 @@ export const OFFLINE_CHAT_CATALOG: OfflineChatModelCatalogItem[] = [
     params: '70B', quant: 'Q4_K_M', size: '40–48 GB', ram: '64 GB+', speed: 'Very heavy', quality: 'Enterprise',
     categories: ['general', 'business', 'writing', 'law', 'large-quality'],
     recommendedUse: 'Large local assistant for organizations with strong CPU RAM and high-VRAM or multi-GPU systems.',
-    url: '',
+    url: 'https://huggingface.co/bartowski/Meta-Llama-3.1-70B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-70B-Instruct-Q4_K_M.gguf?download=true',
   },
   {
     id: 'llama31-70b-instruct-q5',
@@ -472,7 +472,7 @@ export const OFFLINE_CHAT_CATALOG: OfflineChatModelCatalogItem[] = [
     params: '70B', quant: 'Q5_K_M', size: '48–56 GB', ram: '80 GB+', speed: 'Very heavy', quality: 'Higher fidelity',
     categories: ['general', 'business', 'writing', 'large-quality'],
     recommendedUse: 'Higher-quality 70B local deployment for organizations with qualified enterprise hardware.',
-    url: '',
+    url: 'https://huggingface.co/mradermacher/Meta-Llama-3.1-70B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-70B-Instruct.Q5_K_M.gguf?download=true',
   },
   {
     id: 'deepseek-coder-33b-q4',
@@ -480,7 +480,7 @@ export const OFFLINE_CHAT_CATALOG: OfflineChatModelCatalogItem[] = [
     params: '33B', quant: 'Q4_K_M', size: '18–22 GB', ram: '32–48 GB', speed: 'Heavy', quality: 'Excellent coding',
     categories: ['coding', 'large-quality'],
     recommendedUse: 'Large local coding model for enterprise development teams and code review workflows.',
-    url: '',
+    url: 'https://huggingface.co/TheBloke/deepseek-coder-33b-instruct-GGUF/resolve/main/deepseek-coder-33b-instruct.Q4_K_M.gguf?download=true',
   },
   {
     id: 'qwen25-72b-instruct-q4',
@@ -488,7 +488,7 @@ export const OFFLINE_CHAT_CATALOG: OfflineChatModelCatalogItem[] = [
     params: '72B', quant: 'Q4_K_M', size: '40–48 GB', ram: '64 GB+', speed: 'Very heavy', quality: 'Enterprise',
     categories: ['general', 'coding', 'math', 'business', 'large-quality'],
     recommendedUse: 'Strong multilingual reasoning and coding on qualified enterprise hardware. Code Workspace eligible.',
-    url: '',
+    url: 'https://huggingface.co/bartowski/Qwen2.5-72B-Instruct-GGUF/resolve/main/Qwen2.5-72B-Instruct-Q4_K_M.gguf?download=true',
   },
   {
     id: 'command-r-plus-104b-q4',
@@ -496,32 +496,53 @@ export const OFFLINE_CHAT_CATALOG: OfflineChatModelCatalogItem[] = [
     params: '104B', quant: 'Q4_K_M', size: '55–65 GB', ram: '96 GB+', speed: 'Very heavy', quality: 'Enterprise RAG',
     categories: ['general', 'business', 'writing', 'large-quality'],
     recommendedUse: 'Long-context enterprise assistant / RAG workflows on multi-GPU servers. Code Workspace eligible.',
-    url: '',
-  },
+    url: 'https://huggingface.co/bartowski/c4ai-command-r-plus-GGUF/resolve/main/c4ai-command-r-plus-Q4_K_M.gguf/c4ai-command-r-plus-Q4_K_M-00001-of-00006.gguf?download=true',
+shardUrls: [
+      'https://huggingface.co/bartowski/c4ai-command-r-plus-GGUF/resolve/main/c4ai-command-r-plus-Q4_K_M.gguf/c4ai-command-r-plus-Q4_K_M-00002-of-00006.gguf?download=true',
+      'https://huggingface.co/bartowski/c4ai-command-r-plus-GGUF/resolve/main/c4ai-command-r-plus-Q4_K_M.gguf/c4ai-command-r-plus-Q4_K_M-00003-of-00006.gguf?download=true',
+      'https://huggingface.co/bartowski/c4ai-command-r-plus-GGUF/resolve/main/c4ai-command-r-plus-Q4_K_M.gguf/c4ai-command-r-plus-Q4_K_M-00004-of-00006.gguf?download=true',
+      'https://huggingface.co/bartowski/c4ai-command-r-plus-GGUF/resolve/main/c4ai-command-r-plus-Q4_K_M.gguf/c4ai-command-r-plus-Q4_K_M-00005-of-00006.gguf?download=true',
+      'https://huggingface.co/bartowski/c4ai-command-r-plus-GGUF/resolve/main/c4ai-command-r-plus-Q4_K_M.gguf/c4ai-command-r-plus-Q4_K_M-00006-of-00006.gguf?download=true',
+    ],  },
   {
     id: 'mixtral-8x22b-q4',
     name: 'Mixtral 8x22B Instruct',
     params: '141B', quant: 'Q4_K_M', size: '70–90 GB', ram: '128 GB+', speed: 'Extreme', quality: 'Enterprise MoE',
     categories: ['general', 'coding', 'business', 'large-quality'],
     recommendedUse: 'Sparse MoE local deployment for teams with large VRAM pools. Code Workspace eligible.',
-    url: '',
-  },
+    url: 'https://huggingface.co/MaziyarPanahi/Mixtral-8x22B-Instruct-v0.1-GGUF/resolve/main/Mixtral-8x22B-Instruct-v0.1.Q4_K_M-00001-of-00002.gguf?download=true',
+shardUrls: [
+      'https://huggingface.co/MaziyarPanahi/Mixtral-8x22B-Instruct-v0.1-GGUF/resolve/main/Mixtral-8x22B-Instruct-v0.1.Q4_K_M-00002-of-00002.gguf?download=true',
+    ],  },
   {
     id: 'llama31-405b-instruct-q4',
     name: 'Llama 3.1 405B Instruct',
     params: '405B', quant: 'Q4_K_M', size: '200–240 GB', ram: '256 GB+ / multi-GPU', speed: 'Extreme', quality: 'Frontier local',
     categories: ['general', 'coding', 'math', 'business', 'writing', 'law', 'large-quality'],
     recommendedUse: 'Frontier-class local GGUF for clusters / high-end servers. Import a quantized .gguf (often multi-part). Code Workspace eligible.',
-    url: '',
-  },
+    url: 'https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q4_K_M-00001-of-00006.gguf?download=true',
+shardUrls: [
+      'https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q4_K_M-00002-of-00006.gguf?download=true',
+      'https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q4_K_M-00003-of-00006.gguf?download=true',
+      'https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q4_K_M-00004-of-00006.gguf?download=true',
+      'https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q4_K_M-00005-of-00006.gguf?download=true',
+      'https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q4_K_M-00006-of-00006.gguf?download=true',
+    ],  },
   {
     id: 'llama31-405b-instruct-q5',
     name: 'Llama 3.1 405B Instruct High Quality',
     params: '405B', quant: 'Q5_K_M', size: '250–300 GB', ram: '320 GB+ / multi-GPU', speed: 'Extreme', quality: 'Frontier fidelity',
     categories: ['general', 'coding', 'business', 'large-quality'],
     recommendedUse: 'Higher-fidelity 405B local deployment when you have the cluster budget. Code Workspace eligible.',
-    url: '',
-  },
+    url: 'https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q5_K_M-00001-of-00007.gguf?download=true',
+shardUrls: [
+      'https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q5_K_M-00002-of-00007.gguf?download=true',
+      'https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q5_K_M-00003-of-00007.gguf?download=true',
+      'https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q5_K_M-00004-of-00007.gguf?download=true',
+      'https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q5_K_M-00005-of-00007.gguf?download=true',
+      'https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q5_K_M-00006-of-00007.gguf?download=true',
+      'https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q5_K_M-00007-of-00007.gguf?download=true',
+    ],  },
 ];
 
 export const ONLINE_CHAT_MODELS: OnlineChatModel[] = [

@@ -33,6 +33,18 @@ import { onOpenExternal } from '../openExternal';
 import { useAutoResizeTextarea } from '../hooks/useAutoResizeTextarea';
 import { filterChatSelectableLocalModels } from '../localModels';
 
+import RefreshButton from './RefreshButton';
+
+function isDocExportError(raw: string): boolean {
+  const lower = raw.toLowerCase();
+  return lower.includes('doc_export')
+    || lower.includes('document export')
+    || lower.includes('python-docx')
+    || lower.includes('python-pptx')
+    || lower.includes('doc_export_worker')
+    || (lower.includes('export') && (lower.includes('docx') || lower.includes('pptx') || lower.includes('reportlab')));
+}
+
 function humanError(err: unknown): string {
   let raw = '';
   if (err instanceof Error) raw = err.message;
@@ -46,6 +58,9 @@ function humanError(err: unknown): string {
     }
   } else {
     raw = String(err || 'Unknown error');
+  }
+  if (isDocExportError(raw)) {
+    return raw.replace(/^error:\s*/i, '').trim();
   }
   const lower = raw.toLowerCase();
   if (lower.includes('out of memory') || lower.includes('oom')) {
@@ -1004,6 +1019,10 @@ export default function ChatView() {
   const streamUiTimerRef = useRef<number | null>(null);
   const streamLastUiAtRef = useRef(0);
   const attachmentCacheRef = useRef<Map<string, AttachmentContext>>(new Map());
+  const generationEpochRef = useRef(0);
+  const streamUnlistenRef = useRef<{ chunk?: () => void; status?: () => void; error?: () => void }>({});
+  const generatingAssistantRef = useRef<{ conversationId: string; messageId: string } | null>(null);
+  const [refreshBusy, setRefreshBusy] = useState(false);
 
   const {
     activeConversationId,
@@ -1085,6 +1104,24 @@ export default function ChatView() {
       .then(models => setLocalModels(filterChatSelectableLocalModels(models)))
       .catch(() => { /* library refresh is best-effort */ });
   }, [setLocalModels]);
+
+  const refreshChatView = async () => {
+    setRefreshBusy(true);
+    try {
+      const [models, convs] = await Promise.all([
+        invoke<LocalModelRecord[]>('get_local_models'),
+        invoke<Conversation[]>('get_conversations'),
+      ]);
+      setLocalModels(filterChatSelectableLocalModels(models));
+      setConversations(convs);
+      if (activeConversationId) {
+        const msgs = await invoke<Message[]>('get_messages', { conversationId: activeConversationId });
+        setMessages(activeConversationId, msgs);
+      }
+    } finally {
+      setRefreshBusy(false);
+    }
+  };
 
   const selectLocalGguf = async (path: string) => {
     setGenerationError(null);
@@ -1253,8 +1290,40 @@ export default function ChatView() {
   };
 
   const stopGeneration = async () => {
+    generationEpochRef.current += 1;
+    streamUnlistenRef.current.chunk?.();
+    streamUnlistenRef.current.status?.();
+    streamUnlistenRef.current.error?.();
+    streamUnlistenRef.current = {};
+
+    if (streamUiTimerRef.current) {
+      window.clearTimeout(streamUiTimerRef.current);
+      streamUiTimerRef.current = null;
+    }
+
+    const activeGen = generatingAssistantRef.current;
+    if (activeGen) {
+      const partial = finalizeAssistantText(streamingTextRef.current);
+      const finalText = partial && partial !== 'Thinking...'
+        ? partial
+        : '[Generation stopped.]';
+      replaceMessage(activeGen.conversationId, activeGen.messageId, finalText);
+      void invoke('update_message', {
+        id: activeGen.messageId,
+        content: finalText,
+        metadata: null,
+      }).catch(() => undefined);
+      generatingAssistantRef.current = null;
+    }
+
+    streamingTextRef.current = '';
+    streamingReasoningRef.current = '';
+    reasoningStartedAtRef.current = null;
+    setLiveReasoning('');
+    setLiveReasoningStreaming(false);
+    setLiveReasoningMsgId(null);
+
     try {
-      setGenerationStatus('Stopping the local engine...');
       await invoke('stop_generation');
     } catch (err) {
       setGenerationError(humanError(err));
@@ -1494,6 +1563,8 @@ export default function ChatView() {
       setLiveReasoning('');
       setLiveReasoningMsgId(assistantMsgId);
       setLiveReasoningStreaming(false);
+      generatingAssistantRef.current = { conversationId, messageId: assistantMsgId };
+      const generationEpoch = generationEpochRef.current;
       let streamError: string | null = null;
       let reasoningMs: number | null = null;
 
@@ -1530,6 +1601,7 @@ export default function ChatView() {
       };
 
       const unlistenChunk = await listen<GenerationResponsePayload>('generation-chunk', (event) => {
+        if (generationEpochRef.current !== generationEpoch) return;
         const chunkText = event.payload?.text || '';
         const finishReason = event.payload?.finish_reason;
         const reasoningDelta = event.payload?.reasoning || '';
@@ -1573,12 +1645,19 @@ export default function ChatView() {
         }
       });
       const unlistenStatus = await listen<any>('generation-status', (event) => {
+        if (generationEpochRef.current !== generationEpoch) return;
         const message = event.payload?.message;
         if (typeof message === 'string' && message.trim()) setGenerationStatus(message);
       });
       const unlistenError = await listen<string>('generation-error', (event) => {
+        if (generationEpochRef.current !== generationEpoch) return;
         streamError = humanError(event.payload);
       });
+      streamUnlistenRef.current = {
+        chunk: unlistenChunk,
+        status: unlistenStatus,
+        error: unlistenError,
+      };
 
       try {
         let visionImages: Array<{ mime: string; base64: string }> = [];
@@ -1628,6 +1707,10 @@ export default function ChatView() {
         unlistenChunk();
         unlistenStatus();
         unlistenError();
+        streamUnlistenRef.current = {};
+        if (generationEpochRef.current === generationEpoch) {
+          generatingAssistantRef.current = null;
+        }
       }
 
       const partialText = finalizeAssistantText(streamingTextRef.current);
@@ -1787,6 +1870,7 @@ export default function ChatView() {
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5 xl:gap-2 w-full xl:w-auto xl:max-w-[min(100%,52rem)] xl:flex-shrink-0">
+          <RefreshButton title="Refresh" onClick={refreshChatView} busy={refreshBusy} className="text-xs xl:text-sm px-2.5 xl:px-3 py-1.5 xl:py-2" />
           <button
             type="button"
             onClick={() => void createChat()}
@@ -1909,7 +1993,7 @@ export default function ChatView() {
         </div>
       )}
 
-      {generationStatus && (
+      {generationStatus && isGenerating && (
         <div className="mx-4 mt-4 rounded-2xl border border-primary-300/40 bg-primary-50/85 dark:bg-primary-950/20 p-3 text-sm text-primary-700 dark:text-primary-300 flex items-center gap-2 shadow-lg shadow-primary-500/5">
           <div className="w-2 h-2 rounded-full bg-current animate-pulse" /> {generationStatus}
         </div>

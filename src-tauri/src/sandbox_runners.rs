@@ -484,13 +484,17 @@ fn prepare_script(
             let script_path = work_canon.join("Program.csx");
             // Prefer `dotnet script` if available; else write a tiny console project.
             if which_in_path("dotnet-script").is_some()
-                || std::process::Command::new(&dotnet)
-                    .args(["script", "--help"])
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::null())
-                    .status()
-                    .map(|s| s.success())
-                    .unwrap_or(false)
+                || {
+                    let mut dotnet_probe = std::process::Command::new(&dotnet);
+                    crate::process_util::no_window_std(&mut dotnet_probe);
+                    dotnet_probe
+                        .args(["script", "--help"])
+                        .stdout(Stdio::null())
+                        .stderr(Stdio::null())
+                        .status()
+                        .map(|s| s.success())
+                        .unwrap_or(false)
+                }
             {
                 std::fs::write(&script_path, code)
                     .map_err(|e| AppError::Unknown(format!("Cannot write sandbox script: {e}")))?;
@@ -649,6 +653,7 @@ async fn spawn_and_wait(prep: PreparedCmd) -> AppResult<SandboxRunResult> {
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     cmd.kill_on_drop(true);
     scrub_env(&mut cmd);
+    crate::process_util::no_window_tokio(&mut cmd);
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,

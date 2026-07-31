@@ -29,7 +29,8 @@
     "build:macos-release": "bash scripts/build_macos_release.sh",
     "dist:stage:windows": "powershell -ExecutionPolicy Bypass -File distribution/windows-desktop/scripts/stage-release.ps1",
     "dist:stage:macos": "bash distribution/macos-desktop/scripts/stage-release.sh",
-    "dist:stage:linux": "bash distribution/linux-desktop/scripts/stage-release.sh"
+    "dist:stage:linux": "bash distribution/linux-desktop/scripts/stage-release.sh",
+    "build:windows-release": "npm run setup:windows-runtimes && npm run verify:windows-runtimes && npm run tauri build"
   },
   "dependencies": {
     "@tauri-apps/api": "^1.5.0",

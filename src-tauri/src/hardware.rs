@@ -78,11 +78,16 @@ impl HardwareMonitor {
     pub fn get_system_info(&mut self) -> SystemInfo {
         self.refresh();
         
+        self.system.refresh_cpu();
         let cpus = self.system.cpus();
+        let logical = std::thread::available_parallelism()
+            .map(|n| n.get())
+            .unwrap_or_else(|| cpus.len());
+        let physical = self.system.physical_core_count().unwrap_or(logical);
         let cpu = CPUInfo {
             brand: cpus.first().map(|c| c.brand().to_string()).unwrap_or_else(|| "Unknown".to_string()),
-            cores_physical: cpus.len(),
-            cores_logical: cpus.len() * 2,
+            cores_physical: physical,
+            cores_logical: logical,
             frequency_mhz: cpus.first().map(|c| c.frequency()).unwrap_or(0),
             usage_percent: if cpus.is_empty() { 0.0 } else { cpus.iter().map(|c| c.cpu_usage()).sum::<f32>() / cpus.len() as f32 },
             architecture: std::env::consts::ARCH.to_string(),
@@ -150,6 +155,39 @@ impl HardwareMonitor {
             }
         }
 
+        #[cfg(windows)]
+        {
+            for (name, vram_total) in Self::detect_dxgi_adapters() {
+                let name_lower = name.to_lowercase();
+                let already = gpus.iter().any(|g| {
+                    g.name.eq_ignore_ascii_case(&name)
+                        || (g.is_cuda_capable && name_lower.contains("nvidia"))
+                });
+                if already {
+                    continue;
+                }
+                let vendor = if name_lower.contains("amd") || name_lower.contains("radeon") {
+                    "AMD"
+                } else if name_lower.contains("intel") {
+                    "Intel"
+                } else if name_lower.contains("nvidia") {
+                    "NVIDIA"
+                } else {
+                    "Unknown"
+                };
+                gpus.push(GPUInfo {
+                    name: name.clone(),
+                    vendor: vendor.to_string(),
+                    vram_total_bytes: vram_total,
+                    vram_used_bytes: 0,
+                    is_cuda_capable: false,
+                    is_metal_capable: false,
+                    is_vulkan_capable: true,
+                    compute_score: if vendor == "AMD" { 2500 } else { 1500 },
+                });
+            }
+        }
+
         #[cfg(target_os = "macos")]
         {
             gpus.extend(Self::detect_macos_gpus(self.system.total_memory()));
@@ -173,6 +211,54 @@ impl HardwareMonitor {
         gpus
     }
 
+    #[cfg(windows)]
+    fn detect_dxgi_adapters() -> Vec<(String, u64)> {
+        use windows::Win32::Graphics::Dxgi::{
+            CreateDXGIFactory1, IDXGIFactory1, IDXGIAdapter1,
+        };
+
+        unsafe {
+            let factory: IDXGIFactory1 = match CreateDXGIFactory1() {
+                Ok(f) => f,
+                Err(_) => return Vec::new(),
+            };
+            let mut adapters = Vec::new();
+            let mut index = 0u32;
+            loop {
+                let adapter: IDXGIAdapter1 = match factory.EnumAdapters1(index) {
+                    Ok(a) => a,
+                    Err(_) => break,
+                };
+                index += 1;
+                let desc = match adapter.GetDesc1() {
+                    Ok(d) => d,
+                    Err(_) => continue,
+                };
+                let name = String::from_utf16_lossy(
+                    &desc
+                        .Description
+                        .iter()
+                        .take_while(|&&c| c != 0)
+                        .copied()
+                        .collect::<Vec<_>>(),
+                )
+                .trim()
+                .to_string();
+                let vram = desc.DedicatedVideoMemory as u64;
+                if vram == 0 || name.is_empty() {
+                    continue;
+                }
+                // Skip Microsoft Basic Render Driver / software adapters.
+                let lower = name.to_ascii_lowercase();
+                if lower.contains("basic render") || lower.contains("microsoft basic") {
+                    continue;
+                }
+                adapters.push((name, vram));
+            }
+            adapters
+        }
+    }
+
     /// Detect macOS GPUs with realistic VRAM / Metal expectations.
     ///
     /// Apple Silicon uses unified memory (system RAM ≈ usable "VRAM").
@@ -185,10 +271,11 @@ impl HardwareMonitor {
         let mut gpus = Vec::new();
         let apple_silicon = Self::is_apple_silicon_cpu();
 
-        if let Ok(output) = Command::new("system_profiler")
-            .args(["SPDisplaysDataType", "-json"])
-            .output()
-        {
+        if let Ok(output) = {
+            let mut cmd = Command::new("system_profiler");
+            crate::process_util::no_window_std(&mut cmd);
+            cmd.args(["SPDisplaysDataType", "-json"]).output()
+        } {
             if let Ok(json) = serde_json::from_slice::<serde_json::Value>(&output.stdout) {
                 if let Some(arr) = json.get("SPDisplaysDataType").and_then(|v| v.as_array()) {
                     for display in arr {
@@ -295,10 +382,11 @@ impl HardwareMonitor {
     #[cfg(target_os = "macos")]
     fn is_apple_silicon_cpu() -> bool {
         use std::process::Command;
-        if let Ok(output) = Command::new("sysctl")
-            .args(["-n", "machdep.cpu.brand_string"])
-            .output()
-        {
+        if let Ok(output) = {
+            let mut cmd = Command::new("sysctl");
+            crate::process_util::no_window_std(&mut cmd);
+            cmd.args(["-n", "machdep.cpu.brand_string"]).output()
+        } {
             let brand = String::from_utf8_lossy(&output.stdout).to_lowercase();
             if brand.contains("apple") {
                 return true;
@@ -360,7 +448,11 @@ impl HardwareMonitor {
     #[cfg(target_os = "macos")]
     fn estimate_apple_score() -> u32 {
         use std::process::Command;
-        if let Ok(output) = Command::new("sysctl").args(["-n", "machdep.cpu.brand_string"]).output() {
+        if let Ok(output) = {
+            let mut cmd = Command::new("sysctl");
+            crate::process_util::no_window_std(&mut cmd);
+            cmd.args(["-n", "machdep.cpu.brand_string"]).output()
+        } {
             let brand = String::from_utf8_lossy(&output.stdout);
             if brand.contains("M4") { return 9000; }
             if brand.contains("M3") { return 8000; }

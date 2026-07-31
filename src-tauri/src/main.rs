@@ -28,6 +28,7 @@ mod cw_pdf_prepare;
 mod cw_skills;
 mod mcp_host;
 mod llama_server_host;
+mod process_util;
 mod power_features;
 mod power_commands;
 mod unlimited_ocr;
@@ -35,6 +36,7 @@ mod doc_export;
 
 use tauri::{GlobalShortcutManager, Manager, WindowEvent};
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use std::time::Duration;
 use tokio::sync::Mutex;
 
@@ -62,14 +64,16 @@ fn main() {
         }
     };
 
+    let generation_cancel = Arc::new(AtomicBool::new(false));
     tauri::Builder::default()
         .manage(AppState {
             db: Arc::new(Mutex::new(db)),
             hardware: Arc::new(Mutex::new(HardwareMonitor::new())),
             crypto: Arc::new(CryptoVault::new(&device_key)),
-            local_backend: Arc::new(llm::local::LlamaCppBackend::new()),
+            local_backend: Arc::new(llm::local::LlamaCppBackend::new(generation_cancel.clone())),
             kc_embed_pool: knowledge_chat::runtime::KcEmbedPool::new(),
             kc_rerank_pool: knowledge_chat::llama_rerank::KcRerankPool::new(),
+            generation_cancel,
             download_cancel: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             download_tracked: Arc::new(Mutex::new(Vec::new())),
         })
@@ -163,6 +167,7 @@ fn main() {
             doc_export::export_document,
             doc_export::generate_and_export_document,
             doc_export::probe_doc_export,
+            doc_export::install_doc_export_support,
             knowledge_chat::kc_build_file_catalog,
             knowledge_chat::kc_load_selected_files,
             knowledge_chat::kc_build_repo_map,

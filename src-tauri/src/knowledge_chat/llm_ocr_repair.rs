@@ -47,7 +47,9 @@ fn run_external_repair(cmd: &str, raw: &str) -> AppResult<String> {
         .next()
         .ok_or_else(|| AppError::Unknown("Empty NEXUS_OCR_LLM_REPAIR_CMD".into()))?;
     let args: Vec<&str> = parts.collect();
-    let mut child = std::process::Command::new(program)
+    let mut child_cmd = std::process::Command::new(program);
+    crate::process_util::no_window_std(&mut child_cmd);
+    let mut child = child_cmd
         .args(&args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
