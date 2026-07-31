@@ -1,7 +1,9 @@
 # Dependencies & build
 node_modules/
 dist/
+target/
 src-tauri/target/
+**/pocketcode-data/
 .DS_Store
 Thumbs.db
 

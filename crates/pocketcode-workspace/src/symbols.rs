@@ -14,6 +14,7 @@ use std::sync::OnceLock;
 use std::time::{SystemTime, UNIX_EPOCH};
 use walkdir::WalkDir;
 
+#[allow(dead_code)]
 const INDEX_DIR: &str = ".pocketmind-index";
 const INDEX_FILE: &str = "symbols.json";
 const MAX_SYMBOLS_PER_FILE: usize = 16;
@@ -38,6 +39,9 @@ const CODE_EXTS: &[&str] = &[
     "rs", "py", "js", "jsx", "ts", "tsx", "go", "java", "kt", "cs", "cpp", "c", "h", "hpp", "rb",
     "php", "swift", "scala", "lua", "r", "dart", "zig",
 ];
+
+/// Docs/config/data files Cursor indexes as text; we extract lightweight anchors (headings, tags, keys).
+const TEXT_DOC_EXTS: &[&str] = &["xml", "md", "markdown", "json", "yml", "yaml", "txt", "csv", "toml"];
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct IndexedSymbol {
@@ -128,6 +132,125 @@ fn is_code_extension(ext: &str) -> bool {
     CODE_EXTS.iter().any(|e| *e == ext)
 }
 
+fn is_indexable_extension(ext: &str) -> bool {
+    is_code_extension(ext) || TEXT_DOC_EXTS.iter().any(|e| *e == ext)
+}
+
+fn line_of(source: &str, byte_offset: usize) -> i32 {
+    (source[..byte_offset.min(source.len())]
+        .bytes()
+        .filter(|b| *b == b'\n')
+        .count()
+        + 1) as i32
+}
+
+/// Extract searchable anchors from XML / Markdown / JSON / YAML / plain text.
+fn parse_text_doc_symbols(source: &str, ext: &str, rel: &str) -> Vec<IndexedSymbol> {
+    let mut out = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let push = |out: &mut Vec<IndexedSymbol>,
+                seen: &mut std::collections::HashSet<String>,
+                name: String,
+                kind: &str,
+                line_start: i32| {
+        if name.is_empty() || name.len() > 120 || !seen.insert(name.clone()) {
+            return;
+        }
+        out.push(IndexedSymbol {
+            path: rel.to_string(),
+            name: name.clone(),
+            kind: kind.to_string(),
+            line_start,
+            line_end: line_start + 4,
+            signature: format!("{kind} {name}"),
+        });
+    };
+
+    match ext {
+        "md" | "markdown" => {
+            static RE: OnceLock<Regex> = OnceLock::new();
+            let re = RE.get_or_init(|| Regex::new(r"(?m)^(#{1,6})\s+(.+?)\s*$").unwrap());
+            for caps in re.captures_iter(source) {
+                let name = caps.get(2).map(|m| m.as_str().trim()).unwrap_or("").to_string();
+                let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
+                push(&mut out, &mut seen, name, "heading", line_of(source, start));
+                if out.len() >= 64 {
+                    break;
+                }
+            }
+        }
+        "xml" => {
+            // FortiSIEM-style: <Rule … id="LogonTime"> or <name>Logon Time</name>
+            static RE_ID: OnceLock<Regex> = OnceLock::new();
+            static RE_NAME: OnceLock<Regex> = OnceLock::new();
+            let re_id = RE_ID.get_or_init(|| {
+                Regex::new(r#"(?i)<([A-Za-z_][\w:-]*)\b[^>]*\bid\s*=\s*["']([^"']+)["']"#).unwrap()
+            });
+            let re_name = RE_NAME
+                .get_or_init(|| Regex::new(r"(?i)<name>\s*([^<]{2,80})\s*</name>").unwrap());
+            for caps in re_id.captures_iter(source) {
+                let tag = caps.get(1).map(|m| m.as_str()).unwrap_or("tag");
+                let id = caps.get(2).map(|m| m.as_str()).unwrap_or("").to_string();
+                let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
+                push(
+                    &mut out,
+                    &mut seen,
+                    id,
+                    &format!("xml-{tag}"),
+                    line_of(source, start),
+                );
+                if out.len() >= 64 {
+                    break;
+                }
+            }
+            for caps in re_name.captures_iter(source) {
+                let name = caps.get(1).map(|m| m.as_str().trim()).unwrap_or("").to_string();
+                let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
+                push(&mut out, &mut seen, name, "xml-name", line_of(source, start));
+                if out.len() >= 64 {
+                    break;
+                }
+            }
+        }
+        "json" => {
+            static RE: OnceLock<Regex> = OnceLock::new();
+            let re = RE.get_or_init(|| Regex::new(r#"(?m)^\s{0,4}"([A-Za-z_][\w.-]{1,60})"\s*:"#).unwrap());
+            for caps in re.captures_iter(source) {
+                let name = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
+                let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
+                push(&mut out, &mut seen, name, "json-key", line_of(source, start));
+                if out.len() >= 64 {
+                    break;
+                }
+            }
+        }
+        "yml" | "yaml" | "toml" => {
+            static RE: OnceLock<Regex> = OnceLock::new();
+            let re = RE.get_or_init(|| Regex::new(r"(?m)^\s{0,4}([A-Za-z_][\w.-]{1,60})\s*:").unwrap());
+            for caps in re.captures_iter(source) {
+                let name = caps.get(1).map(|m| m.as_str()).unwrap_or("").to_string();
+                let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
+                push(&mut out, &mut seen, name, "config-key", line_of(source, start));
+                if out.len() >= 64 {
+                    break;
+                }
+            }
+        }
+        "txt" | "csv" => {
+            // First non-empty line as a document title-ish anchor.
+            for (i, line) in source.lines().enumerate() {
+                let t = line.trim();
+                if t.len() >= 4 && t.len() <= 100 {
+                    push(&mut out, &mut seen, t.to_string(), "doc-line", (i + 1) as i32);
+                    break;
+                }
+            }
+        }
+        _ => {}
+    }
+    out
+}
+
 fn symbol_patterns() -> &'static [(Regex, &'static str)] {
     static PATS: OnceLock<Vec<(Regex, &'static str)>> = OnceLock::new();
     PATS.get_or_init(|| {
@@ -170,7 +293,7 @@ fn symbol_patterns() -> &'static [(Regex, &'static str)] {
 
 fn parse_file_symbols(abs: &Path, rel: &str) -> Vec<IndexedSymbol> {
     let ext = extension_of(abs);
-    if !is_code_extension(&ext) {
+    if !is_indexable_extension(&ext) {
         return Vec::new();
     }
     let meta = match fs::metadata(abs) {
@@ -184,6 +307,10 @@ fn parse_file_symbols(abs: &Path, rel: &str) -> Vec<IndexedSymbol> {
         Ok(s) => s,
         Err(_) => return Vec::new(),
     };
+
+    if !is_code_extension(&ext) {
+        return parse_text_doc_symbols(&source, &ext, rel);
+    }
 
     let mut out = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -199,7 +326,7 @@ fn parse_file_symbols(abs: &Path, rel: &str) -> Vec<IndexedSymbol> {
                 continue;
             }
             let start = caps.get(0).map(|m| m.start()).unwrap_or(0);
-            let line_start = (source[..start].bytes().filter(|b| *b == b'\n').count() + 1) as i32;
+            let line_start = line_of(&source, start);
             out.push(IndexedSymbol {
                 path: rel.to_string(),
                 name: name.clone(),
@@ -253,7 +380,7 @@ pub fn ensure_index(workspace_root: &Path) -> Result<(usize, usize)> {
         }
         let abs = entry.path();
         let ext = extension_of(abs);
-        if !is_code_extension(&ext) {
+        if !is_indexable_extension(&ext) {
             continue;
         }
         file_count += 1;
@@ -587,4 +714,54 @@ pub fn read_symbol(
         "### {} `{}` — {} (L{}-L{})\n```\n{}\n```",
         sym.kind, sym.name, sym.path, sym.line_start, sym.line_end, body
     ))
+}
+
+#[cfg(test)]
+mod text_doc_index_tests {
+    use super::*;
+    use std::io::Write;
+
+    #[test]
+    fn indexes_xml_rule_ids_and_md_headings() {
+        let dir = std::env::temp_dir().join(format!(
+            "pc-text-index-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("rules")).unwrap();
+        let mut xml = fs::File::create(dir.join("rules/auth.xml")).unwrap();
+        write!(
+            xml,
+            r#"<Rule id="PH_RULE_Logon_Time"><name>Logon Time Outside</name></Rule>"#
+        )
+        .unwrap();
+        let mut md = fs::File::create(dir.join("README.md")).unwrap();
+        write!(md, "# FortiSIEM intake\n\nNotes about logon.\n").unwrap();
+
+        let (touched, symbols) = ensure_index(&dir).expect("index");
+        assert!(touched >= 1, "expected files touched, got {touched}");
+        assert!(symbols >= 2, "expected text anchors, got {symbols}");
+
+        let hits = find_symbol(&dir, "Logon").expect("find");
+        assert!(
+            hits.iter().any(|h| h.name.contains("Logon") || h.path.contains("auth.xml")),
+            "missing logon hit: {hits:?}"
+        );
+
+        let map = repo_map(&dir).expect("map");
+        assert!(
+            !map.contains("Indexed files: 0"),
+            "repo_map should not be empty for text docs: {map}"
+        );
+        assert!(
+            map.contains("PH_RULE_Logon_Time") || map.contains("FortiSIEM"),
+            "repo_map missing anchors: {map}"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
 }

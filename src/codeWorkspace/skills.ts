@@ -1,6 +1,6 @@
 import { invoke } from '@tauri-apps/api/tauri';
 import { getSetting, setSetting } from '../api/powerFeatures';
-import { BUILTIN_SKILLS } from './builtinSkills';
+import { BUILTIN_SKILLS, ALWAYS_ON_SKILL_IDS } from './builtinSkills';
 
 export interface SkillInfo {
   id: string;
@@ -56,14 +56,21 @@ export async function toggleSkillEnabled(id: string, enabled: boolean): Promise<
   return next;
 }
 
-/** Build capped markdown block for enabled skills. */
+/** Build capped markdown block for enabled skills (always includes explore-efficiently). */
 export async function loadEnabledSkillsMarkdown(workspaceRoot?: string | null): Promise<string> {
   const [all, enabled] = await Promise.all([
     listAllSkills(workspaceRoot),
     getEnabledSkillIds(),
   ]);
-  if (enabled.length === 0) return '';
-  const picked = all.filter(s => enabled.includes(s.id));
+  const want = new Set<string>([...ALWAYS_ON_SKILL_IDS, ...enabled]);
+  const picked = all.filter(s => want.has(s.id));
+  // Always-on skills first, then user-enabled in stable list order.
+  picked.sort((a, b) => {
+    const aOn = ALWAYS_ON_SKILL_IDS.includes(a.id as typeof ALWAYS_ON_SKILL_IDS[number]) ? 0 : 1;
+    const bOn = ALWAYS_ON_SKILL_IDS.includes(b.id as typeof ALWAYS_ON_SKILL_IDS[number]) ? 0 : 1;
+    if (aOn !== bOn) return aOn - bOn;
+    return a.name.localeCompare(b.name);
+  });
   if (picked.length === 0) return '';
   let out = 'Active skills (follow these instructions):\n';
   for (const s of picked) {

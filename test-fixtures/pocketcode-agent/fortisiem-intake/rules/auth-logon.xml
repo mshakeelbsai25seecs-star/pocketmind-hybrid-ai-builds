@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Synthetic FortiSIEM-style rule pack for PocketCode agent golden tasks. -->
+<Rules>
+  <Rule id="PH_RULE_Logon_Time_Outside_Business" group="Authentication">
+    <name>Logon Time Outside Business Hours</name>
+    <description>
+      Fires when a successful interactive logon occurs outside the configured
+      business window (default 08:00-18:00 local). Use eventType = Win-Security-4624
+      and filter on logonType in (2, 10).
+    </description>
+    <eventType>Win-Security-4624</eventType>
+    <severity>5</severity>
+    <condition>hourOfDay NOT BETWEEN 8 AND 18</condition>
+  </Rule>
+  <Rule id="PH_RULE_Failed_Logon_Burst" group="Authentication">
+    <name>Failed Logon Burst</name>
+    <description>Multiple failed logons from the same source IP within 5 minutes.</description>
+    <eventType>Win-Security-4625</eventType>
+    <severity>7</severity>
+  </Rule>
+  <Rule id="PH_RULE_VPN_Connect" group="Network">
+    <name>VPN Session Established</name>
+    <description>Successful VPN tunnel establishment for remote workforce.</description>
+    <eventType>FortiGate-sslvpn-login</eventType>
+    <severity>3</severity>
+  </Rule>
+</Rules>

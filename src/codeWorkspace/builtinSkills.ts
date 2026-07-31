@@ -8,6 +8,17 @@ export interface BuiltinSkill {
 /** Read-only starter skills shipped with the app. */
 export const BUILTIN_SKILLS: BuiltinSkill[] = [
   {
+    id: 'builtin:explore-efficiently',
+    name: 'Explore efficiently',
+    description: 'Always-on: search cheaply, never thrash, finish with a clean answer.',
+    body: `Explore efficiently (always on):
+1. Trust the WORKSPACE BRIEF — do not list_dir the root just to learn folders.
+2. Prefer codebase_search or one root grep over folder-by-folder fishing.
+3. Never call the same tool with the same arguments twice; results stay in context.
+4. Read small windows (120–400 lines). Change offset to see more of a file.
+5. When tool results can answer the user, finish immediately with clean Markdown (paths, lines, values) — no tool narration.`,
+  },
+  {
     id: 'builtin:code-review',
     name: 'Code review',
     description: 'Structured review: correctness, edge cases, security, tests.',
@@ -40,3 +51,6 @@ export const BUILTIN_SKILLS: BuiltinSkill[] = [
 4. In Plan mode, list files to touch and risks before Build.`,
   },
 ];
+
+/** Skills that are always injected for Agent/Ask/Debug/Plan (cannot be turned off). */
+export const ALWAYS_ON_SKILL_IDS = ['builtin:explore-efficiently'] as const;
