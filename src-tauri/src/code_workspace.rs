@@ -517,7 +517,7 @@ pub async fn grep(
             ocr_cmd.arg("--").arg(pattern).arg(&ocr_dir);
             ocr_cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
             ocr_cmd.kill_on_drop(true);
-            if let Ok(mut child) = ocr_cmd.spawn() {
+            if let Ok(child) = ocr_cmd.spawn() {
                 if let Ok(Ok(ocr_out)) = tokio::time::timeout(
                     Duration::from_secs(GREP_TIMEOUT_SECS),
                     child.wait_with_output(),

@@ -64,10 +64,11 @@ fn standardize_rel(path: &str) -> String {
 
 fn sidecar_name_for_rel(rel: &str) -> String {
     let safe = standardize_rel(rel)
+        .replace('\\', "__")
+        .replace('/', "__")
         .chars()
         .map(|c| match c {
             'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' | '.' => c,
-            '/' | '\\' => '__',
             _ => '_',
         })
         .collect::<String>();
