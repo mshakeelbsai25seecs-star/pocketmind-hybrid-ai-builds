@@ -471,7 +471,7 @@ pub async fn grep(
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     cmd.kill_on_drop(true);
 
-    let mut child = cmd
+    let child = cmd
         .spawn()
         .map_err(|e| AppError::Unknown(format!("Failed to spawn ripgrep: {e}")))?;
 
@@ -648,7 +648,8 @@ fn read_text_window_from_string(
         limit.min(hard_cap)
     };
     let start = offset;
-    let lines: Vec<&str> = normalize_newlines(body).lines().collect();
+    let normalized = normalize_newlines(body);
+    let lines: Vec<&str> = normalized.lines().collect();
     let slice = if start >= lines.len() {
         &[][..]
     } else {
