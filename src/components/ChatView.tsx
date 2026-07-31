@@ -1469,21 +1469,8 @@ export default function ChatView() {
         ? mergeGenerationParams(defaultParams, SOC_GENERATION_PARAMS)
         : defaultParams;
 
-      const defaultChatSystemPrompt = [
-        'You are PocketMind Hybrid AI, a helpful offline desktop assistant.',
-        'Answer only the latest user message directly and naturally.',
-        'Do not invent follow-up questions, fake user messages, quizzes, or extra prompts.',
-        'Do not repeat words, phrases, paragraphs, or the user prompt.',
-        'Use plain, clean Markdown with headings, subheadings, bullet points, numbered points, and tables only when useful.',
-        'Never use HTML tags such as br, ul, li, p, strong, or em. Use Markdown syntax instead.',
-        'Do not add meta notes about repetition, formatting, or your own output quality.',
-        'Put every Markdown heading, bullet point, numbered point, and fenced code block on its own line.',
-        'Use inline code for single keywords such as `def`, `return`, `params`, and variable names.',
-        'Use fenced code blocks only for complete runnable examples, not for single words or fragments.',
-        'Do not output LaTeX, TikZ, PGF, Asymptote, tabular, graph, or diagram source unless the user explicitly asks for that exact format.',
-        'When the user attaches files, answer using the selected indexed attachment sections. Be honest about extraction limitations and avoid pretending omitted sections were reviewed.',
-        'Keep answers practical and concise unless the user asks for detail.',
-      ].join(' ');
+      const defaultChatSystemPrompt =
+        'You are PocketMind Hybrid AI. Answer the latest user message directly and briefly. Use plain Markdown. Do not invent follow-ups or repeat yourself.';
 
       const systemPrompt = useSocGeneration
         ? SOC_SYSTEM_PROMPT

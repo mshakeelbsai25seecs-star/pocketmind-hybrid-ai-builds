@@ -63,7 +63,7 @@ fn is_code_workspace_system_prompt(system: &str) -> bool {
 }
 
 fn nexus_formatting_system_prompt(custom: Option<&str>) -> String {
-    let base = "You are PocketMind Hybrid AI. Answer the latest user message directly. Use plain, clean Markdown. Put headings, bullet points, numbered points, and fenced code blocks on separate lines. Use inline code for single keywords. Use fenced code blocks only for complete runnable examples. Do not output LaTeX, TikZ, PGF, Asymptote, tabular, graph, or diagram source unless the user explicitly asks for that exact format. Do not invent follow-up questions or repeat yourself.";
+    let base = "You are PocketMind Hybrid AI. Answer the latest user message directly and briefly. Use plain Markdown. Do not invent follow-ups or repeat yourself.";
     match custom {
         Some(value) if !value.trim().is_empty()
             && (is_knowledge_system_prompt(value)

@@ -713,7 +713,7 @@ fn build_manual_prompt(request: &GenerationRequest, system: &str) -> String {
         )
     } else {
         format!(
-            "{system}\n\nConversation:\n{history}\n\nLatest user message:\n{latest}\n\nRespond directly to the latest user message only. Ignore old context if it conflicts with the latest request. Do not introduce unrelated projects, products, websites, workflow engines, model cards, documentation, or fake follow-up questions. Use plain Markdown only. Never use HTML tags such as br, ul, li, p, strong, or em. Do not add meta notes about repetition or formatting. Put headings, bullet points, numbered points, and fenced code blocks on separate lines. Use inline code for single keywords and short phrases. Use fenced code blocks only for complete runnable multi-line code examples. Never put single words such as def, class, return, params, or lambda functions in fenced code blocks. Do not output LaTeX, TikZ, PGF, Asymptote, tabular, graph, or diagram source unless the user explicitly asks for that exact format."
+            "{system}\n\nConversation:\n{history}\n\nLatest user message:\n{latest}\n\nAnswer the latest user message only."
         )
     };
 
@@ -950,7 +950,7 @@ impl InferenceBackend for LlamaCppBackend {
             .build()
             .map_err(|e| AppError::InferenceError(format!("Failed to create generation client: {e}")))?;
 
-        let base_system = "You are PocketMind Hybrid AI, a helpful offline desktop assistant. Answer the latest user message directly and stop. Do not invent follow-up questions, fake user messages, future prompts, quizzes, or examples the user did not ask for. Do not ask and answer your own questions. Ignore older chat history when it conflicts with the latest user request. Do not write documentation about Mistral, workflow engines, Kubernetes, or model cards unless the user specifically asks for that topic. Do not repeat words, phrases, paragraphs, or the user prompt. Use plain, clean Markdown for headings, lists, and code when helpful. Put headings, bullet points, numbered points, and fenced code blocks on separate lines. Use inline code for single keywords or short phrases such as `def`, `class`, `return`, `params`, `lambda functions`, file names, and variable names. Use fenced code blocks only for complete runnable multi-line code examples, not for single words, labels, or fragments. Never put `def`, `class`, `return`, `params`, or `lambda functions` in a fenced code block by themselves. Do not output LaTeX, TikZ, PGF, Asymptote, tabular, graph, or diagram source unless the user explicitly asks for that exact format. Never use placeholders like [object Object].";
+        let base_system = "You are PocketMind Hybrid AI. Answer the latest user message directly and briefly. Use plain Markdown. Do not invent follow-ups or repeat yourself.";
         let system = match &request.system_prompt {
             Some(sys) if !sys.trim().is_empty()
                 && (is_soc_system_prompt(sys) || is_knowledge_system_prompt(sys) || is_code_workspace_system_prompt(sys)) =>
