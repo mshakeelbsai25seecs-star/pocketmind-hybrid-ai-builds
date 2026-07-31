@@ -1072,7 +1072,37 @@ impl InferenceBackend for LlamaCppBackend {
         let mut tokens_generated: u32 = 0;
 
         while let Some(chunk) = stream.next().await {
-            let bytes = chunk.map_err(|e| AppError::InferenceError(format!("Streaming from llama-server failed: {e}")))?;
+            let bytes = match chunk {
+                Ok(b) => b,
+                Err(e) => {
+                    // Connection reset / process death mid-stream — unload so the next
+                    // turn relaunches instead of talking to a dead port.
+                    let mut proc_lock = self.process.lock().await;
+                    if let Some(ref mut child) = *proc_lock {
+                        let _ = child.kill().await;
+                    }
+                    *proc_lock = None;
+                    *self.model_loaded.lock().await = false;
+                    *self.loaded_model_path.lock().await = None;
+                    *self.loaded_runtime_signature.lock().await = None;
+                    runtime_discovery::set_chat_gpu_layers_active(0);
+
+                    let detail = e.to_string();
+                    let low = detail.to_ascii_lowercase();
+                    let hint = if low.contains("10054")
+                        || low.contains("forcibly closed")
+                        || low.contains("connection reset")
+                        || low.contains("broken pipe")
+                    {
+                        " llama-server likely crashed from low RAM/VRAM. Close other apps, use a smaller Q4 model, GPU layers 0, context 2048, then retry."
+                    } else {
+                        ""
+                    };
+                    return Err(AppError::InferenceError(format!(
+                        "Streaming from llama-server failed: {detail}.{hint}"
+                    )));
+                }
+            };
             pending.push_str(&String::from_utf8_lossy(&bytes));
 
             while let Some(pos) = pending.find('\n') {

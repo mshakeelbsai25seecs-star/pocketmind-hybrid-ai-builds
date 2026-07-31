@@ -66,6 +66,14 @@ function humanError(err: unknown): string {
   if (lower.includes('connection refused') || lower.includes('failed to connect')) {
     return 'Could not reach the server. Check Org Server / network, then retry.';
   }
+  if (
+    lower.includes('10054')
+    || lower.includes('forcibly closed')
+    || lower.includes('connection reset')
+    || (lower.includes('streaming from llama-server failed') && lower.includes('body'))
+  ) {
+    return 'Local llama-server crashed mid-reply (usually low RAM/VRAM). Close other apps, use a smaller Q4 GGUF, set GPU layers to 0 / CPU, context 2048, then retry. Free RAM is often under 1 GB when this happens.';
+  }
   return raw;
 }
 
