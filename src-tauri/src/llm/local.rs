@@ -391,10 +391,16 @@ impl LlamaCppBackend {
             if let Ok(mut proc_lock) = self.process.try_lock() {
                 if let Some(child) = proc_lock.as_mut() {
                     if let Ok(Some(status)) = child.try_wait() {
+                        let detail = take_child_stdio_tail(child).await;
                         *proc_lock = None;
-                        return Err(AppError::InferenceError(format!(
-                            "llama-server exited before becoming ready. Exit status: {status}. Try CPU mode, a smaller model, context 2048, batch 128, and confirm the GGUF matches this llama.cpp build."
-                        )));
+                        return Err(AppError::InferenceError(match detail {
+                            Some(log) if !log.is_empty() => format!(
+                                "llama-server exited before becoming ready. Exit status: {status}.\n\nllama-server output:\n{log}"
+                            ),
+                            _ => format!(
+                                "llama-server exited before becoming ready. Exit status: {status}. Try CPU mode, a smaller model, context 2048, batch 128, and confirm the GGUF matches this llama.cpp build."
+                            ),
+                        }));
                     }
                 }
             }
@@ -405,6 +411,65 @@ impl LlamaCppBackend {
         Err(AppError::InferenceError(
             "llama-server started but did not become ready within 180 seconds. Try a smaller model first, set GPU layers to 0, context to 2048, batch to 128, and confirm the GGUF is supported by your llama.cpp build.".to_string()
         ))
+    }
+}
+
+/// Capture a short tail of llama-server stderr/stdout after a failed spawn.
+async fn take_child_stdio_tail(child: &mut Child) -> Option<String> {
+    use tokio::io::AsyncReadExt;
+    let mut combined = String::new();
+    if let Some(mut stderr) = child.stderr.take() {
+        let mut buf = Vec::new();
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(400), stderr.read_to_end(&mut buf)).await;
+        combined.push_str(&String::from_utf8_lossy(&buf));
+    }
+    if let Some(mut stdout) = child.stdout.take() {
+        let mut buf = Vec::new();
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(400), stdout.read_to_end(&mut buf)).await;
+        if !buf.is_empty() {
+            if !combined.is_empty() {
+                combined.push('\n');
+            }
+            combined.push_str(&String::from_utf8_lossy(&buf));
+        }
+    }
+    let trimmed = combined.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        // Keep the last ~2.5 KB so OOM/Vulkan lines remain visible.
+        let chars: Vec<char> = trimmed.chars().collect();
+        if chars.len() > 2500 {
+            Some(chars[chars.len() - 2500..].iter().collect())
+        } else {
+            Some(trimmed.to_string())
+        }
+    }
+}
+
+fn drain_child_stdio(child: &mut Child) {
+    use tokio::io::AsyncReadExt;
+    if let Some(mut stderr) = child.stderr.take() {
+        tokio::spawn(async move {
+            let mut buf = [0u8; 4096];
+            loop {
+                match stderr.read(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+            }
+        });
+    }
+    if let Some(mut stdout) = child.stdout.take() {
+        tokio::spawn(async move {
+            let mut buf = [0u8; 4096];
+            loop {
+                match stdout.read(&mut buf).await {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+            }
+        });
     }
 }
 
@@ -828,16 +893,23 @@ impl InferenceBackend for LlamaCppBackend {
 
             let args = self.build_args(&path, params, &plan);
             let mut cmd = Command::new(&plan.runtime.path);
-            cmd.args(&args).stdout(Stdio::null()).stderr(Stdio::null());
+            cmd.args(&args).stdout(Stdio::piped()).stderr(Stdio::piped());
             if let Some(parent) = plan.runtime.path.parent() {
                 cmd.current_dir(parent);
             }
 
             match cmd.spawn() {
                 Ok(child) => {
+                    // Failure paths read the pipes in wait_until_ready / take_child_stdio_tail.
+                    // Once healthy we drain them so the process cannot block on a full buffer.
                     *self.process.lock().await = Some(child);
                     match self.wait_until_ready().await {
                         Ok(_) => {
+                            if let Ok(mut proc_lock) = self.process.try_lock() {
+                                if let Some(alive) = proc_lock.as_mut() {
+                                    drain_child_stdio(alive);
+                                }
+                            }
                             let mut loaded = self.model_loaded.lock().await;
                             let mut loaded_path = self.loaded_model_path.lock().await;
                             let mut loaded_signature = self.loaded_runtime_signature.lock().await;

@@ -321,7 +321,7 @@
           ${sel.size_human || ""} — ${sel.reason || ""}
           ${sel.warning ? `<span class="pill warn">${sel.warning}</span>` : ""}</p>
           <p>Auto-optimizer: <code>${opt.strategy || "?"}</code>
-          GPU layers <code>${nglLabel}</code>
+          GPU layers <code>${opt.strategy === "no-model" ? "n/a" : nglLabel}</code>
           · CTX <code>${opt.context_size || st.env_ctx_size || "?"}</code>
           · free VRAM <code>${opt.free_vram_human || "?"}</code>
           · model <code>${opt.model_bytes_human || "?"}</code>

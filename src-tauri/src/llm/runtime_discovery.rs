@@ -280,6 +280,34 @@ pub fn all_runtime_candidates(gpu_layers: i32) -> Vec<RuntimeCandidate> {
     all
 }
 
+/// True when the only GPUs look like small integrated chips (Intel UHD / Iris /
+/// similar) with little dedicated VRAM. Vulkan backends still initialize the
+/// device even at `--gpu-layers 0` and often crash with `0xc0000005` / OOM on
+/// those GPUs — prefer the dedicated CPU binary instead.
+pub fn weak_igpu_only() -> bool {
+    if has_nvidia_driver() {
+        return false;
+    }
+    let mut monitor = HardwareMonitor::new();
+    let info = monitor.get_system_info();
+    if info.gpus.is_empty() {
+        return true;
+    }
+    let four_gb = 4u64 * 1024 * 1024 * 1024;
+    // Any discrete-sized GPU (>= 4 GB) means Vulkan/CUDA may be worth trying.
+    if info.gpus.iter().any(|g| g.vram_total_bytes >= four_gb) {
+        return false;
+    }
+    info.gpus.iter().all(|g| {
+        let name = g.name.to_lowercase();
+        name.contains("intel")
+            || name.contains("uhd")
+            || name.contains("iris")
+            || name.contains("radeon graphics")
+            || g.vram_total_bytes < 2 * 1024 * 1024 * 1024
+    })
+}
+
 /// Order discovered runtimes by the platform-aware device priority used for chat.
 pub fn ordered_runtime_candidates(gpu_layers: i32) -> AppResult<Vec<RuntimeCandidate>> {
     let all = all_runtime_candidates(gpu_layers);
@@ -290,9 +318,10 @@ pub fn ordered_runtime_candidates(gpu_layers: i32) -> AppResult<Vec<RuntimeCandi
     let nvidia_ok = has_nvidia_driver();
     let metal_hw = macos_metal_hardware();
     let wants_gpu = gpu_layers != 0;
+    let prefer_cpu = weak_igpu_only();
     let mut ordered = Vec::<RuntimeCandidate>::new();
 
-    if wants_gpu {
+    if wants_gpu && !prefer_cpu {
         if cfg!(target_os = "macos") && metal_hw {
             // Only lead with Metal runtimes that actually contain a Metal backend.
             ordered.extend(
@@ -314,6 +343,7 @@ pub fn ordered_runtime_candidates(gpu_layers: i32) -> AppResult<Vec<RuntimeCandi
             (c.mode == "metal" || c.mode == "vulkan" || c.mode == "cuda") && c.force_cpu
         }).map(|c| { let mut x = c.clone(); x.force_cpu = true; x }));
     } else {
+        // CPU-first: explicit CPU request, or weak iGPU where Vulkan crashes at ngl=0.
         ordered.extend(all.iter().filter(|c| c.mode == "cpu").map(|c| { let mut x = c.clone(); x.force_cpu = true; x }));
         ordered.extend(all.iter().filter(|c| c.mode == "auto" || c.mode == "path" || c.mode == "explicit").map(|c| { let mut x = c.clone(); x.force_cpu = true; x }));
         ordered.extend(all.iter().filter(|c| c.mode == "metal" || c.mode == "vulkan" || c.mode == "cuda").map(|c| { let mut x = c.clone(); x.force_cpu = true; x }));

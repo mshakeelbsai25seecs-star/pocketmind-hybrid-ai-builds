@@ -32,7 +32,7 @@ export interface LlamaServerStatus {
   };
   inspect: { running?: boolean; status?: string };
   chat_url_local: string;
-  optimizer?: { strategy?: string; model_bytes_human?: string };
+  optimizer?: { strategy?: string; model_bytes_human?: string; notes?: string[] };
 }
 
 const TOKEN_KEY = 'pm.llama.admin.token';

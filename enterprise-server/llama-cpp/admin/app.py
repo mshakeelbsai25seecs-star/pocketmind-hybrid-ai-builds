@@ -171,9 +171,53 @@ def run_cmd(args: list[str], timeout: int = 120) -> tuple[int, str, str]:
         return 124, "", "Command timed out"
 
 
+def _docker_cli_candidates() -> list[str]:
+    """Resolve docker.exe even when Docker Desktop is installed but not on PATH."""
+    found: list[str] = ["docker"]
+    program_files = os.environ.get("ProgramFiles", r"C:\Program Files")
+    program_files_x86 = os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")
+    local_app = os.environ.get("LOCALAPPDATA", "")
+    extras = [
+        Path(program_files) / "Docker" / "Docker" / "resources" / "bin" / "docker.exe",
+        Path(program_files_x86) / "Docker" / "Docker" / "resources" / "bin" / "docker.exe",
+    ]
+    if local_app:
+        extras.append(Path(local_app) / "Docker" / "resources" / "bin" / "docker.exe")
+    for path in extras:
+        if path.is_file():
+            found.append(str(path))
+    # Preserve order, drop duplicates
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in found:
+        key = item.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
+
+def docker_cli() -> str:
+    """Return a working docker CLI path, preferring PATH then Docker Desktop installs."""
+    for candidate in _docker_cli_candidates():
+        code, _, _ = run_cmd([candidate, "version"], timeout=15)
+        if code == 0:
+            return candidate
+    return "docker"
+
+
+def docker_available() -> bool:
+    for candidate in _docker_cli_candidates():
+        if run_cmd([candidate, "version"], timeout=15)[0] == 0:
+            return True
+    return False
+
+
 def docker_compose(compose_file: str, *compose_args: str, timeout: int = 180) -> tuple[int, str, str]:
+    cli = docker_cli()
     return run_cmd(
-        ["docker", "compose", "--env-file", ".env", "-f", compose_file, *compose_args],
+        [cli, "compose", "--env-file", ".env", "-f", compose_file, *compose_args],
         timeout=timeout,
     )
 
@@ -195,7 +239,7 @@ def container_name_for(mode: str) -> str:
 
 
 def container_inspect(name: str) -> dict[str, Any]:
-    code, out, err = run_cmd(["docker", "inspect", name], timeout=30)
+    code, out, err = run_cmd([docker_cli(), "inspect", name], timeout=30)
     if code != 0:
         return {"exists": False, "error": (err or out).strip() or "not found"}
     try:
@@ -217,7 +261,7 @@ def container_inspect(name: str) -> dict[str, Any]:
 
 
 def container_logs(name: str, tail: int = 120) -> str:
-    code, out, err = run_cmd(["docker", "logs", "--tail", str(tail), name], timeout=30)
+    code, out, err = run_cmd([docker_cli(), "logs", "--tail", str(tail), name], timeout=30)
     return ((out or "") + "\n" + (err or "")).strip()
 
 
@@ -508,17 +552,35 @@ def api_status(
     inspect = container_inspect(cname)
     alt = container_inspect(container_name_for("cpu" if mode == "cuda" else "cuda"))
     port = chat_port()
+    selected = selected_model_info()
+    # Always compute a live plan so a stale .optimizer_plan.json cannot claim
+    # "almost no free VRAM" / cuda-image-cpu-layers when no GGUF is selected.
+    live_plan = build_plan(PACKAGE_ROOT, ENV_FILE).to_dict()
+    saved = load_saved_plan(PACKAGE_ROOT) or {}
+    optimizer = dict(live_plan)
+    if selected.get("valid") and saved.get("strategy") and saved.get("strategy") != "no-model":
+        for key in ("applied_gpu_layers", "ready", "detail", "attempts_log", "fell_back_to_cpu"):
+            if key in saved:
+                optimizer[key] = saved[key]
+        if inspect.get("running") and saved.get("gpu_layers") is not None:
+            optimizer["gpu_layers"] = saved.get("gpu_layers")
+            optimizer["strategy"] = saved.get("strategy", optimizer.get("strategy"))
+            optimizer["notes"] = saved.get("notes", optimizer.get("notes"))
+    elif not selected.get("valid"):
+        # Drop misleading saved CUDA notes when the selected model is missing/invalid.
+        optimizer["applied_gpu_layers"] = 0
+        optimizer.pop("ready", None)
     return {
         "mode_suggested": mode,
         "container": cname,
         "inspect": inspect,
         "alt_inspect": alt,
-        "selected_model": selected_model_info(),
+        "selected_model": selected,
         "chat_api": probe_models_api(port),
         "chat_url_local": f"http://127.0.0.1:{port}/v1",
         "download": dict(_download_state),
-        "docker_ok": run_cmd(["docker", "version"], timeout=15)[0] == 0,
-        "optimizer": load_saved_plan(PACKAGE_ROOT) or build_plan(PACKAGE_ROOT, ENV_FILE).to_dict(),
+        "docker_ok": docker_available(),
+        "optimizer": optimizer,
         "env_gpu_layers": read_env_value(ENV_FILE, "GPU_LAYERS", "-1"),
         "env_ctx_size": read_env_value(ENV_FILE, "CTX_SIZE", "4096"),
         "auto_optimize": read_env_value(ENV_FILE, "AUTO_OPTIMIZE", "1"),
@@ -876,13 +938,23 @@ def api_start(
 ) -> dict[str, Any]:
     require_token(authorization, x_admin_token)
     ensure_layout()
+    if not docker_available():
+        raise HTTPException(
+            400,
+            detail=(
+                "Refusing to start: Docker is not running or docker.exe was not found. "
+                "Install/start Docker Desktop (enable WSL2), then click Refresh. "
+                "For CUDA also install the NVIDIA Container Toolkit."
+            ),
+        )
     info = selected_model_info()
     if not info["valid"]:
         raise HTTPException(
             400,
             detail=(
                 f"Refusing to start: selected model invalid — {info['reason']} "
-                f"({info['host_path']}). Download/select a complete GGUF first."
+                f"({info['host_path']}). Use Import local GGUF, scan a folder, or "
+                "download from the catalog, then Select a complete .gguf first."
             ),
         )
     mode = (body.mode or "").strip().lower() or None
@@ -931,12 +1003,13 @@ def api_logs(
     tail = max(10, min(tail, 400))
     mode = detect_mode()
     name = container_name_for(mode)
-    code, out, err = run_cmd(["docker", "logs", "--tail", str(tail), name], timeout=60)
+    cli = docker_cli()
+    code, out, err = run_cmd([cli, "logs", "--tail", str(tail), name], timeout=60)
     text = out or err
     if code != 0:
         # try the other container
         alt = container_name_for("cpu" if mode == "cuda" else "cuda")
-        code2, out2, err2 = run_cmd(["docker", "logs", "--tail", str(tail), alt], timeout=60)
+        code2, out2, err2 = run_cmd([cli, "logs", "--tail", str(tail), alt], timeout=60)
         text = out2 or err2 or text
         name = alt if code2 == 0 else name
     return {"container": name, "logs": text}

@@ -206,10 +206,25 @@ export default function EnterpriseServerHostPanel() {
 
       {status && (
         <div className="rounded-2xl bg-surface-50/80 dark:bg-surface-900/50 p-4 text-sm space-y-1">
-          <p>Docker: {status.docker_ok ? 'OK' : 'Missing — install Docker Desktop + NVIDIA Container Toolkit for CUDA'}</p>
+          <p>Docker: {status.docker_ok ? 'OK' : 'Missing — install/start Docker Desktop (+ NVIDIA Container Toolkit for CUDA)'}</p>
           <p>Suggested mode: <code>{status.mode_suggested}</code> · Container: {status.inspect?.running ? 'running' : (status.inspect?.status || 'not running')}</p>
           <p>Model: {status.selected_model.valid ? 'valid' : 'invalid'} — {status.selected_model.size_human} ({status.selected_model.reason || status.selected_model.model_path_env})</p>
+          {status.optimizer?.strategy && (
+            <p>Optimizer: <code>{status.optimizer.strategy}</code>
+              {status.optimizer.strategy === 'no-model'
+                ? ' — import a GGUF before Start'
+                : status.optimizer.notes?.[0]
+                  ? ` — ${status.optimizer.notes[0]}`
+                  : ''}
+            </p>
+          )}
           <p>Chat API: {status.chat_api.ok ? 'reachable' : `down${status.chat_api.error ? ` — ${status.chat_api.error}` : ''}`}</p>
+          {!status.docker_ok && (
+            <p className="text-amber-700 dark:text-amber-300">Chat cannot start until Docker is available — same root cause as local llama-server being unreachable.</p>
+          )}
+          {status.docker_ok && !status.selected_model.valid && (
+            <p className="text-amber-700 dark:text-amber-300">Import a local GGUF above (or scan your models folder), then Start. Default <code>model.gguf</code> is only a placeholder.</p>
+          )}
         </div>
       )}
 
