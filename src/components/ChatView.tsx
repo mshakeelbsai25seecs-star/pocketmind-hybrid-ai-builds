@@ -5,7 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import {
   Send, Square, Bot, User, Copy, Check, Trash2,
   Paperclip, Sparkles, AlertCircle, Download, MessageSquare,
-  SlidersHorizontal, ClipboardCopy, RotateCcw, FileText, X,
+  SlidersHorizontal, RotateCcw, FileText, X,
   UploadCloud, Info, Power, ChevronDown
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -24,7 +24,6 @@ import {
 import { exportChatAs, type ChatExportKind } from '../chatExport';
 import { exportContentAsDocument, pickChatBackend, type DocFormatId } from '../docStudio';
 import ContextBudgetBar from './ContextBudgetBar';
-import DiffViewer from './DiffViewer';
 import { computeContextBudget, defaultKeepLastN } from '../contextBudget';
 import { FEATURE_FLAGS } from '../featureFlags';
 import { getSetting, setSetting } from '../api/powerFeatures';
@@ -986,8 +985,6 @@ export default function ChatView() {
   const [attachmentNotice, setAttachmentNotice] = useState<string | null>(null);
   const [includeAttachments, setIncludeAttachments] = useState(true);
   const [keepLastN, setKeepLastN] = useState(defaultKeepLastN());
-  const [showCompareRewrite, setShowCompareRewrite] = useState(false);
-  const [compareOriginal, setCompareOriginal] = useState('');
   /** Live reasoning for the in-flight assistant message (Cursor-style Thought). */
   const [liveReasoning, setLiveReasoning] = useState('');
   const [liveReasoningMsgId, setLiveReasoningMsgId] = useState<string | null>(null);
@@ -1137,11 +1134,6 @@ export default function ChatView() {
     }
   };
 
-  const lastAssistantMessage = useMemo(() => {
-    const list = currentMessages.filter(m => m.role === 'assistant' && m.content && m.content !== 'Thinking...');
-    return list[list.length - 1]?.content ?? '';
-  }, [currentMessages]);
-
   const contextBudget = useMemo(() => {
     if (!FEATURE_FLAGS.contextBudgetBar) return null;
     const fileBlock = includeAttachments && attachments.length > 0
@@ -1188,13 +1180,6 @@ export default function ChatView() {
     } finally {
       setBusyCreatingChat(false);
     }
-  };
-
-  const copyChat = async () => {
-    const text = currentMessages.map(m => `${m.role.toUpperCase()}:\n${m.content}`).join('\n\n---\n\n');
-    await navigator.clipboard.writeText(text || '');
-    setCopiedId('chat');
-    setTimeout(() => setCopiedId(null), 2000);
   };
 
   const exportChat = async (kind: ChatExportKind) => {
@@ -1805,29 +1790,12 @@ export default function ChatView() {
             <span className="hidden sm:inline">New Chat</span>
           </button>
           <button
-            onClick={() => setShowCompareRewrite(v => !v)}
-            className="btn-secondary text-xs xl:text-sm px-2.5 xl:px-4 py-1.5 xl:py-2 flex-shrink-0 whitespace-nowrap"
-            title="Compare rewrite vs last assistant message"
-          >
-            <span className="hidden lg:inline">Compare rewrite</span>
-            <span className="lg:hidden">Compare</span>
-          </button>
-          <button
             onClick={() => setShowTuning(v => !v)}
             className="btn-secondary text-xs xl:text-sm px-2.5 xl:px-4 py-1.5 xl:py-2 flex items-center gap-1.5 flex-shrink-0 whitespace-nowrap"
             title="Generation tuning"
           >
             <SlidersHorizontal className="w-4 h-4 flex-shrink-0" />
             <span className="hidden sm:inline">Tuning</span>
-          </button>
-          <button
-            onClick={copyChat}
-            className="btn-secondary text-xs xl:text-sm px-2.5 xl:px-4 py-1.5 xl:py-2 flex items-center gap-1.5 flex-shrink-0 whitespace-nowrap"
-            title="Copy whole chat"
-          >
-            <ClipboardCopy className="w-4 h-4 flex-shrink-0" />
-            <span className="hidden md:inline">{copiedId === 'chat' ? 'Copied' : 'Copy chat'}</span>
-            <span className="md:hidden">{copiedId === 'chat' ? 'Copied' : 'Copy'}</span>
           </button>
           <div className="relative flex-shrink-0">
             <button
@@ -1921,26 +1889,6 @@ export default function ChatView() {
               <span className="text-xs text-surface-500 self-center">Runtime tip: GPU layers -1 lets PocketMind Hybrid AI decide. It tries full GPU, then CPU + GPU split, then CPU fallback.</span>
             </div>
           </div>
-          </div>
-        </div>
-      )}
-
-      {showCompareRewrite && FEATURE_FLAGS.diffViewer && (
-        <div className="border-b border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-950 p-4">
-          <div className="max-w-5xl mx-auto space-y-3">
-            <p className="text-sm font-bold">Compare rewrite vs last assistant message</p>
-            <textarea
-              value={compareOriginal}
-              onChange={e => setCompareOriginal(e.target.value)}
-              rows={4}
-              placeholder="Paste original text to compare…"
-              className="input-field w-full text-sm font-mono"
-            />
-            {compareOriginal && lastAssistantMessage ? (
-              <DiffViewer original={compareOriginal} modified={lastAssistantMessage} />
-            ) : (
-              <p className="text-xs text-surface-500">Paste original text and ensure the chat has an assistant reply.</p>
-            )}
           </div>
         </div>
       )}
