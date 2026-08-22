@@ -26,7 +26,8 @@ param(
   [string]$CmdlineToolsZip = "commandlinetools-win-11076708_latest.zip",
   [string]$AvdName = "pocketmind_api35",
   [switch]$RemoveBrokenCInstall,
-  [switch]$SkipSdkPackages
+  [switch]$SkipSdkPackages,
+  [switch]$ForceRedownload
 )
 
 $ErrorActionPreference = "Stop"
@@ -41,11 +42,81 @@ function Ensure-Directory([string]$Path) {
   }
 }
 
-function Assert-Sha256([string]$File, [string]$Expected) {
+function Test-Sha256([string]$File, [string]$Expected) {
+  if (-not (Test-Path -LiteralPath $File)) { return $false }
   $hash = (Get-FileHash -Algorithm SHA256 -Path $File).Hash.ToLowerInvariant()
-  if ($hash -ne $Expected.ToLowerInvariant()) {
-    throw "SHA256 mismatch for $File`nExpected: $Expected`nActual:   $hash"
+  return ($hash -eq $Expected.ToLowerInvariant())
+}
+
+function Download-LargeFile {
+  param(
+    [string]$Url,
+    [string]$Destination,
+    [string]$ExpectedSha256 = "",
+    [int]$MaxAttempts = 3
+  )
+
+  Ensure-Directory (Split-Path $Destination -Parent)
+  $curl = Get-Command curl.exe -ErrorAction SilentlyContinue
+  $verifySha = -not [string]::IsNullOrWhiteSpace($ExpectedSha256)
+
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+    if ($verifySha -and (Test-Sha256 $Destination $ExpectedSha256)) {
+      Write-Host "  Already downloaded and verified: $Destination"
+      return
+    }
+    if (-not $verifySha -and (Test-Path -LiteralPath $Destination) -and (Get-Item -LiteralPath $Destination).Length -gt 0) {
+      Write-Host "  Already downloaded: $Destination"
+      return
+    }
+
+    if (Test-Path -LiteralPath $Destination) {
+      Write-Host "  Removing incomplete/corrupt file (attempt $attempt/$MaxAttempts): $Destination" -ForegroundColor Yellow
+      Remove-Item -LiteralPath $Destination -Force
+    }
+
+    Write-Host "  Downloading (attempt $attempt/$MaxAttempts): $Url"
+    if ($curl) {
+      # curl handles large files and resume better than Invoke-WebRequest on Windows.
+      & curl.exe -fL --retry 5 --retry-delay 5 --connect-timeout 30 `
+        -o $Destination $Url
+      if ($LASTEXITCODE -ne 0) {
+        if ($attempt -eq $MaxAttempts) {
+          throw "curl download failed with exit code $LASTEXITCODE"
+        }
+        Start-Sleep -Seconds 5
+        continue
+      }
+    } else {
+      try {
+        Invoke-WebRequest -Uri $Url -OutFile $Destination -UseBasicParsing
+      } catch {
+        if ($attempt -eq $MaxAttempts) { throw }
+        Start-Sleep -Seconds 5
+        continue
+      }
+    }
+
+    if (-not $verifySha) {
+      if ((Test-Path -LiteralPath $Destination) -and (Get-Item -LiteralPath $Destination).Length -gt 0) {
+        $sizeMb = [math]::Round((Get-Item -LiteralPath $Destination).Length / 1MB, 1)
+        Write-Host "  Download complete ($sizeMb MB): $Destination"
+        return
+      }
+      Write-Host "  Download appears empty; will retry." -ForegroundColor Yellow
+      continue
+    }
+
+    if (Test-Sha256 $Destination $ExpectedSha256) {
+      $sizeMb = [math]::Round((Get-Item -LiteralPath $Destination).Length / 1MB, 1)
+      Write-Host "  Download verified ($sizeMb MB): $Destination"
+      return
+    }
+
+    Write-Host "  SHA256 check failed after download; will retry." -ForegroundColor Yellow
   }
+
+  throw "Failed to download a valid file after $MaxAttempts attempts: $Destination"
 }
 
 function Copy-TreeIfMissing {
@@ -147,11 +218,10 @@ if (-not (Test-Path -LiteralPath $studioExe)) {
   Write-Step "Downloading Android Studio $StudioVersion (zip installer for D:)"
   $studioUrl = "https://edgedl.me.gvt1.com/android/studio/ide-zips/$StudioVersion/$StudioZip"
   $studioArchive = Join-Path $DownloadDir $StudioZip
-  if (-not (Test-Path -LiteralPath $studioArchive)) {
-    Write-Host "  URL: $studioUrl"
-    Invoke-WebRequest -Uri $studioUrl -OutFile $studioArchive -UseBasicParsing
+  if ($ForceRedownload -and (Test-Path -LiteralPath $studioArchive)) {
+    Remove-Item -LiteralPath $studioArchive -Force
   }
-  Assert-Sha256 $studioArchive $StudioSha256
+  Download-LargeFile -Url $studioUrl -Destination $studioArchive -ExpectedSha256 $StudioSha256
 
   Write-Step "Extracting Android Studio to $StudioDir"
   if (Test-Path -LiteralPath $StudioDir) {
@@ -197,9 +267,10 @@ if (-not (Test-Path -LiteralPath $sdkManager)) {
   Write-Step "Installing Android SDK command-line tools"
   $cmdlineUrl = "https://dl.google.com/android/repository/$CmdlineToolsZip"
   $cmdlineArchive = Join-Path $DownloadDir $CmdlineToolsZip
-  if (-not (Test-Path -LiteralPath $cmdlineArchive)) {
-    Invoke-WebRequest -Uri $cmdlineUrl -OutFile $cmdlineArchive -UseBasicParsing
+  if ($ForceRedownload -and (Test-Path -LiteralPath $cmdlineArchive)) {
+    Remove-Item -LiteralPath $cmdlineArchive -Force
   }
+  Download-LargeFile -Url $cmdlineUrl -Destination $cmdlineArchive -ExpectedSha256 ""
   $tmp = Join-Path $env:TEMP ("android-cmdline-" + [guid]::NewGuid().ToString())
   Ensure-Directory $tmp
   Expand-Archive -LiteralPath $cmdlineArchive -DestinationPath $tmp -Force
