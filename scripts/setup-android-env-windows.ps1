@@ -9,16 +9,16 @@
   by performing a clean install of Android Studio to D:\Android\Android Studio and
   relocating SDK, AVD, Gradle, and IDE config/cache to D:\Android\.
 
+  Default project root: D:\nexus-ai-deep-fixed
+
   Safe to re-run. Does not delete your C: install until you pass -RemoveBrokenCInstall.
 
 .EXAMPLE
-  powershell -ExecutionPolicy Bypass -File .\scripts\setup-android-env-windows.ps1
-
-.EXAMPLE
-  powershell -ExecutionPolicy Bypass -File .\scripts\setup-android-env-windows.ps1 -RemoveBrokenCInstall
+  powershell -ExecutionPolicy Bypass -File D:\nexus-ai-deep-fixed\scripts\setup-android-env-windows.ps1 -RemoveBrokenCInstall
 #>
 [CmdletBinding()]
 param(
+  [string]$ProjectRoot = "D:\nexus-ai-deep-fixed",
   [string]$DriveRoot = "D:\Android",
   [string]$StudioVersion = "2026.1.3.8",
   [string]$StudioZip = "android-studio-quail3-patch1-windows.zip",
@@ -36,12 +36,12 @@ function Write-Step([string]$Message) {
 }
 
 function Ensure-Directory([string]$Path) {
-  if (-not (Test-Path $Path)) {
+  if (-not (Test-Path -LiteralPath $Path)) {
     New-Item -ItemType Directory -Force -Path $Path | Out-Null
   }
 }
 
-function Test-Sha256([string]$File, [string]$Expected) {
+function Assert-Sha256([string]$File, [string]$Expected) {
   $hash = (Get-FileHash -Algorithm SHA256 -Path $File).Hash.ToLowerInvariant()
   if ($hash -ne $Expected.ToLowerInvariant()) {
     throw "SHA256 mismatch for $File`nExpected: $Expected`nActual:   $hash"
@@ -50,7 +50,7 @@ function Test-Sha256([string]$File, [string]$Expected) {
 
 function Copy-TreeIfMissing {
   param([string]$Source, [string]$Destination)
-  if (-not (Test-Path $Source)) { return 0 }
+  if (-not (Test-Path -LiteralPath $Source)) { return 0 }
   Ensure-Directory $Destination
   $count = 0
   Get-ChildItem -Path $Source -Recurse -File | ForEach-Object {
@@ -58,8 +58,8 @@ function Copy-TreeIfMissing {
     $destFile = Join-Path $Destination $rel
     $destDir = Split-Path $destFile -Parent
     Ensure-Directory $destDir
-    if (-not (Test-Path $destFile)) {
-      Copy-Item $_.FullName $destFile
+    if (-not (Test-Path -LiteralPath $destFile)) {
+      Copy-Item -LiteralPath $_.FullName -Destination $destFile
       $count++
     }
   }
@@ -71,22 +71,26 @@ function Set-UserEnv([string]$Name, [string]$Value) {
   Set-Item -Path "Env:$Name" -Value $Value
 }
 
-# --- Paths on D: ---
-if (-not (Test-Path "D:\")) {
+# Prefer the script's own repo if it lives under a different path than the default.
+$ScriptRepoRoot = Split-Path -Parent $PSScriptRoot
+if (Test-Path -LiteralPath (Join-Path $ScriptRepoRoot "android")) {
+  $ProjectRoot = $ScriptRepoRoot
+}
+
+if (-not (Test-Path -LiteralPath "D:\")) {
   throw "Drive D: is not available. Plug in / mount the D: drive or pass -DriveRoot to another volume."
 }
 
-$StudioDir      = Join-Path $DriveRoot "Android Studio"
-$SdkRoot        = Join-Path $DriveRoot "Sdk"
-$AvdHome        = Join-Path $DriveRoot "avd"
-$GradleHome     = Join-Path $DriveRoot ".gradle"
-$StudioConfig   = Join-Path $DriveRoot "AndroidStudioConfig"
-$StudioCache    = Join-Path $DriveRoot "AndroidStudioCache"
-$StudioLogs     = Join-Path $DriveRoot "AndroidStudioLogs"
-$DownloadDir    = Join-Path $DriveRoot "Downloads"
-$BrokenCStudio  = "${env:ProgramFiles}\Android\Android Studio"
-$RepoRoot       = Split-Path -Parent $PSScriptRoot
-$AndroidDir     = Join-Path $RepoRoot "android"
+$StudioDir     = Join-Path $DriveRoot "Android Studio"
+$SdkRoot       = Join-Path $DriveRoot "Sdk"
+$AvdHome       = Join-Path $DriveRoot "avd"
+$GradleHome    = Join-Path $DriveRoot ".gradle"
+$StudioConfig  = Join-Path $DriveRoot "AndroidStudioConfig"
+$StudioCache   = Join-Path $DriveRoot "AndroidStudioCache"
+$StudioLogs    = Join-Path $DriveRoot "AndroidStudioLogs"
+$DownloadDir   = Join-Path $DriveRoot "Downloads"
+$BrokenCStudio = Join-Path ${env:ProgramFiles} "Android\Android Studio"
+$AndroidDir    = Join-Path $ProjectRoot "android"
 
 Ensure-Directory $DriveRoot
 Ensure-Directory $DownloadDir
@@ -98,17 +102,16 @@ Ensure-Directory $StudioCache
 Ensure-Directory $StudioLogs
 
 Write-Host "PocketMind Hybrid AI — Android Studio setup (Windows, D: drive)" -ForegroundColor Green
+Write-Host "  Project: $ProjectRoot"
 Write-Host "  Studio:  $StudioDir"
 Write-Host "  SDK:     $SdkRoot"
 Write-Host "  AVD:     $AvdHome"
 Write-Host "  Gradle:  $GradleHome"
 
 # --- Detect broken C: install (EssentialPluginMissingException) ---
-if (Test-Path $BrokenCStudio) {
+if (Test-Path -LiteralPath $BrokenCStudio) {
   $pluginsDir = Join-Path $BrokenCStudio "plugins"
-  $essential = @(
-    "android", "gradle", "java", "Kotlin", "Git4Idea", "JUnit"
-  )
+  $essential = @("android", "gradle", "java", "Kotlin", "Git4Idea", "JUnit")
   $missing = @()
   foreach ($name in $essential) {
     $match = Get-ChildItem -Path $pluginsDir -Directory -ErrorAction SilentlyContinue |
@@ -123,45 +126,46 @@ if (Test-Path $BrokenCStudio) {
     if ($RemoveBrokenCInstall) {
       Write-Step "Removing broken C: Android Studio install"
       try {
-        # Best-effort uninstall via winget if present
         $winget = Get-Command winget -ErrorAction SilentlyContinue
         if ($winget) {
           & winget uninstall --id Google.AndroidStudio --accept-source-agreements --disable-interactivity 2>$null
         }
       } catch { }
-      if (Test-Path $BrokenCStudio) {
+      if (Test-Path -LiteralPath $BrokenCStudio) {
         Remove-Item -LiteralPath $BrokenCStudio -Recurse -Force -ErrorAction SilentlyContinue
       }
-      $cConfig = Join-Path $env:APPDATA "Google\AndroidStudio*"
-      Write-Host "  Left user config at $cConfig (migrate manually if needed)."
+      Write-Host "  Left user config under $env:APPDATA\Google\AndroidStudio* (migrate manually if needed)."
     } else {
       Write-Host "  Re-run with -RemoveBrokenCInstall after closing Android Studio to remove the C: install."
     }
   }
 }
 
-# --- Install Android Studio (zip → D:, keeps plugins intact) ---
+# --- Install Android Studio (zip -> D:, keeps plugins intact) ---
 $studioExe = Join-Path $StudioDir "bin\studio64.exe"
-if (-not (Test-Path $studioExe)) {
+if (-not (Test-Path -LiteralPath $studioExe)) {
   Write-Step "Downloading Android Studio $StudioVersion (zip installer for D:)"
   $studioUrl = "https://edgedl.me.gvt1.com/android/studio/ide-zips/$StudioVersion/$StudioZip"
   $studioArchive = Join-Path $DownloadDir $StudioZip
-  if (-not (Test-Path $studioArchive)) {
+  if (-not (Test-Path -LiteralPath $studioArchive)) {
+    Write-Host "  URL: $studioUrl"
     Invoke-WebRequest -Uri $studioUrl -OutFile $studioArchive -UseBasicParsing
   }
-  Test-Sha256 $studioArchive $StudioSha256
+  Assert-Sha256 $studioArchive $StudioSha256
 
   Write-Step "Extracting Android Studio to $StudioDir"
-  if (Test-Path $StudioDir) {
+  if (Test-Path -LiteralPath $StudioDir) {
     Remove-Item -LiteralPath $StudioDir -Recurse -Force
   }
   Ensure-Directory $StudioDir
   Expand-Archive -LiteralPath $studioArchive -DestinationPath $DriveRoot -Force
-  $extracted = Get-ChildItem -Path $DriveRoot -Directory | Where-Object { $_.Name -like "android-studio*" } | Select-Object -First 1
+  $extracted = Get-ChildItem -Path $DriveRoot -Directory |
+    Where-Object { $_.Name -like "android-studio*" } |
+    Select-Object -First 1
   if ($extracted -and $extracted.FullName -ne $StudioDir) {
     Rename-Item -LiteralPath $extracted.FullName -NewName "Android Studio"
   }
-  if (-not (Test-Path $studioExe)) {
+  if (-not (Test-Path -LiteralPath $studioExe)) {
     throw "studio64.exe not found at $studioExe after extract."
   }
 } else {
@@ -172,48 +176,43 @@ if (-not (Test-Path $studioExe)) {
 Write-Step "Configuring Android Studio config, cache, and logs on D:"
 $ideaProps = Join-Path $StudioDir "bin\idea.properties"
 $props = @()
-if (Test-Path $ideaProps) {
-  $props = Get-Content $ideaProps | Where-Object {
+if (Test-Path -LiteralPath $ideaProps) {
+  $props = Get-Content -LiteralPath $ideaProps | Where-Object {
     $_ -notmatch '^\s*idea\.(config|system|plugins|log)\.path\s*='
   }
 }
-$escaped = @{
-  config  = ($StudioConfig -replace '\\', '/')
-  system  = ($StudioCache -replace '\\', '/')
-  plugins = (Join-Path $StudioConfig "plugins" -replace '\\', '/')
-  log     = ($StudioLogs -replace '\\', '/')
-}
+$pluginsPath = (Join-Path $StudioConfig "plugins") -replace '\\', '/'
 $props += @(
-  "idea.config.path=$($escaped.config)"
-  "idea.system.path=$($escaped.system)"
-  "idea.plugins.path=$($escaped.plugins)"
-  "idea.log.path=$($escaped.log)"
+  "idea.config.path=$($StudioConfig -replace '\\', '/')"
+  "idea.system.path=$($StudioCache -replace '\\', '/')"
+  "idea.plugins.path=$pluginsPath"
+  "idea.log.path=$($StudioLogs -replace '\\', '/')"
 )
 Ensure-Directory (Join-Path $StudioConfig "plugins")
 Set-Content -Path $ideaProps -Value $props -Encoding UTF8
 
 # --- SDK cmdline-tools ---
 $sdkManager = Join-Path $SdkRoot "cmdline-tools\latest\bin\sdkmanager.bat"
-if (-not (Test-Path $sdkManager)) {
+if (-not (Test-Path -LiteralPath $sdkManager)) {
   Write-Step "Installing Android SDK command-line tools"
   $cmdlineUrl = "https://dl.google.com/android/repository/$CmdlineToolsZip"
   $cmdlineArchive = Join-Path $DownloadDir $CmdlineToolsZip
-  if (-not (Test-Path $cmdlineArchive)) {
+  if (-not (Test-Path -LiteralPath $cmdlineArchive)) {
     Invoke-WebRequest -Uri $cmdlineUrl -OutFile $cmdlineArchive -UseBasicParsing
   }
   $tmp = Join-Path $env:TEMP ("android-cmdline-" + [guid]::NewGuid().ToString())
   Ensure-Directory $tmp
   Expand-Archive -LiteralPath $cmdlineArchive -DestinationPath $tmp -Force
   $latest = Join-Path $SdkRoot "cmdline-tools\latest"
-  if (Test-Path $latest) { Remove-Item $latest -Recurse -Force }
+  if (Test-Path -LiteralPath $latest) { Remove-Item -LiteralPath $latest -Recurse -Force }
   Ensure-Directory $latest
   $inner = Join-Path $tmp "cmdline-tools"
-  if (Test-Path $inner) {
+  if (Test-Path -LiteralPath $inner) {
     Copy-Item -Path (Join-Path $inner "*") -Destination $latest -Recurse -Force
   } else {
     Copy-Item -Path (Join-Path $tmp "*") -Destination $latest -Recurse -Force
   }
-  Remove-Item $tmp -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $tmp -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 if (-not $SkipSdkPackages) {
@@ -247,9 +246,13 @@ foreach ($m in $migrations) {
 # --- AVD on D: ---
 $env:ANDROID_AVD_HOME = $AvdHome
 $avdManager = Join-Path $SdkRoot "cmdline-tools\latest\bin\avdmanager.bat"
-if ((Test-Path $avdManager) -and -not (Test-Path (Join-Path $AvdHome "$AvdName.avd"))) {
+if ((Test-Path -LiteralPath $avdManager) -and -not (Test-Path -LiteralPath (Join-Path $AvdHome "$AvdName.avd"))) {
   Write-Step "Creating AVD $AvdName on D:"
-  "no" | & $avdManager create avd -n $AvdName -k "system-images;android-35;google_apis;x86_64" -d pixel_6 --force 2>&1 | Out-Null
+  "no" | & $avdManager create avd `
+    -n $AvdName `
+    -k "system-images;android-35;google_apis;x86_64" `
+    -d pixel_6 `
+    --force 2>&1 | Out-Null
 }
 
 # --- User environment variables (persistent) ---
@@ -276,16 +279,18 @@ foreach ($entry in $pathAdds) {
 $env:Path = "$userPath;$env:Path"
 
 # --- Project local.properties ---
-if (Test-Path $AndroidDir) {
+if (Test-Path -LiteralPath $AndroidDir) {
   $localProps = Join-Path $AndroidDir "local.properties"
   @"
 ## Machine-local SDK path (D: drive). Do not commit.
 sdk.dir=$($SdkRoot -replace '\\', '/')
 "@ | Set-Content -Path $localProps -Encoding UTF8
   Write-Host "  Wrote $localProps"
+} else {
+  Write-Host "  WARNING: android\ folder not found under $ProjectRoot" -ForegroundColor Yellow
 }
 
-# --- Desktop shortcut (optional) ---
+# --- Desktop shortcut ---
 $shortcutPath = Join-Path ([Environment]::GetFolderPath("Desktop")) "Android Studio (D).lnk"
 try {
   $wsh = New-Object -ComObject WScript.Shell
@@ -305,9 +310,11 @@ Write-Host @"
 Next steps:
   1. Close any broken Android Studio window from C:\Program Files.
   2. Launch: "$studioExe" "$AndroidDir"
-     (or use the desktop shortcut)
+     (or use the Desktop shortcut "Android Studio (D)")
   3. In the Setup Wizard, confirm SDK path: $SdkRoot
-  4. Build:  cd android && .\gradlew.bat assembleDebug
+  4. Build:
+       cd $ProjectRoot\android
+       .\gradlew.bat assembleDebug
 
 If C: still has a broken install, re-run with -RemoveBrokenCInstall after closing Studio.
 

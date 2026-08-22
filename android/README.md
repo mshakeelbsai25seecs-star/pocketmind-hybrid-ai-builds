@@ -36,15 +36,19 @@ android-studio /path/to/repo/android
 # or: /opt/android-studio/bin/studio.sh
 ```
 
-### Windows
+### Windows (`D:\nexus-ai-deep-fixed`)
 
 **Fix `EssentialPluginMissingException` and keep SDK/Gradle/AVD on D: (not C:):**
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\setup-android-env-windows.ps1
+# From anywhere — full path (recommended)
+powershell -ExecutionPolicy Bypass -File D:\nexus-ai-deep-fixed\scripts\setup-android-env-windows.ps1 -RemoveBrokenCInstall
+
+# Or double-click:
+#   D:\nexus-ai-deep-fixed\scripts\RUN-ANDROID-SETUP.cmd
 ```
 
-See [WINDOWS_SETUP.md](WINDOWS_SETUP.md) for manual steps and C: cleanup.
+See [WINDOWS_SETUP.md](WINDOWS_SETUP.md) for details and C: cleanup.
 
 ```bat
 cd android
