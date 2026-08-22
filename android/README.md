@@ -38,6 +38,14 @@ android-studio /path/to/repo/android
 
 ### Windows
 
+**Fix `EssentialPluginMissingException` and keep SDK/Gradle/AVD on D: (not C:):**
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-android-env-windows.ps1
+```
+
+See [WINDOWS_SETUP.md](WINDOWS_SETUP.md) for manual steps and C: cleanup.
+
 ```bat
 cd android
 copy keystore.properties.example keystore.properties
