@@ -11,15 +11,29 @@ That error means the install under `C:\Program Files\Android\Android Studio` is 
 
 ## One-command setup (recommended)
 
-From an **elevated or normal** PowerShell in the repo root:
+**You must run this from the repository root** (the folder that contains `android\` and `scripts\`), **not** from `C:\Windows\System32`.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\setup-android-env-windows.ps1
+# 1) Go to your PocketMind repo (change the path if yours is different)
+cd C:\path\to\nexus-ai-deep-fixed
+
+# 2) Confirm the script exists
+Test-Path .\scripts\setup-android-env-windows.ps1
+
+# 3) Run setup (add -RemoveBrokenCInstall to delete the broken C: install)
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-android-env-windows.ps1 -RemoveBrokenCInstall
 ```
+
+If `Test-Path` returns `False`, you do not have the latest repo yet. Either:
+
+- `git pull` on branch `cursor/android-studio-setup-7411`, or
+- use the **full path** to the script, e.g.  
+  `powershell -ExecutionPolicy Bypass -File "D:\Projects\nexus-ai-deep-fixed\scripts\setup-android-env-windows.ps1" -RemoveBrokenCInstall`
 
 Optional — remove the broken C: install after closing Android Studio:
 
 ```powershell
+cd C:\path\to\nexus-ai-deep-fixed
 powershell -ExecutionPolicy Bypass -File .\scripts\setup-android-env-windows.ps1 -RemoveBrokenCInstall
 ```
 
