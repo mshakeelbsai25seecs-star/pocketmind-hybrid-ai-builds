@@ -57,13 +57,85 @@ function Add-UserPathEntry([string]$Entry) {
 }
 
 function Test-MsvcToolchain {
+  if (Get-Command link.exe -ErrorAction SilentlyContinue) { return $true }
   $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
   if (Test-Path -LiteralPath $vswhere) {
     $installPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
     if ($installPath) { return $true }
   }
-  # Fallback: cl.exe already on PATH (Developer PowerShell)
-  return [bool](Get-Command cl.exe -ErrorAction SilentlyContinue)
+  return $false
+}
+
+function Get-VsInstallPath {
+  $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+  if (-not (Test-Path -LiteralPath $vswhere)) { return $null }
+  $path = & $vswhere -latest -products * -property installationPath 2>$null
+  if ($path) { return $path }
+  return (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null)
+}
+
+function Import-VsDevEnvironment {
+  $installPath = Get-VsInstallPath
+  if (-not $installPath) { return $false }
+
+  $candidates = @(
+    (Join-Path $installPath "Common7\Tools\VsDevCmd.bat"),
+    (Join-Path $installPath "VC\Auxiliary\Build\vcvars64.bat")
+  )
+  $devCmd = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+  if (-not $devCmd) { return $false }
+
+  Write-Host "  Importing MSVC environment from: $devCmd"
+  $tempBat = Join-Path $env:TEMP ("vsdev-env-" + [guid]::NewGuid().ToString() + ".bat")
+  @"
+@echo off
+call "$devCmd" -arch=amd64 >nul
+set
+"@ | Set-Content -Path $tempBat -Encoding ASCII
+
+  $lines = & cmd.exe /c "`"$tempBat`"" 2>$null
+  Remove-Item -LiteralPath $tempBat -Force -ErrorAction SilentlyContinue
+  foreach ($line in $lines) {
+    if ($line -match '^(.*?)=(.*)$') {
+      $name = $Matches[1]
+      $value = $Matches[2]
+      if ($name -and ($name -notmatch '^\s*$')) {
+        Set-Item -Path "Env:$name" -Value $value
+      }
+    }
+  }
+  return [bool](Get-Command link.exe -ErrorAction SilentlyContinue)
+}
+
+function Install-MsvcBuildTools {
+  Write-Host @"
+Installing / repairing Visual Studio 2022 Build Tools with C++ workload.
+This is required for link.exe. It may take 10–30 minutes and use some C: space.
+"@ -ForegroundColor Yellow
+
+  $winget = Get-Command winget -ErrorAction SilentlyContinue
+  if ($winget) {
+    # --force re-runs the installer so an existing Build Tools install can gain VCTools.
+    & winget install --id Microsoft.VisualStudio.2022.BuildTools -e --force `
+      --accept-source-agreements --accept-package-agreements --disable-interactivity `
+      --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+  }
+
+  $vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
+  $installPath = Get-VsInstallPath
+  if ((Test-Path -LiteralPath $vsInstaller) -and $installPath) {
+    Write-Host "  Running VS Installer modify for VCTools on: $installPath"
+    $p = Start-Process -FilePath $vsInstaller -ArgumentList @(
+      "modify",
+      "--installPath", $installPath,
+      "--add", "Microsoft.VisualStudio.Workload.VCTools",
+      "--includeRecommended",
+      "--quiet",
+      "--norestart",
+      "--wait"
+    ) -Wait -PassThru
+    Write-Host "  VS Installer exit code: $($p.ExitCode)"
+  }
 }
 
 # Prefer the script's own repo if present.
@@ -186,34 +258,30 @@ rustc --version
 # --- MSVC Build Tools (required for Tauri on Windows) ---
 Write-Step "Checking Visual C++ / MSVC toolchain"
 if (-not (Test-MsvcToolchain)) {
-  Write-Host @"
-WARNING: Microsoft C++ build tools were not detected.
-Tauri needs the MSVC toolchain to link the .exe.
+  Install-MsvcBuildTools
+}
 
-Install (one-time, may use some C: space for VS Build Tools):
-  winget install --id Microsoft.VisualStudio.2022.BuildTools -e --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-
-Or open Visual Studio Installer and add "Desktop development with C++".
-
-Attempting winget install now...
-"@ -ForegroundColor Yellow
-
-  $winget = Get-Command winget -ErrorAction SilentlyContinue
-  if ($winget) {
-    try {
-      & winget install --id Microsoft.VisualStudio.2022.BuildTools -e --accept-source-agreements --accept-package-agreements --disable-interactivity --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-    } catch {
-      Write-Host "winget Build Tools install failed: $($_.Exception.Message)" -ForegroundColor Yellow
-    }
-  }
-
+if (-not (Import-VsDevEnvironment)) {
   if (-not (Test-MsvcToolchain)) {
-    Write-Host "MSVC still not detected. Build may fail until Build Tools are installed." -ForegroundColor Yellow
-  } else {
-    Write-Host "MSVC toolchain detected." -ForegroundColor Green
+    throw @"
+Microsoft C++ build tools (link.exe) are still missing.
+
+Close other Visual Studio Installer windows, then run as Administrator:
+
+  winget install --id Microsoft.VisualStudio.2022.BuildTools -e --force --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+
+Or open "Visual Studio Installer" → Modify Build Tools → enable "Desktop development with C++".
+
+Then re-run:
+  powershell -ExecutionPolicy Bypass -File D:\nexus-ai-deep-fixed\scripts\build-desktop-windows.ps1 -SkipLlamaRuntimes
+"@
   }
+}
+
+if (Get-Command link.exe -ErrorAction SilentlyContinue) {
+  Write-Host "MSVC linker ready: $((Get-Command link.exe).Source)" -ForegroundColor Green
 } else {
-  Write-Host "MSVC toolchain detected." -ForegroundColor Green
+  Write-Host "WARNING: link.exe still not on PATH; build will likely fail." -ForegroundColor Yellow
 }
 
 # --- WebView2 Runtime ---
@@ -262,6 +330,12 @@ $env:CARGO_HOME = $CargoHome
 $env:RUSTUP_HOME = $RustupHome
 $env:CARGO_TARGET_DIR = $TargetDir
 $env:Path = "$(Join-Path $CargoHome 'bin');$env:Path"
+# Ensure MSVC env is loaded in this session (link.exe / cl.exe).
+[void](Import-VsDevEnvironment)
+
+if (-not (Get-Command link.exe -ErrorAction SilentlyContinue)) {
+  throw "link.exe not found on PATH. Install VC++ Build Tools, then re-run this script."
+}
 
 npm run tauri build
 if ($LASTEXITCODE -ne 0) {
