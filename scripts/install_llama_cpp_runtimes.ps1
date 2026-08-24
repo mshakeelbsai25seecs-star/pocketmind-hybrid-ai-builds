@@ -68,14 +68,31 @@ function Write-Section($text) { Write-Host "`n=== $text ===" -ForegroundColor Cy
 function Get-ReleaseAssets {
   param([string]$Tag)
   $headers = @{ "User-Agent" = "PocketMind Hybrid AI-Installer"; "Accept" = "application/vnd.github+json" }
+
   if ($Tag) {
     $url = "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/$Tag"
-  } else {
-    $url = "https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
+    Write-Host "Querying release metadata: $url"
+    return Invoke-RestMethod -Uri $url -Headers $headers
   }
-  Write-Host "Querying release metadata: $url"
-  $release = Invoke-RestMethod -Uri $url -Headers $headers
-  return $release
+
+  # IMPORTANT: /releases/latest is currently a stub tag (e.g. v0.2.0) with no
+  # Windows binaries. Prefer the newest b##### release that ships win-cpu-x64.
+  $listUrl = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=20"
+  Write-Host "Querying recent releases: $listUrl"
+  $releases = Invoke-RestMethod -Uri $listUrl -Headers $headers
+  foreach ($release in $releases) {
+    $tagName = [string]$release.tag_name
+    $assets = @($release.assets)
+    $hasCpu = $assets | Where-Object {
+      $_.name -match 'bin-win-cpu-x64' -and $_.name -like '*.zip'
+    } | Select-Object -First 1
+    if ($tagName -match '^b\d+' -and $hasCpu) {
+      Write-Host "Selected release: $tagName ($($assets.Count) assets)"
+      return $release
+    }
+  }
+
+  throw "Could not find a llama.cpp release with Windows CPU x64 binaries (bin-win-cpu-x64). Pass -Tag b10615 (or newer)."
 }
 
 function Find-Asset {
