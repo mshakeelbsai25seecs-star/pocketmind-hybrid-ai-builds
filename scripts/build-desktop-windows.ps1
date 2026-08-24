@@ -58,6 +58,10 @@ function Add-UserPathEntry([string]$Entry) {
 
 function Test-MsvcToolchain {
   if (Get-Command link.exe -ErrorAction SilentlyContinue) { return $true }
+  if (Get-VsInstallPath) {
+    $p = Get-VsInstallPath
+    if (Test-Path -LiteralPath (Join-Path $p "VC\Tools\MSVC")) { return $true }
+  }
   $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
   if (Test-Path -LiteralPath $vswhere) {
     $installPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
@@ -68,10 +72,22 @@ function Test-MsvcToolchain {
 
 function Get-VsInstallPath {
   $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-  if (-not (Test-Path -LiteralPath $vswhere)) { return $null }
-  $path = & $vswhere -latest -products * -property installationPath 2>$null
-  if ($path) { return $path }
-  return (& $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null)
+  if (Test-Path -LiteralPath $vswhere) {
+    $path = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath 2>$null
+    if ($path) { return $path }
+    $path = & $vswhere -latest -products * -property installationPath 2>$null
+    if ($path) { return $path }
+  }
+  foreach ($candidate in @(
+    "D:\VS\BuildTools",
+    "${env:ProgramFiles(x86)}\Microsoft Visual Studio\2022\BuildTools",
+    "$env:ProgramFiles\Microsoft Visual Studio\2022\BuildTools"
+  )) {
+    if (Test-Path -LiteralPath (Join-Path $candidate "VC\Tools\MSVC")) {
+      return $candidate
+    }
+  }
+  return $null
 }
 
 function Import-VsDevEnvironment {
@@ -108,33 +124,56 @@ set
 }
 
 function Install-MsvcBuildTools {
+  param([string]$PreferredInstallPath = "D:\VS\BuildTools")
+
   Write-Host @"
-Installing / repairing Visual Studio 2022 Build Tools with C++ workload.
-This is required for link.exe. It may take 10–30 minutes and use some C: space.
+Installing Visual Studio 2022 Build Tools with C++ workload to:
+  $PreferredInstallPath
+This is required for link.exe. First run often takes 15–40 minutes.
 "@ -ForegroundColor Yellow
 
-  $winget = Get-Command winget -ErrorAction SilentlyContinue
-  if ($winget) {
-    # --force re-runs the installer so an existing Build Tools install can gain VCTools.
-    & winget install --id Microsoft.VisualStudio.2022.BuildTools -e --force `
-      --accept-source-agreements --accept-package-agreements --disable-interactivity `
-      --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+  Ensure-Directory $PreferredInstallPath
+  Ensure-Directory (Join-Path $DevCacheRoot "Downloads")
+
+  # If winget says Build Tools is installed but vswhere sees nothing, the install is corrupt.
+  $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+  $seenByVswhere = $false
+  if (Test-Path -LiteralPath $vswhere) {
+    $raw = & $vswhere -all -products * -property installationPath 2>$null
+    if ($raw) { $seenByVswhere = $true }
   }
 
-  $vsInstaller = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\setup.exe"
-  $installPath = Get-VsInstallPath
-  if ((Test-Path -LiteralPath $vsInstaller) -and $installPath) {
-    Write-Host "  Running VS Installer modify for VCTools on: $installPath"
-    $p = Start-Process -FilePath $vsInstaller -ArgumentList @(
-      "modify",
-      "--installPath", $installPath,
-      "--add", "Microsoft.VisualStudio.Workload.VCTools",
-      "--includeRecommended",
-      "--quiet",
-      "--norestart",
-      "--wait"
-    ) -Wait -PassThru
-    Write-Host "  VS Installer exit code: $($p.ExitCode)"
+  $winget = Get-Command winget -ErrorAction SilentlyContinue
+  if ($winget -and -not $seenByVswhere) {
+    Write-Host "  Detected broken/orphan Build Tools registration. Uninstalling via winget..." -ForegroundColor Yellow
+    try {
+      & winget uninstall --id Microsoft.VisualStudio.2022.BuildTools -e --disable-interactivity --accept-source-agreements 2>$null
+    } catch {
+      Write-Host "  winget uninstall warning: $($_.Exception.Message)" -ForegroundColor Yellow
+    }
+  }
+
+  $boot = Join-Path $DevCacheRoot "Downloads\vs_BuildTools.exe"
+  if (-not (Test-Path -LiteralPath $boot)) {
+    Write-Host "  Downloading VS Build Tools bootstrapper..."
+    Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vs_BuildTools.exe" -OutFile $boot -UseBasicParsing
+  }
+
+  Write-Host "  Running bootstrapper (passive). A UAC prompt may appear — accept it."
+  $argList = @(
+    "--wait",
+    "--passive",
+    "--norestart",
+    "--installPath", $PreferredInstallPath,
+    "--add", "Microsoft.VisualStudio.Workload.VCTools",
+    "--includeRecommended"
+  )
+  $p = Start-Process -FilePath $boot -ArgumentList $argList -Wait -PassThru
+  Write-Host "  Bootstrapper exit code: $($p.ExitCode)"
+
+  if ($p.ExitCode -notin @(0, 3010)) {
+    Write-Host "  Passive install failed. Launching interactive installer — select 'Desktop development with C++'." -ForegroundColor Yellow
+    Start-Process -FilePath $boot -ArgumentList @("--installPath", $PreferredInstallPath) -Wait
   }
 }
 
@@ -258,7 +297,7 @@ rustc --version
 # --- MSVC Build Tools (required for Tauri on Windows) ---
 Write-Step "Checking Visual C++ / MSVC toolchain"
 if (-not (Test-MsvcToolchain)) {
-  Install-MsvcBuildTools
+  Install-MsvcBuildTools -PreferredInstallPath "D:\VS\BuildTools"
 }
 
 if (-not (Import-VsDevEnvironment)) {
