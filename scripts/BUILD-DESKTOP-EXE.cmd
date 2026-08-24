@@ -18,7 +18,7 @@ if not exist "%SCRIPT%" (
 )
 
 cd /d "%REPO%"
-echo Building PocketMind desktop on D: — first run can take a long time.
+echo Building PocketMind desktop on D: - first run can take a long time.
 echo.
 powershell -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT%"
 echo.

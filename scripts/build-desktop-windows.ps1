@@ -129,7 +129,7 @@ function Install-MsvcBuildTools {
   Write-Host @"
 Installing Visual Studio 2022 Build Tools with C++ workload to:
   $PreferredInstallPath
-This is required for link.exe. First run often takes 15–40 minutes.
+This is required for link.exe. First run often takes 15-40 minutes.
 "@ -ForegroundColor Yellow
 
   Ensure-Directory $PreferredInstallPath
@@ -159,7 +159,7 @@ This is required for link.exe. First run often takes 15–40 minutes.
     Invoke-WebRequest -Uri "https://aka.ms/vs/17/release/vs_BuildTools.exe" -OutFile $boot -UseBasicParsing
   }
 
-  Write-Host "  Running bootstrapper (passive). A UAC prompt may appear — accept it."
+  Write-Host "  Running bootstrapper (passive). A UAC prompt may appear - accept it."
   $argList = @(
     "--wait",
     "--passive",
@@ -172,7 +172,7 @@ This is required for link.exe. First run often takes 15–40 minutes.
   Write-Host "  Bootstrapper exit code: $($p.ExitCode)"
 
   if ($p.ExitCode -notin @(0, 3010)) {
-    Write-Host "  Passive install failed. Launching interactive installer — select 'Desktop development with C++'." -ForegroundColor Yellow
+    Write-Host "  Passive install failed. Launching interactive installer - select 'Desktop development with C++'." -ForegroundColor Yellow
     Start-Process -FilePath $boot -ArgumentList @("--installPath", $PreferredInstallPath) -Wait
   }
 }
@@ -223,7 +223,7 @@ Set-UserEnv "CARGO_TARGET_DIR" $TargetDir
 Set-UserEnv "NPM_CONFIG_CACHE" $NpmCache
 Set-UserEnv "NEXUS_DATA_ROOT" $DataRoot
 
-Write-Host "PocketMind Hybrid AI — Windows desktop build (D: drive)" -ForegroundColor Green
+Write-Host "PocketMind Hybrid AI - Windows desktop build (D: drive)" -ForegroundColor Green
 Write-Host "  Project:      $ProjectRoot"
 Write-Host "  CARGO_HOME:   $CargoHome"
 Write-Host "  RUSTUP_HOME:  $RustupHome"
@@ -305,11 +305,13 @@ if (-not (Import-VsDevEnvironment)) {
     throw @"
 Microsoft C++ build tools (link.exe) are still missing.
 
-Close other Visual Studio Installer windows, then run as Administrator:
+Your previous Build Tools install looks corrupted (winget lists it, vswhere does not).
 
-  winget install --id Microsoft.VisualStudio.2022.BuildTools -e --force --override "--wait --passive --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
-
-Or open "Visual Studio Installer" → Modify Build Tools → enable "Desktop development with C++".
+Fix with:
+  1) Run: D:\nexus-ai-deep-fixed\scripts\FIX-MSVC-BUILDTOOLS.cmd
+     (uninstalls broken registration, installs C++ tools to D:\VS\BuildTools)
+  2) Or open Visual Studio Installer -> remove broken Build Tools -> install fresh
+     with 'Desktop development with C++' checked, install path D:\VS\BuildTools
 
 Then re-run:
   powershell -ExecutionPolicy Bypass -File D:\nexus-ai-deep-fixed\scripts\build-desktop-windows.ps1 -SkipLlamaRuntimes

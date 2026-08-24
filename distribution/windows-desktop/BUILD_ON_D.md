@@ -9,13 +9,12 @@ In **PowerShell**:
 ```powershell
 cd D:\nexus-ai-deep-fixed
 
-# Get the build script (keeps your local git changes; no branch switch required)
+# Get build scripts without switching branches (do NOT use Set-Content - it corrupts .ps1 files)
 git fetch origin cursor/android-studio-setup-7411
-New-Item -ItemType Directory -Force -Path .\scripts | Out-Null
-git show origin/cursor/android-studio-setup-7411:scripts/build-desktop-windows.ps1 |
-  Set-Content -Path .\scripts\build-desktop-windows.ps1 -Encoding UTF8
-git show origin/cursor/android-studio-setup-7411:scripts/BUILD-DESKTOP-EXE.cmd |
-  Set-Content -Path .\scripts\BUILD-DESKTOP-EXE.cmd -Encoding ASCII
+git checkout origin/cursor/android-studio-setup-7411 -- `
+  scripts/build-desktop-windows.ps1 `
+  scripts/BUILD-DESKTOP-EXE.cmd `
+  scripts/FIX-MSVC-BUILDTOOLS.cmd
 
 # Install toolchain on D: + build
 powershell -ExecutionPolicy Bypass -File .\scripts\build-desktop-windows.ps1
