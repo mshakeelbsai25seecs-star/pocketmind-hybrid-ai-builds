@@ -44,21 +44,31 @@ powershell -ExecutionPolicy Bypass -File .\scripts\BUILD-FAT-INSTALLER.ps1
 
 Expected Store package size: roughly **hundreds of MB to ~1+ GB** (CUDA dominates).
 
-## Host for Store
+## Host for Store (public repo only)
 
-The fat setup is often **>100 MB** (CUDA), so a normal git push to GitHub Pages will fail.
-Publish it as a **GitHub Release** asset instead (2 GB limit):
+`nexus-ai-deep-fixed` is **private** — do not use it for the Store package URL.
+
+Host the fat setup on the **public** repo / site:
+
+| Piece | Where |
+|-------|--------|
+| Website | https://noumanshakeil.github.io/ |
+| Binary | GitHub **Release** on `noumanshakeil/noumanshakeil.github.io` (files >100 MB cannot use normal Pages git push) |
+| Store Package URL | Release download URL below |
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\distribution\github-pages\PUBLISH-FAT-TO-GITHUB-RELEASE.ps1
+powershell -ExecutionPolicy Bypass -File .\distribution\github-pages\PUBLISH-SITE-ONLY.ps1
 ```
 
 Store package URL (after publish):
 
-`https://github.com/noumanshakeil/nexus-ai-deep-fixed/releases/download/windows-1.0.0/PocketMind-Hybrid-AI_1.0.0_x64-setup.exe`
+`https://github.com/noumanshakeil/noumanshakeil.github.io/releases/download/windows-1.0.0/PocketMind-Hybrid-AI_1.0.0_x64-setup.exe`
 
 Silent install switch: `/S`  
-Architecture: **x64** only
+Architecture: **x64** only  
+
+Partner Center return codes: see `STORE_RETURN_CODES.md` in this folder.
 
 ## Notes
 
