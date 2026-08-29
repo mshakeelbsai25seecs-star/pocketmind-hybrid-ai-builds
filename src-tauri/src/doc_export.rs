@@ -105,23 +105,27 @@ pub fn resolve_doc_export_worker() -> Option<PathBuf> {
             .join("scripts")
             .join("doc_export_worker.py"),
     );
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            candidates.push(parent.join("resources").join("doc_export_worker.py"));
+            candidates.push(parent.join("resources").join("doc_export").join("doc_export_worker.py"));
+            let mut walk = parent.to_path_buf();
+            for _ in 0..6 {
+                candidates.push(walk.join("scripts").join("doc_export_worker.py"));
+                candidates.push(walk.join("resources").join("doc_export_worker.py"));
+                if !walk.pop() {
+                    break;
+                }
+            }
+        }
+    }
     if let Ok(cwd) = std::env::current_dir() {
         let mut walk = cwd;
         for _ in 0..6 {
             candidates.push(walk.join("scripts").join("doc_export_worker.py"));
+            candidates.push(walk.join("resources").join("doc_export_worker.py"));
             if !walk.pop() {
                 break;
-            }
-        }
-    }
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(parent) = exe.parent() {
-            let mut walk = parent.to_path_buf();
-            for _ in 0..6 {
-                candidates.push(walk.join("scripts").join("doc_export_worker.py"));
-                if !walk.pop() {
-                    break;
-                }
             }
         }
     }
@@ -129,6 +133,15 @@ pub fn resolve_doc_export_worker() -> Option<PathBuf> {
         .into_iter()
         .find(|p| p.is_file())
         .and_then(|p| p.canonicalize().ok().or(Some(p)))
+}
+
+fn resolve_doc_export_python() -> Option<PathBuf> {
+    if let Ok(path) = crate::tooling::python_path() {
+        if path.is_file() {
+            return Some(path);
+        }
+    }
+    resolve_python_executable()
 }
 
 fn extract_json_object(text: &str) -> AppResult<Value> {
@@ -349,7 +362,7 @@ pub fn run_python_exporter(spec: &Value, format: &DocFormat, output_path: &Path)
     let worker = resolve_doc_export_worker().ok_or_else(|| {
         AppError::Unknown("Could not find scripts/doc_export_worker.py".to_string())
     })?;
-    let python = resolve_python_executable().ok_or_else(|| {
+    let python = resolve_doc_export_python().ok_or_else(|| {
         AppError::Unknown("Python 3 is required for document export.".to_string())
     })?;
 
@@ -362,6 +375,7 @@ pub fn run_python_exporter(spec: &Value, format: &DocFormat, output_path: &Path)
         .map_err(|e| AppError::Unknown(format!("DocSpec serialize: {e}")))?;
 
     let mut cmd = Command::new(&python);
+    crate::process_util::no_window_std(&mut cmd);
     cmd.arg(&worker)
         .arg("--format")
         .arg(format.as_str())
@@ -372,12 +386,7 @@ pub fn run_python_exporter(spec: &Value, format: &DocFormat, output_path: &Path)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(target_os = "windows")]
-    {
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-        cmd.creation_flags(CREATE_NO_WINDOW);
-    }
+    // no_window applied above
 
     let mut child = cmd
         .spawn()
@@ -577,11 +586,13 @@ pub async fn generate_and_export_document(
 #[tauri::command]
 pub async fn probe_doc_export() -> serde_json::Value {
     let worker = resolve_doc_export_worker();
-    let python = resolve_python_executable();
+    let python = resolve_doc_export_python();
     let mut packages = serde_json::Map::new();
     if let Some(py) = &python {
         for pkg in ["docx", "pptx", "reportlab", "fpdf"] {
-            let ok = Command::new(py)
+            let mut probe = Command::new(py);
+            crate::process_util::no_window_std(&mut probe);
+            let ok = probe
                 .args(["-c", &format!("import {pkg}")])
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
@@ -607,4 +618,37 @@ pub async fn probe_doc_export() -> serde_json::Value {
             && (packages.get("reportlab").and_then(|v| v.as_bool()).unwrap_or(false)
                 || packages.get("fpdf").and_then(|v| v.as_bool()).unwrap_or(false)),
     })
+}
+
+#[tauri::command]
+pub async fn install_doc_export_support() -> AppResult<serde_json::Value> {
+    let python = resolve_doc_export_python().ok_or_else(|| {
+        AppError::Unknown(
+            "Python 3 is required for document export. Install Python or run Repair tooling in Diagnostics."
+                .to_string(),
+        )
+    })?;
+    let packages = ["python-docx", "python-pptx", "reportlab"];
+    let mut errors: Vec<String> = Vec::new();
+    for pkg in packages {
+        let mut cmd = Command::new(&python);
+        crate::process_util::no_window_std(&mut cmd);
+        let output = cmd
+            .args(["-m", "pip", "install", pkg])
+            .output()
+            .map_err(|e| AppError::Unknown(format!("Failed to run pip for {pkg}: {e}")))?;
+        if !output.status.success() {
+            let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            errors.push(format!("{pkg}: {}", if stderr.is_empty() { "install failed" } else { stderr.as_str() }));
+        }
+    }
+    let probe = probe_doc_export().await;
+    if !errors.is_empty() {
+        return Err(AppError::Unknown(format!(
+            "Some exporter packages failed: {}. Probe: {}",
+            errors.join(" | "),
+            probe.get("ready").and_then(|v| v.as_bool()).unwrap_or(false)
+        )));
+    }
+    Ok(probe)
 }

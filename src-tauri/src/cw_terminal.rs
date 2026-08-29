@@ -237,6 +237,7 @@ pub fn start(
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     cmd.kill_on_drop(true);
     apply_sandbox_env(&mut cmd);
+    crate::process_util::no_window_tokio(&mut cmd);
 
     let mut child = cmd
         .spawn()

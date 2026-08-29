@@ -1,8 +1,9 @@
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use serde::Serialize;
 use serde_json::Value;
 use futures::StreamExt;
 use async_trait::async_trait;
+use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use crate::error::{AppError, AppResult};
 use super::{
     InferenceBackend, GenerationRequest, GenerationChunk, GenerationParams, ToolCall,
@@ -63,7 +64,7 @@ fn is_code_workspace_system_prompt(system: &str) -> bool {
 }
 
 fn nexus_formatting_system_prompt(custom: Option<&str>) -> String {
-    let base = "You are PocketMind Hybrid AI. Answer the latest user message directly. Use plain, clean Markdown. Put headings, bullet points, numbered points, and fenced code blocks on separate lines. Use inline code for single keywords. Use fenced code blocks only for complete runnable examples. Do not output LaTeX, TikZ, PGF, Asymptote, tabular, graph, or diagram source unless the user explicitly asks for that exact format. Do not invent follow-up questions or repeat yourself.";
+    let base = "Answer the latest user message directly. Use plain, clean Markdown. Put headings, bullet points, numbered points, and fenced code blocks on separate lines. Use inline code for single keywords. Use fenced code blocks only for complete runnable examples. Do not output LaTeX, TikZ, PGF, Asymptote, tabular, graph, or diagram source unless the user explicitly asks for that exact format. Do not invent follow-up questions or repeat yourself.";
     match custom {
         Some(value) if !value.trim().is_empty()
             && (is_knowledge_system_prompt(value)
@@ -73,7 +74,7 @@ fn nexus_formatting_system_prompt(custom: Option<&str>) -> String {
             // Pass through specialized prompts unchanged (tool JSON protocol must not fight Markdown chat instructions).
             value.trim().to_string()
         }
-        Some(value) if !value.trim().is_empty() => format!("{}\n\n{}", base, value.trim()),
+        Some(value) if !value.trim().is_empty() => value.trim().to_string(),
         _ => base.to_string(),
     }
 }
@@ -83,6 +84,7 @@ pub struct RemoteBackend {
     api_key: String,
     base_url: String,
     model_id: String,
+    stream_cancel: Mutex<Option<Arc<AtomicBool>>>,
 }
 
 impl RemoteBackend {
@@ -105,6 +107,7 @@ impl RemoteBackend {
             api_key: api_key.to_string(),
             base_url: base_url.to_string(),
             model_id: model_id.to_string(),
+            stream_cancel: Mutex::new(None),
         }
     }
 
@@ -114,7 +117,33 @@ impl RemoteBackend {
             api_key: api_key.to_string(),
             base_url: base_url.trim_end_matches('/').to_string(),
             model_id: model_id.to_string(),
+            stream_cancel: Mutex::new(None),
         }
+    }
+
+    pub async fn generate_stream_cancellable(
+        &self,
+        request: GenerationRequest,
+        tx: mpsc::Sender<GenerationChunk>,
+        cancel: Arc<AtomicBool>,
+    ) -> AppResult<()> {
+        if cancel.load(Ordering::Relaxed) {
+            let _ = tx
+                .send(GenerationChunk {
+                    text: "[Stopped]".to_string(),
+                    finish_reason: Some("stop".to_string()),
+                    tokens_generated: 0,
+                    tokens_per_sec: 0.0,
+                    tool_calls: None,
+                    reasoning: None,
+                })
+                .await;
+            return Ok(());
+        }
+        *self.stream_cancel.lock().await = Some(cancel);
+        let result = self.generate_stream(request, tx).await;
+        *self.stream_cancel.lock().await = None;
+        result
     }
 
     pub fn get_api_key_url(provider: &str) -> String {
@@ -1115,6 +1144,26 @@ impl InferenceBackend for RemoteBackend {
         let mut saw_answer = false;
 
         while let Some(chunk) = stream.next().await {
+            if self
+                .stream_cancel
+                .lock()
+                .await
+                .as_ref()
+                .map(|c| c.load(Ordering::Relaxed))
+                .unwrap_or(false)
+            {
+                let _ = tx
+                    .send(GenerationChunk {
+                        text: String::new(),
+                        finish_reason: Some("stop".to_string()),
+                        tokens_generated: 0,
+                        tokens_per_sec: 0.0,
+                        tool_calls: None,
+                        reasoning: None,
+                    })
+                    .await;
+                return Ok(());
+            }
             let chunk = chunk.map_err(|e| AppError::NetworkError(e.to_string()))?;
             buffer.push_str(&String::from_utf8_lossy(&chunk));
             // Providers may use LF or CRLF; normalize so SSE framing stays reliable.

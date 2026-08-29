@@ -4,6 +4,7 @@ import DeploymentSettingsPanel from './DeploymentSettingsPanel';
 import SecuritySettingsPanel from './SecuritySettingsPanel';
 import AuditLogPanel from './AuditLogPanel';
 import McpSettingsPanel from './McpSettingsPanel';
+import RefreshButton from './RefreshButton';
 import { Key, Shield, Cpu, Palette, Globe, Database, ExternalLink, Trash2, CheckCircle, AlertTriangle, Loader2 } from 'lucide-react';
 import { useAppStore } from '../store';
 import { CHAT_API_PROVIDERS } from '../apiProviders';
@@ -25,6 +26,7 @@ export default function SettingsPanel() {
   const [appVersion, setAppVersion] = useState('…');
   const [advancedBusy, setAdvancedBusy] = useState(false);
   const [advancedMessage, setAdvancedMessage] = useState('');
+  const [refreshBusy, setRefreshBusy] = useState(false);
 
   useEffect(() => {
     try {
@@ -40,11 +42,24 @@ export default function SettingsPanel() {
   }, []);
 
   useEffect(() => {
-    if (activeTab !== 'advanced') return;
     invoke<SystemInfo>('get_system_info')
       .then(info => setAppVersion(info.app_version || '1.0.0'))
       .catch(() => setAppVersion('1.0.0'));
-  }, [activeTab]);
+  }, []);
+
+  const refreshSettings = async () => {
+    setRefreshBusy(true);
+    try {
+      const info = await invoke<SystemInfo>('get_system_info');
+      setAppVersion(info.app_version || '1.0.0');
+      await fetchDeploymentConfig().then(config => store.setDeploymentConfig(config));
+      setAdvancedMessage('Settings refreshed.');
+    } catch (err) {
+      setAdvancedMessage(String(err));
+    } finally {
+      setRefreshBusy(false);
+    }
+  };
 
   const openDataFolder = async () => {
     setAdvancedBusy(true);
@@ -133,9 +148,12 @@ export default function SettingsPanel() {
   return (
     <div className="flex-1 overflow-y-auto p-6">
       <div className="max-w-3xl mx-auto space-y-6">
-        <div>
-          <h1 className="text-2xl font-bold mb-1">Settings</h1>
-          <p className="text-surface-500">Configure PocketMind Hybrid AI to your preferences</p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-bold mb-1">Settings</h1>
+            <p className="text-surface-500">Configure PocketMind Hybrid AI to your preferences</p>
+          </div>
+          <RefreshButton title="Refresh" onClick={refreshSettings} busy={refreshBusy} />
         </div>
 
         <div className="flex flex-wrap gap-1 p-1 bg-surface-100 dark:bg-surface-900 rounded-lg w-fit">

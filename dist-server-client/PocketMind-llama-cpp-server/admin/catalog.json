@@ -16,7 +16,7 @@
         "math",
         "large-quality"
       ],
-      "recommendedUse": "Moonshot Kimi K3 (~2.8T, 1M ctx, native vision) — open weights scheduled ~2026-07-27. Until then use Online → Kimi K3 (OpenRouter). After weights drop, import GGUF+mmproj or re-download from Models.",
+      "recommendedUse": "Moonshot Kimi K3 (~2.8T, 1M ctx, native vision) \u2014 open weights scheduled ~2026-07-27. Until then use Online \u2192 Kimi K3 (OpenRouter). After weights drop, import GGUF+mmproj or re-download from Models.",
       "url": "",
       "shardUrls": [],
       "mmprojUrl": null,
@@ -27,7 +27,7 @@
       "name": "GLM-5.2",
       "params": "753B",
       "quant": "UD-IQ2_M",
-      "size": "~6× shards (~245 GB)",
+      "size": "~6\u00d7 shards (~245 GB)",
       "ram": "245 GB+",
       "categories": [
         "coding",
@@ -53,7 +53,7 @@
       "name": "DeepSeek V4 Pro",
       "params": "1600B",
       "quant": "Q2_K-XL",
-      "size": "~13× shards (~498 GB)",
+      "size": "~13\u00d7 shards (~498 GB)",
       "ram": "512 GB+",
       "categories": [
         "coding",
@@ -61,7 +61,7 @@
         "math",
         "large-quality"
       ],
-      "recommendedUse": "DeepSeek V4 Pro (1.6T / ~49B active, Think modes). 13 GGUF shards — requires a V4-aware llama.cpp fork (not stock upstream). Prefer Online DeepSeek V4 Pro for most users.",
+      "recommendedUse": "DeepSeek V4 Pro (1.6T / ~49B active, Think modes). 13 GGUF shards \u2014 requires a V4-aware llama.cpp fork (not stock upstream). Prefer Online DeepSeek V4 Pro for most users.",
       "url": "https://huggingface.co/teamblobfish/DeepSeek-V4-Pro-GGUF/resolve/main/Q2_K-XL/DeepSeek-V4-Pro-Q2_K-XL-00001-of-00013.gguf?download=true",
       "shardUrls": [
         "https://huggingface.co/teamblobfish/DeepSeek-V4-Pro-GGUF/resolve/main/Q2_K-XL/DeepSeek-V4-Pro-Q2_K-XL-00002-of-00013.gguf?download=true",
@@ -85,7 +85,7 @@
       "name": "DeepSeek V4 Flash",
       "params": "284B",
       "quant": "Q4_K_M-XL",
-      "size": "~4× shards (~163 GB)",
+      "size": "~4\u00d7 shards (~163 GB)",
       "ram": "180 GB+",
       "categories": [
         "coding",
@@ -108,13 +108,13 @@
       "name": "Qwen3 Coder 480B-A35B",
       "params": "480B",
       "quant": "UD-Q2_K_XL",
-      "size": "~4× shards (~180 GB)",
+      "size": "~4\u00d7 shards (~180 GB)",
       "ram": "200 GB+",
       "categories": [
         "coding",
         "large-quality"
       ],
-      "recommendedUse": "Alibaba Qwen3-Coder flagship (480B MoE / 35B active, 256K–1M ctx) for repository-scale offline PocketCode. 4 GGUF shards.",
+      "recommendedUse": "Alibaba Qwen3-Coder flagship (480B MoE / 35B active, 256K\u20131M ctx) for repository-scale offline PocketCode. 4 GGUF shards.",
       "url": "https://huggingface.co/unsloth/Qwen3-Coder-480B-A35B-Instruct-GGUF/resolve/main/UD-Q2_K_XL/Qwen3-Coder-480B-A35B-Instruct-UD-Q2_K_XL-00001-of-00004.gguf?download=true",
       "shardUrls": [
         "https://huggingface.co/unsloth/Qwen3-Coder-480B-A35B-Instruct-GGUF/resolve/main/UD-Q2_K_XL/Qwen3-Coder-480B-A35B-Instruct-UD-Q2_K_XL-00002-of-00004.gguf?download=true",
@@ -129,7 +129,7 @@
       "name": "Llama 4 Maverick 17B-128E",
       "params": "400B",
       "quant": "UD-Q2_K_XL",
-      "size": "~4× shards + mmproj (~151 GB)",
+      "size": "~4\u00d7 shards + mmproj (~151 GB)",
       "ram": "160 GB+",
       "categories": [
         "vision",
@@ -152,7 +152,7 @@
       "name": "DeepSeek V3-0324",
       "params": "671B",
       "quant": "UD-Q2_K_XL",
-      "size": "~6× shards (~248 GB)",
+      "size": "~6\u00d7 shards (~248 GB)",
       "ram": "180 GB+",
       "categories": [
         "coding",
@@ -160,7 +160,7 @@
         "math",
         "large-quality"
       ],
-      "recommendedUse": "Direct offline competitor to online DeepSeek (671B MoE / ~37B active). Text+tools/PocketCode on multi-GPU / high-RAM servers. Not a native VLM — pair with a VL model for screenshots.",
+      "recommendedUse": "Direct offline competitor to online DeepSeek (671B MoE / ~37B active). Text+tools/PocketCode on multi-GPU / high-RAM servers. Not a native VLM \u2014 pair with a VL model for screenshots.",
       "url": "https://huggingface.co/unsloth/DeepSeek-V3-0324-GGUF/resolve/main/UD-Q2_K_XL/DeepSeek-V3-0324-UD-Q2_K_XL-00001-of-00006.gguf?download=true",
       "shardUrls": [
         "https://huggingface.co/unsloth/DeepSeek-V3-0324-GGUF/resolve/main/UD-Q2_K_XL/DeepSeek-V3-0324-UD-Q2_K_XL-00002-of-00006.gguf?download=true",
@@ -177,7 +177,7 @@
       "name": "MiniMax M3",
       "params": "428B",
       "quant": "UD-IQ1_M",
-      "size": "~4× shards (~128 GB)",
+      "size": "~4\u00d7 shards (~128 GB)",
       "ram": "133 GB+",
       "categories": [
         "vision",
@@ -192,7 +192,7 @@
         "https://huggingface.co/unsloth/MiniMax-M3-GGUF/resolve/main/UD-IQ1_M/MiniMax-M3-UD-IQ1_M-00003-of-00004.gguf?download=true",
         "https://huggingface.co/unsloth/MiniMax-M3-GGUF/resolve/main/UD-IQ1_M/MiniMax-M3-UD-IQ1_M-00004-of-00004.gguf?download=true"
       ],
-      "mmprojUrl": null,
+      "mmprojUrl": "https://huggingface.co/Serpen/Minimax_M3_MMPROJ_GGUF/resolve/main/M3-mmproj.gguf?download=true",
       "visionCapable": true
     },
     {
@@ -200,7 +200,7 @@
       "name": "Qwen3.5 397B-A17B",
       "params": "397B",
       "quant": "UD-Q4_K_XL",
-      "size": "~6× shards + mmproj (~214 GB)",
+      "size": "~6\u00d7 shards + mmproj (~214 GB)",
       "ram": "256 GB+",
       "categories": [
         "vision",
@@ -209,7 +209,7 @@
         "math",
         "large-quality"
       ],
-      "recommendedUse": "Qwen flagship MoE VLM (397B / ~17B active) — strongest offline alternative to DeepSeek for charts/PDFs/math-from-images. 6 shards + mmproj.",
+      "recommendedUse": "Qwen flagship MoE VLM (397B / ~17B active) \u2014 strongest offline alternative to DeepSeek for charts/PDFs/math-from-images. 6 shards + mmproj.",
       "url": "https://huggingface.co/unsloth/Qwen3.5-397B-A17B-GGUF/resolve/main/UD-Q4_K_XL/Qwen3.5-397B-A17B-UD-Q4_K_XL-00001-of-00006.gguf?download=true",
       "shardUrls": [
         "https://huggingface.co/unsloth/Qwen3.5-397B-A17B-GGUF/resolve/main/UD-Q4_K_XL/Qwen3.5-397B-A17B-UD-Q4_K_XL-00002-of-00006.gguf?download=true",
@@ -226,7 +226,7 @@
       "name": "Kimi K2.6",
       "params": "1000B",
       "quant": "UD-Q2_K_XL",
-      "size": "~8× shards + mmproj (~350 GB)",
+      "size": "~8\u00d7 shards + mmproj (~350 GB)",
       "ram": "350 GB+",
       "categories": [
         "vision",
@@ -253,7 +253,7 @@
       "name": "Qwen3-VL 235B-A22B Instruct",
       "params": "235B",
       "quant": "UD-Q2_K_XL",
-      "size": "~2× shards + mmproj (~80–100 GB)",
+      "size": "~2\u00d7 shards + mmproj (~80\u2013100 GB)",
       "ram": "96 GB+",
       "categories": [
         "vision",
@@ -274,7 +274,7 @@
       "name": "Qwen3-VL 235B-A22B Instruct Q4",
       "params": "235B",
       "quant": "Q4_K_M",
-      "size": "~3× shards + mmproj (~142 GB)",
+      "size": "~3\u00d7 shards + mmproj (~142 GB)",
       "ram": "160 GB+",
       "categories": [
         "vision",
@@ -323,7 +323,7 @@
         "general",
         "large-quality"
       ],
-      "recommendedUse": "Strongest dense offline VLM that fits a single high-end workstation. Screenshots, PDFs, UI → code. Downloads GGUF + mmproj.",
+      "recommendedUse": "Strongest dense offline VLM that fits a single high-end workstation. Screenshots, PDFs, UI \u2192 code. Downloads GGUF + mmproj.",
       "url": "https://huggingface.co/bartowski/Qwen_Qwen2.5-VL-72B-Instruct-GGUF/resolve/main/Qwen_Qwen2.5-VL-72B-Instruct-Q4_K_M.gguf?download=true",
       "shardUrls": [],
       "mmprojUrl": "https://huggingface.co/bartowski/Qwen_Qwen2.5-VL-72B-Instruct-GGUF/resolve/main/mmproj-Qwen_Qwen2.5-VL-72B-Instruct-f16.gguf?download=true",
@@ -417,7 +417,7 @@
         "general",
         "small-fast"
       ],
-      "recommendedUse": "Tiny offline vision smoke test only — not for real PocketCode tasks.",
+      "recommendedUse": "Tiny offline vision smoke test only \u2014 not for real PocketCode tasks.",
       "url": "https://huggingface.co/bartowski/Qwen2-VL-2B-Instruct-GGUF/resolve/main/Qwen2-VL-2B-Instruct-Q4_K_M.gguf?download=true",
       "shardUrls": [],
       "mmprojUrl": "https://huggingface.co/bartowski/Qwen2-VL-2B-Instruct-GGUF/resolve/main/mmproj-Qwen2-VL-2B-Instruct-f16.gguf?download=true",
@@ -635,7 +635,7 @@
         "large-quality"
       ],
       "recommendedUse": "Medical-domain educational Q&A. Not a diagnosis tool.",
-      "url": "",
+      "url": "https://huggingface.co/QuantFactory/BioMistral-7B-GGUF/resolve/main/BioMistral-7B.Q4_K_M.gguf?download=true",
       "shardUrls": [],
       "mmprojUrl": null,
       "visionCapable": false
@@ -654,7 +654,7 @@
         "large-quality"
       ],
       "recommendedUse": "Friendly general assistant, writing, roleplay-style personas, and business drafting.",
-      "url": "",
+      "url": "https://huggingface.co/TheBloke/OpenHermes-2.5-Mistral-7B-GGUF/resolve/main/openhermes-2.5-mistral-7b.Q4_K_M.gguf?download=true",
       "shardUrls": [],
       "mmprojUrl": null,
       "visionCapable": false
@@ -672,7 +672,7 @@
         "small-fast"
       ],
       "recommendedUse": "Reliable general chat and writing on average laptops.",
-      "url": "",
+      "url": "https://huggingface.co/TheBloke/neural-chat-7b-v3-1-GGUF/resolve/main/neural-chat-7b-v3-1.Q4_K_M.gguf?download=true",
       "shardUrls": [],
       "mmprojUrl": null,
       "visionCapable": false
@@ -689,7 +689,7 @@
         "small-fast"
       ],
       "recommendedUse": "Offline coding, bug fixing, API integration help, and code review.",
-      "url": "",
+      "url": "https://huggingface.co/TheBloke/deepseek-coder-6.7B-instruct-GGUF/resolve/main/deepseek-coder-6.7b-instruct.Q4_K_M.gguf?download=true",
       "shardUrls": [],
       "mmprojUrl": null,
       "visionCapable": false
@@ -706,7 +706,7 @@
         "business"
       ],
       "recommendedUse": "SQL query generation, database explanations, and analytics workflows.",
-      "url": "",
+      "url": "https://huggingface.co/TheBloke/sqlcoder-7b-GGUF/resolve/main/sqlcoder-7b.Q4_K_M.gguf?download=true",
       "shardUrls": [],
       "mmprojUrl": null,
       "visionCapable": false
@@ -723,7 +723,7 @@
         "large-quality"
       ],
       "recommendedUse": "Offline math practice, exam explanations, and symbolic reasoning.",
-      "url": "",
+      "url": "https://huggingface.co/TheBloke/WizardMath-7B-V1.1-GGUF/resolve/main/wizardmath-7b-v1.1.Q4_K_M.gguf?download=true",
       "shardUrls": [],
       "mmprojUrl": null,
       "visionCapable": false
@@ -741,7 +741,7 @@
         "business"
       ],
       "recommendedUse": "General assistant, structured responses, and professional writing.",
-      "url": "",
+      "url": "https://huggingface.co/TheBloke/Nous-Capybara-7B-v1.9-GGUF/resolve/main/nous-capybara-7b-v1.9.Q4_K_M.gguf?download=true",
       "shardUrls": [],
       "mmprojUrl": null,
       "visionCapable": false
@@ -751,14 +751,14 @@
       "name": "Law / Legal Chat 7B",
       "params": "7B",
       "quant": "Q4_K_M",
-      "size": "4–5 GB",
+      "size": "4\u20135 GB",
       "ram": "8 GB",
       "categories": [
         "law",
         "business"
       ],
       "recommendedUse": "Legal drafting assistance and study. Not legal advice.",
-      "url": "",
+      "url": "https://huggingface.co/TheBloke/law-chat-GGUF/resolve/main/law-chat.Q4_K_M.gguf?download=true",
       "shardUrls": [],
       "mmprojUrl": null,
       "visionCapable": false
@@ -768,8 +768,8 @@
       "name": "Mixtral 8x7B Instruct",
       "params": "46.7B",
       "quant": "Q4_K_M",
-      "size": "26–30 GB",
-      "ram": "32–48 GB",
+      "size": "26\u201330 GB",
+      "ram": "32\u201348 GB",
       "categories": [
         "general",
         "business",
@@ -777,7 +777,7 @@
         "large-quality"
       ],
       "recommendedUse": "Enterprise-grade local assistant use on high-RAM workstations or CPU+GPU split systems.",
-      "url": "",
+      "url": "https://huggingface.co/TheBloke/Mixtral-8x7B-Instruct-v0.1-GGUF/resolve/main/mixtral-8x7b-instruct-v0.1.Q4_K_M.gguf?download=true",
       "shardUrls": [],
       "mmprojUrl": null,
       "visionCapable": false
@@ -787,7 +787,7 @@
       "name": "Qwen2.5 32B Instruct",
       "params": "32B",
       "quant": "Q4_K_M",
-      "size": "18–22 GB",
+      "size": "18\u201322 GB",
       "ram": "32 GB+",
       "categories": [
         "general",
@@ -797,7 +797,7 @@
         "large-quality"
       ],
       "recommendedUse": "High-quality local reasoning, coding, math, and business analysis for professional hardware.",
-      "url": "",
+      "url": "https://huggingface.co/bartowski/Qwen2.5-32B-Instruct-GGUF/resolve/main/Qwen2.5-32B-Instruct-Q4_K_M.gguf?download=true",
       "shardUrls": [],
       "mmprojUrl": null,
       "visionCapable": false
@@ -807,7 +807,7 @@
       "name": "Llama 3.1 70B Instruct",
       "params": "70B",
       "quant": "Q4_K_M",
-      "size": "40–48 GB",
+      "size": "40\u201348 GB",
       "ram": "64 GB+",
       "categories": [
         "general",
@@ -817,7 +817,7 @@
         "large-quality"
       ],
       "recommendedUse": "Large local assistant for organizations with strong CPU RAM and high-VRAM or multi-GPU systems.",
-      "url": "",
+      "url": "https://huggingface.co/bartowski/Meta-Llama-3.1-70B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-70B-Instruct-Q4_K_M.gguf?download=true",
       "shardUrls": [],
       "mmprojUrl": null,
       "visionCapable": false
@@ -827,7 +827,7 @@
       "name": "Llama 3.1 70B Instruct High Quality",
       "params": "70B",
       "quant": "Q5_K_M",
-      "size": "48–56 GB",
+      "size": "48\u201356 GB",
       "ram": "80 GB+",
       "categories": [
         "general",
@@ -836,7 +836,7 @@
         "large-quality"
       ],
       "recommendedUse": "Higher-quality 70B local deployment for organizations with qualified enterprise hardware.",
-      "url": "",
+      "url": "https://huggingface.co/mradermacher/Meta-Llama-3.1-70B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-70B-Instruct.Q5_K_M.gguf?download=true",
       "shardUrls": [],
       "mmprojUrl": null,
       "visionCapable": false
@@ -846,14 +846,14 @@
       "name": "DeepSeek Coder 33B Instruct",
       "params": "33B",
       "quant": "Q4_K_M",
-      "size": "18–22 GB",
-      "ram": "32–48 GB",
+      "size": "18\u201322 GB",
+      "ram": "32\u201348 GB",
       "categories": [
         "coding",
         "large-quality"
       ],
       "recommendedUse": "Large local coding model for enterprise development teams and code review workflows.",
-      "url": "",
+      "url": "https://huggingface.co/TheBloke/deepseek-coder-33b-instruct-GGUF/resolve/main/deepseek-coder-33b-instruct.Q4_K_M.gguf?download=true",
       "shardUrls": [],
       "mmprojUrl": null,
       "visionCapable": false
@@ -863,7 +863,7 @@
       "name": "Qwen2.5 72B Instruct",
       "params": "72B",
       "quant": "Q4_K_M",
-      "size": "40–48 GB",
+      "size": "40\u201348 GB",
       "ram": "64 GB+",
       "categories": [
         "general",
@@ -873,7 +873,7 @@
         "large-quality"
       ],
       "recommendedUse": "Strong multilingual reasoning and coding on qualified enterprise hardware. Code Workspace eligible.",
-      "url": "",
+      "url": "https://huggingface.co/bartowski/Qwen2.5-72B-Instruct-GGUF/resolve/main/Qwen2.5-72B-Instruct-Q4_K_M.gguf?download=true",
       "shardUrls": [],
       "mmprojUrl": null,
       "visionCapable": false
@@ -883,7 +883,7 @@
       "name": "Command R+ 104B",
       "params": "104B",
       "quant": "Q4_K_M",
-      "size": "55–65 GB",
+      "size": "55\u201365 GB",
       "ram": "96 GB+",
       "categories": [
         "general",
@@ -892,8 +892,14 @@
         "large-quality"
       ],
       "recommendedUse": "Long-context enterprise assistant / RAG workflows on multi-GPU servers. Code Workspace eligible.",
-      "url": "",
-      "shardUrls": [],
+      "url": "https://huggingface.co/bartowski/c4ai-command-r-plus-GGUF/resolve/main/c4ai-command-r-plus-Q4_K_M.gguf/c4ai-command-r-plus-Q4_K_M-00001-of-00006.gguf?download=true",
+      "shardUrls": [
+        "https://huggingface.co/bartowski/c4ai-command-r-plus-GGUF/resolve/main/c4ai-command-r-plus-Q4_K_M.gguf/c4ai-command-r-plus-Q4_K_M-00002-of-00006.gguf?download=true",
+        "https://huggingface.co/bartowski/c4ai-command-r-plus-GGUF/resolve/main/c4ai-command-r-plus-Q4_K_M.gguf/c4ai-command-r-plus-Q4_K_M-00003-of-00006.gguf?download=true",
+        "https://huggingface.co/bartowski/c4ai-command-r-plus-GGUF/resolve/main/c4ai-command-r-plus-Q4_K_M.gguf/c4ai-command-r-plus-Q4_K_M-00004-of-00006.gguf?download=true",
+        "https://huggingface.co/bartowski/c4ai-command-r-plus-GGUF/resolve/main/c4ai-command-r-plus-Q4_K_M.gguf/c4ai-command-r-plus-Q4_K_M-00005-of-00006.gguf?download=true",
+        "https://huggingface.co/bartowski/c4ai-command-r-plus-GGUF/resolve/main/c4ai-command-r-plus-Q4_K_M.gguf/c4ai-command-r-plus-Q4_K_M-00006-of-00006.gguf?download=true"
+      ],
       "mmprojUrl": null,
       "visionCapable": false
     },
@@ -902,7 +908,7 @@
       "name": "Mixtral 8x22B Instruct",
       "params": "141B",
       "quant": "Q4_K_M",
-      "size": "70–90 GB",
+      "size": "70\u201390 GB",
       "ram": "128 GB+",
       "categories": [
         "general",
@@ -911,8 +917,10 @@
         "large-quality"
       ],
       "recommendedUse": "Sparse MoE local deployment for teams with large VRAM pools. Code Workspace eligible.",
-      "url": "",
-      "shardUrls": [],
+      "url": "https://huggingface.co/MaziyarPanahi/Mixtral-8x22B-Instruct-v0.1-GGUF/resolve/main/Mixtral-8x22B-Instruct-v0.1.Q4_K_M-00001-of-00002.gguf?download=true",
+      "shardUrls": [
+        "https://huggingface.co/MaziyarPanahi/Mixtral-8x22B-Instruct-v0.1-GGUF/resolve/main/Mixtral-8x22B-Instruct-v0.1.Q4_K_M-00002-of-00002.gguf?download=true"
+      ],
       "mmprojUrl": null,
       "visionCapable": false
     },
@@ -921,7 +929,7 @@
       "name": "Llama 3.1 405B Instruct",
       "params": "405B",
       "quant": "Q4_K_M",
-      "size": "200–240 GB",
+      "size": "200\u2013240 GB",
       "ram": "256 GB+ / multi-GPU",
       "categories": [
         "general",
@@ -933,8 +941,14 @@
         "large-quality"
       ],
       "recommendedUse": "Frontier-class local GGUF for clusters / high-end servers. Import a quantized .gguf (often multi-part). Code Workspace eligible.",
-      "url": "",
-      "shardUrls": [],
+      "url": "https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q4_K_M-00001-of-00006.gguf?download=true",
+      "shardUrls": [
+        "https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q4_K_M-00002-of-00006.gguf?download=true",
+        "https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q4_K_M-00003-of-00006.gguf?download=true",
+        "https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q4_K_M-00004-of-00006.gguf?download=true",
+        "https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q4_K_M-00005-of-00006.gguf?download=true",
+        "https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q4_K_M-00006-of-00006.gguf?download=true"
+      ],
       "mmprojUrl": null,
       "visionCapable": false
     },
@@ -943,7 +957,7 @@
       "name": "Llama 3.1 405B Instruct High Quality",
       "params": "405B",
       "quant": "Q5_K_M",
-      "size": "250–300 GB",
+      "size": "250\u2013300 GB",
       "ram": "320 GB+ / multi-GPU",
       "categories": [
         "general",
@@ -952,8 +966,15 @@
         "large-quality"
       ],
       "recommendedUse": "Higher-fidelity 405B local deployment when you have the cluster budget. Code Workspace eligible.",
-      "url": "",
-      "shardUrls": [],
+      "url": "https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q5_K_M-00001-of-00007.gguf?download=true",
+      "shardUrls": [
+        "https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q5_K_M-00002-of-00007.gguf?download=true",
+        "https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q5_K_M-00003-of-00007.gguf?download=true",
+        "https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q5_K_M-00004-of-00007.gguf?download=true",
+        "https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q5_K_M-00005-of-00007.gguf?download=true",
+        "https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q5_K_M-00006-of-00007.gguf?download=true",
+        "https://huggingface.co/bullerwins/Meta-Llama-3.1-405B-Instruct-GGUF/resolve/main/Meta-Llama-3.1-405B-Instruct-Q5_K_M-00007-of-00007.gguf?download=true"
+      ],
       "mmprojUrl": null,
       "visionCapable": false
     }

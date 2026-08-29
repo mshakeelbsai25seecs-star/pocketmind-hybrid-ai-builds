@@ -1,10 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { open } from '@tauri-apps/api/dialog';
-import { HardDrive, Trash2, RefreshCw, AlertTriangle, Database, FolderOpen, CheckCircle2, Scan, FolderInput } from 'lucide-react';
+import { HardDrive, Trash2, AlertTriangle, Database, FolderOpen, CheckCircle2, Scan, FolderInput } from 'lucide-react';
 import { useAppStore } from '../store';
 import { LocalModelRecord } from '../types';
 import { FEATURE_FLAGS } from '../featureFlags';
+import RefreshButton from './RefreshButton';
 import {
   batchProcessFolder,
   deleteOrphanFiles,
@@ -31,15 +32,25 @@ export default function StorageManager() {
   const [orphanBusy, setOrphanBusy] = useState(false);
   const [batchResults, setBatchResults] = useState<BatchFileResult[]>([]);
   const [verifyResult, setVerifyResult] = useState<IntegrityResult | null>(null);
+  const [refreshBusy, setRefreshBusy] = useState(false);
 
   const totalModelBytes = useMemo(() => localModels.reduce((sum, m) => sum + Math.max(0, m.size_bytes || 0), 0), [localModels]);
   const messageCount = useMemo(() => Object.values(messages).reduce((sum, list) => sum + list.length, 0), [messages]);
 
   const refreshModels = async () => {
-    const models = await invoke<LocalModelRecord[]>('get_local_models');
-    setLocalModels(models);
-    setStatus('Model library refreshed.');
+    setRefreshBusy(true);
+    try {
+      const models = await invoke<LocalModelRecord[]>('get_local_models');
+      setLocalModels(models);
+      setStatus('Model library refreshed.');
+    } finally {
+      setRefreshBusy(false);
+    }
   };
+
+  useEffect(() => {
+    void refreshModels();
+  }, []);
 
   const removeModelRecord = async (model: LocalModelRecord) => {
     const confirmText = `Remove ${model.name} from the PocketMind Hybrid AI library?\n\nThis removes the library record only. It does not delete the GGUF file from disk.`;
@@ -134,9 +145,7 @@ export default function StorageManager() {
               Review local model records, model sizes, chat counts, and disk status. This phase avoids dangerous file deletion; model removal is library-only unless you delete files manually.
             </p>
           </div>
-          <button onClick={refreshModels} className="inline-flex items-center justify-center gap-2 rounded-2xl bg-primary-600 hover:bg-primary-700 text-white px-5 py-3 font-semibold shadow-lg shadow-primary-600/20">
-            <RefreshCw className="w-4 h-4" /> Refresh
-          </button>
+          <RefreshButton title="Refresh" onClick={refreshModels} busy={refreshBusy} />
         </div>
       </section>
 

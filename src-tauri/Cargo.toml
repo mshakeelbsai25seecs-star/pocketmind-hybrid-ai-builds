@@ -56,6 +56,9 @@ streaming-iterator = { version = "0.1.9", optional = true }
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 nvml-wrapper = "0.9"
 
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.54", features = ["Win32_Graphics_Dxgi", "Win32_Foundation"] }
+
 [features]
 default = ["custom-protocol", "code-entities"]
 custom-protocol = ["tauri/custom-protocol"]

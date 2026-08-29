@@ -492,7 +492,7 @@ fn rerank_gpu_layer_attempts(
     }
     let model_size = runtime_discovery::model_size_bytes(model_path);
     let (_, _, free_vram, _) = runtime_discovery::hardware_memory_snapshot();
-    let partial = runtime_discovery::estimate_partial_gpu_layers(model_size, free_vram);
+    let partial = runtime_discovery::estimate_partial_gpu_layers(model_path, free_vram);
 
     let gpu_try = if requested_gpu_layers > 0 {
         if partial > 0 && partial < 999 {
@@ -535,6 +535,7 @@ async fn try_spawn_rerank_attempt(
     let stderr_file = std::fs::File::create(&stderr_path).ok();
 
     let mut command = Command::new(runtime);
+    crate::process_util::no_window_tokio(&mut command);
     command
         .arg("-m")
         .arg(model_path)

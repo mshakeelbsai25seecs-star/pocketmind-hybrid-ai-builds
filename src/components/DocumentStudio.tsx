@@ -5,6 +5,7 @@ import { useAppStore } from '../store';
 import {
   exportDocument,
   generateDocumentSpec,
+  installDocExportSupport,
   pickChatBackend,
   probeDocExport,
   type DocFormatId,
@@ -43,6 +44,7 @@ export default function DocumentStudio() {
   const [specResult, setSpecResult] = useState<DocSpecResult | null>(null);
   const [probe, setProbe] = useState<DocExportProbe | null>(null);
   const [recent, setRecent] = useState<string[]>([]);
+  const [installBusy, setInstallBusy] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -53,6 +55,27 @@ export default function DocumentStudio() {
       }
     })();
   }, []);
+
+  const installExportSupport = async () => {
+    setInstallBusy(true);
+    setErr(null);
+    setMsg('Installing python-docx, python-pptx, and reportlab…');
+    try {
+      const next = await installDocExportSupport();
+      setProbe(next);
+      setMsg(next.ready ? 'Document export support installed.' : 'Install finished — recheck exporter status above.');
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+      setMsg(null);
+      try {
+        setProbe(await probeDocExport());
+      } catch {
+        /* optional */
+      }
+    } finally {
+      setInstallBusy(false);
+    }
+  };
 
   const modelLabel = currentModel || 'No model selected';
   const { backend, modelPath } = pickChatBackend(currentModel);
@@ -131,13 +154,22 @@ export default function DocumentStudio() {
       {probe && !probe.ready && (
         <div className="rounded-2xl border border-amber-300/60 bg-amber-50 dark:bg-amber-950/30 p-4 text-sm flex gap-3">
           <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
-          <div>
+          <div className="flex-1">
             <p className="font-medium">Exporter packages incomplete</p>
             <p className="text-xs text-surface-600 dark:text-surface-400 mt-1">
               Install with: pip install python-docx python-pptx reportlab
               {!probe.python_found ? ' (Python not found on PATH)' : ''}
               {!probe.worker_found ? ' · exporter script missing' : ''}
             </p>
+            <button
+              type="button"
+              className="btn-primary text-xs mt-3"
+              disabled={installBusy}
+              onClick={() => void installExportSupport()}
+            >
+              {installBusy ? <Loader2 className="w-4 h-4 animate-spin inline mr-1" /> : null}
+              Install document export support
+            </button>
           </div>
         </div>
       )}

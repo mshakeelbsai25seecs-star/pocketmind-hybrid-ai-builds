@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useAppStore } from '../store';
 import { Character, Conversation, Message } from '../types';
+import RefreshButton from './RefreshButton';
 
 export type CharacterPreset = {
   id: string;
@@ -203,15 +204,21 @@ export default function CharacterEditor() {
   const [notice, setNotice] = useState<string>('');
   const [busyPresetId, setBusyPresetId] = useState<string | null>(null);
   const [form, setForm] = useState({ name: '', description: '', system_prompt: '', traits: '[]' });
+  const [refreshBusy, setRefreshBusy] = useState(false);
 
   const existingNames = useMemo(() => new Set(characters.map(c => c.name.trim().toLowerCase())), [characters]);
   const categories = useMemo(() => ['all', ...Array.from(new Set(COMMON_CHARACTER_PRESETS.map(p => p.category)))], []);
   const visiblePresets = useMemo(() => COMMON_CHARACTER_PRESETS.filter(p => filter === 'all' || p.category === filter), [filter]);
 
   const refreshCharacters = async () => {
-    const chars = await invoke<Character[]>('get_characters');
-    setCharacters(chars);
-    return chars;
+    setRefreshBusy(true);
+    try {
+      const chars = await invoke<Character[]>('get_characters');
+      setCharacters(chars);
+      return chars;
+    } finally {
+      setRefreshBusy(false);
+    }
   };
 
   const createCharacterFromData = async (data: { name: string; description: string; prompt: string; traits: string[] }) => {
@@ -336,6 +343,7 @@ export default function CharacterEditor() {
             <p className="text-surface-500 max-w-2xl">Create, select, and start chats with specialized personas. Characters now actually drive the chat system prompt.</p>
           </div>
           <div className="flex flex-wrap gap-2">
+            <RefreshButton title="Refresh" onClick={() => void refreshCharacters()} busy={refreshBusy} />
             <button onClick={handleAddAllPresets} disabled={busyPresetId === 'all'} className="btn-secondary flex items-center gap-2">
               <CopyPlus className="w-4 h-4" /> {busyPresetId === 'all' ? 'Adding...' : 'Add all common characters'}
             </button>

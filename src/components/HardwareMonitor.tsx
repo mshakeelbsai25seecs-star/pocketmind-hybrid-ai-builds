@@ -63,7 +63,7 @@ export default function HardwareMonitor() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           <StatCard icon={MemoryStick} label="Total RAM" value={formatBytes(systemInfo.memory.total_bytes)} subtext={`${formatBytes(systemInfo.memory.free_bytes)} free`} color="blue" />
-          <StatCard icon={Cpu} label="CPU" value={`${systemInfo.cpu.cores_physical} cores`} subtext={systemInfo.cpu.brand} color="purple" />
+          <StatCard icon={Cpu} label="CPU" value={`${systemInfo.cpu.cores_physical} cores / ${systemInfo.cpu.cores_logical} threads`} subtext={systemInfo.cpu.brand} color="purple" />
           <StatCard icon={Zap} label="GPU" value={vramInfo?.name || 'No GPU detected'} subtext={vramInfo ? `${formatBytes(vramInfo.vram_total_bytes)} VRAM` : 'CPU fallback active'} color="green" />
           <StatCard icon={HardDrive} label="Storage" value={formatBytes(systemInfo.storage.free_bytes)} subtext={`of ${formatBytes(systemInfo.storage.total_bytes)}`} color="orange" />
         </div>

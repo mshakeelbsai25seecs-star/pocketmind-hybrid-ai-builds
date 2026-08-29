@@ -2,6 +2,7 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::collections::BTreeSet;
 use std::process::Stdio;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 use serde_json::Value;
@@ -20,6 +21,7 @@ pub struct LlamaCppBackend {
     loaded_runtime_signature: Arc<Mutex<Option<String>>>,
     loaded_mmproj: Arc<Mutex<Option<String>>>,
     port: u16,
+    generation_cancel: Arc<AtomicBool>,
 }
 
 /// True for non-primary multi-part GGUF shards (…-00002-of-00005.gguf).
@@ -209,7 +211,7 @@ struct LaunchPlan {
 }
 
 impl LlamaCppBackend {
-    pub fn new() -> Self {
+    pub fn new(generation_cancel: Arc<AtomicBool>) -> Self {
         Self {
             process: Arc::new(Mutex::new(None)),
             model_loaded: Arc::new(Mutex::new(false)),
@@ -219,7 +221,30 @@ impl LlamaCppBackend {
             // Use a free per-process port instead of a fixed port. This prevents PocketMind Hybrid AI
             // from accidentally talking to an old leftover llama-server.exe instance.
             port: Self::find_free_port().unwrap_or(18082),
+            generation_cancel,
         }
+    }
+
+    pub async fn generate_stream_cancellable(
+        &self,
+        request: GenerationRequest,
+        tx: mpsc::Sender<GenerationChunk>,
+        cancel: Arc<AtomicBool>,
+    ) -> AppResult<()> {
+        if cancel.load(Ordering::Relaxed) {
+            let _ = tx
+                .send(GenerationChunk {
+                    text: "[Stopped]".to_string(),
+                    finish_reason: Some("stop".to_string()),
+                    tokens_generated: 0,
+                    tokens_per_sec: 0.0,
+                    tool_calls: None,
+                    reasoning: None,
+                })
+                .await;
+            return Ok(());
+        }
+        self.generate_stream_inner(request, tx, cancel).await
     }
 
     pub async fn current_mmproj_path(&self) -> Option<String> {
@@ -819,6 +844,9 @@ impl InferenceBackend for LlamaCppBackend {
         let mut errors = Vec::<String>::new();
 
         for plan in launch_plans {
+            if self.generation_cancel.load(Ordering::Relaxed) {
+                return Err(AppError::InferenceError("Generation stopped.".to_string()));
+            }
             let mut proc_lock = self.process.lock().await;
             if let Some(ref mut child) = *proc_lock {
                 let _ = child.kill().await;
@@ -829,6 +857,7 @@ impl InferenceBackend for LlamaCppBackend {
             let args = self.build_args(&path, params, &plan);
             let mut cmd = Command::new(&plan.runtime.path);
             cmd.args(&args).stdout(Stdio::null()).stderr(Stdio::null());
+            crate::process_util::no_window_tokio(&mut cmd);
             if let Some(parent) = plan.runtime.path.parent() {
                 cmd.current_dir(parent);
             }
@@ -873,20 +902,30 @@ impl InferenceBackend for LlamaCppBackend {
     }
 
     async fn generate_stream(&self, request: GenerationRequest, tx: mpsc::Sender<GenerationChunk>) -> AppResult<()> {
+        self.generate_stream_inner(request, tx, self.generation_cancel.clone())
+            .await
+    }
+
+    async fn generate_stream_inner(
+        &self,
+        request: GenerationRequest,
+        tx: mpsc::Sender<GenerationChunk>,
+        cancel: Arc<AtomicBool>,
+    ) -> AppResult<()> {
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(600))
             .build()
             .map_err(|e| AppError::InferenceError(format!("Failed to create generation client: {e}")))?;
 
-        let base_system = "You are PocketMind Hybrid AI, a helpful offline desktop assistant. Answer the latest user message directly and stop. Do not invent follow-up questions, fake user messages, future prompts, quizzes, or examples the user did not ask for. Do not ask and answer your own questions. Ignore older chat history when it conflicts with the latest user request. Do not write documentation about Mistral, workflow engines, Kubernetes, or model cards unless the user specifically asks for that topic. Do not repeat words, phrases, paragraphs, or the user prompt. Use plain, clean Markdown for headings, lists, and code when helpful. Put headings, bullet points, numbered points, and fenced code blocks on separate lines. Use inline code for single keywords or short phrases such as `def`, `class`, `return`, `params`, `lambda functions`, file names, and variable names. Use fenced code blocks only for complete runnable multi-line code examples, not for single words, labels, or fragments. Never put `def`, `class`, `return`, `params`, or `lambda functions` in a fenced code block by themselves. Do not output LaTeX, TikZ, PGF, Asymptote, tabular, graph, or diagram source unless the user explicitly asks for that exact format. Never use placeholders like [object Object].";
+        let formatting_only = "Answer the latest user message directly and stop. Do not invent follow-up questions, fake user messages, future prompts, quizzes, or examples the user did not ask for. Do not ask and answer your own questions. Ignore older chat history when it conflicts with the latest user request. Do not write documentation about Mistral, workflow engines, Kubernetes, or model cards unless the user specifically asks for that topic. Do not repeat words, phrases, paragraphs, or the user prompt. Use plain, clean Markdown for headings, lists, and code when helpful. Put headings, bullet points, numbered points, and fenced code blocks on separate lines. Use inline code for single keywords or short phrases such as `def`, `class`, `return`, `params`, `lambda functions`, file names, and variable names. Use fenced code blocks only for complete runnable multi-line code examples, not for single words, labels, or fragments. Never put `def`, `class`, `return`, `params`, or `lambda functions` in a fenced code block by themselves. Do not output LaTeX, TikZ, PGF, Asymptote, tabular, graph, or diagram source unless the user explicitly asks for that exact format. Never use placeholders like [object Object].";
         let system = match &request.system_prompt {
             Some(sys) if !sys.trim().is_empty()
                 && (is_soc_system_prompt(sys) || is_knowledge_system_prompt(sys) || is_code_workspace_system_prompt(sys)) =>
             {
                 sys.trim().to_string()
             }
-            Some(sys) if !sys.trim().is_empty() => format!("{}\n\n{}", base_system, sys.trim()),
-            _ => base_system.to_string(),
+            Some(sys) if !sys.trim().is_empty() => sys.trim().to_string(),
+            _ => formatting_only.to_string(),
         };
 
         let mmproj_ready = self.loaded_mmproj.lock().await.is_some();
@@ -1000,6 +1039,19 @@ impl InferenceBackend for LlamaCppBackend {
         let mut tokens_generated: u32 = 0;
 
         while let Some(chunk) = stream.next().await {
+            if cancel.load(Ordering::Relaxed) {
+                let _ = tx
+                    .send(GenerationChunk {
+                        text: String::new(),
+                        finish_reason: Some("stop".to_string()),
+                        tokens_generated,
+                        tokens_per_sec: 0.0,
+                        tool_calls: None,
+                        reasoning: None,
+                    })
+                    .await;
+                return Ok(());
+            }
             let bytes = chunk.map_err(|e| AppError::InferenceError(format!("Streaming from llama-server failed: {e}")))?;
             pending.push_str(&String::from_utf8_lossy(&bytes));
 
