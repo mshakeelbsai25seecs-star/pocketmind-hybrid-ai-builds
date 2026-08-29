@@ -13,11 +13,12 @@ Portable Windows desktop build for analysts and power users on Windows 10/11.
 
 ## Before you ship
 
-1. On a Windows machine with D: available, prefer the D:-drive installer/builder:
-   see [BUILD_ON_D.md](BUILD_ON_D.md) (`scripts\build-desktop-windows.ps1`).
-2. Or manually: `npm run tauri build` then `.\scripts\stage-release.ps1` from this folder.
-3. Copy `../shared/config` and `../shared/docs/QUICK_START.md` into the zip if desired.
-4. Zip `payload/` + docs as `PocketMind Hybrid AI-Windows-Desktop-v0.1.0.zip`.
+1. On Windows, build the **fat self-contained installer** (embeds CPU/CUDA/Vulkan runtimes):
+   see [FAT_INSTALLER.md](FAT_INSTALLER.md) (`scripts\prepare-windows-bundle-runtimes.ps1` + `npm run tauri build`).
+2. Or use the D:-drive builder: [BUILD_ON_D.md](BUILD_ON_D.md).
+3. Run `.\scripts\stage-release.ps1` from this folder.
+4. Copy `../shared/config` and `../shared/docs/QUICK_START.md` into the zip if desired.
+5. For Microsoft Store, host the fat `*-setup.exe` only (GitHub Pages). Zip `payload/` for tester portable packages.
 
 ## Default paths
 

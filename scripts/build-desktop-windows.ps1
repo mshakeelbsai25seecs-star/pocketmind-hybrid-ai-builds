@@ -347,14 +347,27 @@ Write-Step "Installing npm dependencies"
 Set-Location $ProjectRoot
 npm install --cache $NpmCache
 
-# --- llama.cpp runtimes (needed for local inference next to the exe) ---
+# --- llama.cpp runtimes: download + embed into Tauri resources for fat setup.exe ---
 if (-not $SkipLlamaRuntimes) {
-  $llamaScript = Join-Path $ProjectRoot "scripts\install_llama_cpp_runtimes.ps1"
-  if (Test-Path -LiteralPath $llamaScript) {
-    Write-Step "Installing llama.cpp Windows runtimes into bin\llama.cpp"
-    & $llamaScript -ProjectPath $ProjectRoot -TempRoot (Join-Path $DevCacheRoot "llama-runtime-tmp")
+  $prepareScript = Join-Path $ProjectRoot "scripts\prepare-windows-bundle-runtimes.ps1"
+  if (Test-Path -LiteralPath $prepareScript) {
+    Write-Step "Preparing bundled llama.cpp runtimes (CPU/CUDA/Vulkan) for the installer"
+    & $prepareScript -ProjectRoot $ProjectRoot -TempRoot (Join-Path $DevCacheRoot "llama-runtime-tmp")
   } else {
-    Write-Host "Skipping llama runtimes (script missing): $llamaScript" -ForegroundColor Yellow
+    $llamaScript = Join-Path $ProjectRoot "scripts\install_llama_cpp_runtimes.ps1"
+    if (Test-Path -LiteralPath $llamaScript) {
+      Write-Step "Installing llama.cpp Windows runtimes into bin\llama.cpp"
+      & $llamaScript -ProjectPath $ProjectRoot -TempRoot (Join-Path $DevCacheRoot "llama-runtime-tmp")
+    } else {
+      Write-Host "Skipping llama runtimes (scripts missing)" -ForegroundColor Yellow
+    }
+  }
+} else {
+  # Even when download is skipped, sync whatever is already in bin\ into resources\.
+  $prepareScript = Join-Path $ProjectRoot "scripts\prepare-windows-bundle-runtimes.ps1"
+  if (Test-Path -LiteralPath $prepareScript) {
+    Write-Step "Syncing existing bin\llama.cpp into Tauri resources (SkipLlamaRuntimes download)"
+    & $prepareScript -ProjectRoot $ProjectRoot -SkipDownload
   }
 }
 

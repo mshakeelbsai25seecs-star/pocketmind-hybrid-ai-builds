@@ -77,6 +77,7 @@
       },
       "resources": [
         "resources/tooling/**",
+        "resources/llama.cpp/**",
         "../scripts/unlimited_ocr_worker.py",
         "../scripts/soc_pdf_ocr.py",
         "../scripts/doc_export_worker.py",
