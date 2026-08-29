@@ -82,10 +82,7 @@
         "../scripts/unlimited_ocr_worker.py",
         "../scripts/soc_pdf_ocr.py",
         "../scripts/doc_export_worker.py",
-        "../scripts/doc_export",
-        "../bin/llama.cpp/cpu/": "llama.cpp/cpu/",
-        "../bin/llama.cpp/vulkan/": "llama.cpp/vulkan/",
-        "../bin/llama.cpp/cuda/": "llama.cpp/cuda/"
+        "../scripts/doc_export"
       ]
     },
     "security": {

@@ -136,7 +136,7 @@ pub fn resolve_doc_export_worker() -> Option<PathBuf> {
 }
 
 fn resolve_doc_export_python() -> Option<PathBuf> {
-    if let Ok(path) = crate::tooling::python_path() {
+    if let Some(path) = crate::tooling::python_path() {
         if path.is_file() {
             return Some(path);
         }
