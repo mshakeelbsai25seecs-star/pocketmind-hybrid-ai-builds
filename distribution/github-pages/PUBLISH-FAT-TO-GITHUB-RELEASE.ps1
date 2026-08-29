@@ -1,16 +1,10 @@
 # Publish the fat Windows setup.exe to the PUBLIC github.io repo as a Release asset.
 #
-# Why Releases (not git push into downloads/):
-#   Fat setup with CUDA is often >100 MB. GitHub blocks normal git files over 100 MB.
-#   Releases on a public repo allow up to ~2 GB and give a stable HTTPS download URL.
-#
-# Public host (this is what Store + the website use):
+# Public host:
 #   Repo:  https://github.com/noumanshakeil/noumanshakeil.github.io
 #   Site:  https://noumanshakeil.github.io/
-#   Package URL (after publish):
+#   Package URL:
 #   https://github.com/noumanshakeil/noumanshakeil.github.io/releases/download/windows-1.0.0/PocketMind-Hybrid-AI_1.0.0_x64-setup.exe
-#
-# Prereqs: `gh auth status` (account that can push to noumanshakeil.github.io)
 #
 # Example:
 #   powershell -ExecutionPolicy Bypass -File .\distribution\github-pages\PUBLISH-FAT-TO-GITHUB-RELEASE.ps1
@@ -24,12 +18,21 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Invoke-Gh {
+  param([Parameter(Mandatory = $true)][string[]]$GhArgs)
+  # PowerShell 5.1 treats native stderr as terminating under Stop; run via cmd for exit codes.
+  $argLine = ($GhArgs | ForEach-Object {
+      if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
+    }) -join ' '
+  cmd.exe /c "gh $argLine"
+  return $LASTEXITCODE
+}
+
 if (-not (Test-Path -LiteralPath $SetupExe)) {
   throw "Setup EXE not found: $SetupExe"
 }
 
-$gh = Get-Command gh -ErrorAction SilentlyContinue
-if (-not $gh) {
+if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
   throw "GitHub CLI (gh) not found. Install from https://cli.github.com/ then run: gh auth login"
 }
 
@@ -38,7 +41,8 @@ Write-Host "Publishing $sizeMb MB -> PUBLIC repo $Repo release $Tag" -Foreground
 Write-Host "  Source: $SetupExe"
 Write-Host "  (Private nexus-ai-deep-fixed is NOT used for hosting.)"
 
-$notes = @"
+$notesFile = Join-Path $env:TEMP ("pocketmind-release-notes-{0}.md" -f [guid]::NewGuid().ToString("N"))
+@"
 Self-contained Windows NSIS installer for **PocketMind Hybrid AI** (CPU + CUDA + Vulkan runtimes embedded).
 
 - Site: https://noumanshakeil.github.io/
@@ -47,23 +51,41 @@ Self-contained Windows NSIS installer for **PocketMind Hybrid AI** (CPU + CUDA +
 
 Microsoft Store Package URL:
 https://github.com/$Repo/releases/download/$Tag/$AssetName
-"@
+"@ | Set-Content -Path $notesFile -Encoding UTF8
 
-$existing = & gh release view $Tag --repo $Repo 2>$null
-if ($LASTEXITCODE -ne 0) {
-  & gh release create $Tag --repo $Repo --title $Title --notes $notes
-  if ($LASTEXITCODE -ne 0) { throw "gh release create failed (need push access to $Repo)" }
-} else {
-  Write-Host "Release $Tag already exists; uploading/replacing asset..."
-}
-
-$staging = Join-Path $env:TEMP $AssetName
-Copy-Item -LiteralPath $SetupExe -Destination $staging -Force
 try {
-  & gh release upload $Tag $staging --repo $Repo --clobber
-  if ($LASTEXITCODE -ne 0) { throw "gh release upload failed" }
+  $viewCode = Invoke-Gh @("release", "view", $Tag, "--repo", $Repo)
+  if ($viewCode -ne 0) {
+    Write-Host "Release $Tag not found; creating it..." -ForegroundColor Yellow
+    $createCode = Invoke-Gh @(
+      "release", "create", $Tag,
+      "--repo", $Repo,
+      "--title", $Title,
+      "--notes-file", $notesFile
+    )
+    if ($createCode -ne 0) {
+      throw "gh release create failed (need push access to $Repo). Exit code $createCode"
+    }
+  } else {
+    Write-Host "Release $Tag already exists; uploading/replacing asset..."
+  }
+
+  $staging = Join-Path $env:TEMP $AssetName
+  Copy-Item -LiteralPath $SetupExe -Destination $staging -Force
+  try {
+    $uploadCode = Invoke-Gh @(
+      "release", "upload", $Tag, $staging,
+      "--repo", $Repo,
+      "--clobber"
+    )
+    if ($uploadCode -ne 0) {
+      throw "gh release upload failed with exit code $uploadCode"
+    }
+  } finally {
+    Remove-Item -LiteralPath $staging -Force -ErrorAction SilentlyContinue
+  }
 } finally {
-  Remove-Item -LiteralPath $staging -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $notesFile -Force -ErrorAction SilentlyContinue
 }
 
 $url = "https://github.com/$Repo/releases/download/$Tag/$AssetName"
@@ -73,5 +95,7 @@ Write-Host $url
 Write-Host "Install switch: /S"
 Write-Host "Architecture: x64"
 Write-Host ""
-Write-Host "Next: refresh the Pages site HTML so the download button points here:"
+Write-Host "Verify:"
+Write-Host "  gh release view $Tag --repo $Repo"
+Write-Host "Then refresh the site HTML:"
 Write-Host "  powershell -ExecutionPolicy Bypass -File .\distribution\github-pages\PUBLISH-SITE-ONLY.ps1"
