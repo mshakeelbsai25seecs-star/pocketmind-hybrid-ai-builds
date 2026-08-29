@@ -42,10 +42,11 @@ function Assert-Backend([string]$Name) {
     throw "Missing required runtime: $server"
   }
   $dlls = @(Get-ChildItem -LiteralPath (Join-Path $binRoot $Name) -Filter *.dll -File -ErrorAction SilentlyContinue)
-  Write-Host ("  OK {0}: llama-server.exe + {1} DLL(s)" -f $Name, $dlls.Count)
+  Write-Host "  OK ${Name}: llama-server.exe + $($dlls.Count) DLL(s)"
 }
 
-Write-Host "PocketMind — prepare Windows bundled llama.cpp runtimes" -ForegroundColor Green
+# ASCII-only banner: PowerShell 5.1 mis-parses UTF-8 em dashes without BOM.
+Write-Host "PocketMind - prepare Windows bundled llama.cpp runtimes" -ForegroundColor Green
 Write-Host "  Project:   $ProjectRoot"
 Write-Host "  Bin:       $binRoot"
 Write-Host "  Resources: $resourceRoot"
@@ -95,7 +96,7 @@ foreach ($backend in @("cpu", "cuda", "vulkan")) {
   New-Item -ItemType Directory -Force -Path $dst | Out-Null
   Copy-Item -Path (Join-Path $src "*") -Destination $dst -Recurse -Force
   $count = (Get-ChildItem -LiteralPath $dst -File -Recurse | Measure-Object).Count
-  Write-Host ("  Synced {0} ({1} files)" -f $backend, $count)
+  Write-Host "  Synced $backend ($count files)"
 }
 
 $manifest = @(
@@ -107,9 +108,9 @@ foreach ($backend in @("cpu", "cuda", "vulkan")) {
   $server = Join-Path $resourceRoot "$backend\llama-server.exe"
   if (Test-Path -LiteralPath $server) {
     $item = Get-Item -LiteralPath $server
-    $manifest += ("{0}=present size={1}" -f $backend, $item.Length)
+    $manifest += "$backend=present size=$($item.Length)"
   } else {
-    $manifest += ("{0}=absent" -f $backend)
+    $manifest += "$backend=absent"
   }
 }
 Set-Content -Path (Join-Path $resourceRoot "BUNDLE_MANIFEST.txt") -Value $manifest -Encoding UTF8
