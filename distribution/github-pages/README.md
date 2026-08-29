@@ -1,34 +1,47 @@
 # noumanshakeil.github.io
 
-Public download host for **PocketMind Hybrid AI** Windows installers (Microsoft Store package URL + direct downloads).
+Public download host for **PocketMind Hybrid AI** Windows installers
+(Microsoft Store package URL + website).
 
 ## Live site
 
 https://noumanshakeil.github.io/
 
-## Store package URL (x64 NSIS)
+## Downloads vs Store package URL
 
-https://noumanshakeil.github.io/downloads/1.0.0/PocketMind-Hybrid-AI_1.0.0_x64-setup.exe
+| Use | Host | Why |
+|-----|------|-----|
+| Website / people | GitHub Release on this public repo | Fine for browsers (follows redirects) |
+| **Microsoft Partner Center Package URL** | **Azure Blob (direct HTTP 200)** | Partner Center rejects GitHub’s HTTP 302 redirect |
 
-## Upload binaries (from your Windows PC)
+GitHub Release (website only):
+
+https://github.com/noumanshakeil/noumanshakeil.github.io/releases/download/windows-1.0.0/PocketMind-Hybrid-AI_1.0.0_x64-setup.exe
+
+Store Package URL: run `PUBLISH-FAT-TO-AZURE-BLOB.ps1` and use the printed
+`https://<account>.blob.core.windows.net/releases/1.0.0/...exe` link.
+
+Details: `STORE_PACKAGE_URL.md`
+
+- Silent install: `/S`
+- Architecture: **x64**
+
+## Publish from your Windows PC
 
 ```powershell
-cd $HOME\noumanshakeil.github.io   # or wherever you cloned this repo
-git pull
+cd D:\nexus-ai-deep-fixed
+git fetch origin cursor/android-studio-setup-7411
+git checkout origin/cursor/android-studio-setup-7411 -- distribution/github-pages
 
-$payload = "D:\nexus-ai-deep-fixed\distribution\windows-desktop\payload"
-$dest = ".\downloads\1.0.0"
+# 1) Upload fat setup.exe to PUBLIC repo Release (required for Store)
+powershell -ExecutionPolicy Bypass -File .\distribution\github-pages\PUBLISH-FAT-TO-GITHUB-RELEASE.ps1
 
-Copy-Item "$payload\PocketMind Hybrid AI_1.0.0_x64-setup.exe" `
-  "$dest\PocketMind-Hybrid-AI_1.0.0_x64-setup.exe" -Force
-Copy-Item "$payload\PocketMind Hybrid AI_1.0.0_x64_en-US.msi" `
-  "$dest\PocketMind-Hybrid-AI_1.0.0_x64_en-US.msi" -Force
-Copy-Item "$payload\PocketMind Hybrid AI.exe" `
-  "$dest\PocketMind-Hybrid-AI.exe" -Force
-
-git add downloads/1.0.0
-git commit -m "Add PocketMind Hybrid AI 1.0.0 Windows installers"
-git push
+# 2) Refresh the small Pages site (index.html links to that Release)
+powershell -ExecutionPolicy Bypass -File .\distribution\github-pages\PUBLISH-SITE-ONLY.ps1
 ```
 
-Do **not** commit the full `bin\llama.cpp` tree to GitHub Pages (too large). Ship runtimes in the tester zip / separate release.
+Needs `gh auth login` with access to `noumanshakeil/noumanshakeil.github.io`.
+
+## Partner Center return codes
+
+See `distribution/windows-desktop/STORE_RETURN_CODES.md` in the product repo.

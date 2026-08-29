@@ -61,9 +61,17 @@ powershell -ExecutionPolicy Bypass -File .\distribution\github-pages\PUBLISH-FAT
 powershell -ExecutionPolicy Bypass -File .\distribution\github-pages\PUBLISH-SITE-ONLY.ps1
 ```
 
-Store package URL (after publish):
+Website download (OK for browsers; **not** for Partner Center):
 
 `https://github.com/noumanshakeil/noumanshakeil.github.io/releases/download/windows-1.0.0/PocketMind-Hybrid-AI_1.0.0_x64-setup.exe`
+
+**Partner Center Package URL** must not redirect. GitHub Releases always 302, so use Azure Blob:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\distribution\github-pages\PUBLISH-FAT-TO-AZURE-BLOB.ps1
+```
+
+See `../github-pages/STORE_PACKAGE_URL.md`.
 
 Silent install switch: `/S`  
 Architecture: **x64** only  

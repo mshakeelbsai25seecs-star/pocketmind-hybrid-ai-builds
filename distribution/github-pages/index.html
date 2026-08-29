@@ -135,54 +135,58 @@
     <p class="brand">PocketMind Hybrid AI</p>
     <h1>Windows downloads</h1>
     <p class="lead">
-      Official host for the Windows x64 installers. Use the NSIS setup link as the
-      Microsoft Store package URL.
+      Official public host for the Windows x64 installer. The Microsoft Store package
+      URL is the fat NSIS setup below (llama.cpp CPU/CUDA/Vulkan embedded).
     </p>
 
     <section class="card">
       <h2>Recommended — NSIS Setup (Store package)</h2>
-      <p>Silent install switch: <span class="url">/S</span>. Architecture: x64. Version 1.0.0.</p>
+      <p>
+        Silent install switch: <span class="url">/S</span>. Architecture: x64. Version 1.0.0.
+        Large self-contained build (runtimes included; GGUF models still separate).
+      </p>
       <div class="meta">
         <span class="pill">EXE installer</span>
         <span class="pill">x64</span>
         <span class="pill">v1.0.0</span>
+        <span class="pill">fat / self-contained</span>
       </div>
       <div class="actions">
-        <a class="btn btn-primary" href="downloads/1.0.0/PocketMind-Hybrid-AI_1.0.0_x64-setup.exe">Download setup.exe</a>
+        <a class="btn btn-primary"
+           href="https://github.com/noumanshakeil/noumanshakeil.github.io/releases/download/windows-1.0.0/PocketMind-Hybrid-AI_1.0.0_x64-setup.exe">
+          Download setup.exe
+        </a>
+        <a class="btn btn-ghost"
+           href="https://github.com/noumanshakeil/noumanshakeil.github.io/releases/tag/windows-1.0.0">
+          Release page
+        </a>
       </div>
       <p style="margin-top:1rem;margin-bottom:0">
-        Direct URL:<br />
-        <span class="url">https://noumanshakeil.github.io/downloads/1.0.0/PocketMind-Hybrid-AI_1.0.0_x64-setup.exe</span>
+        Public download (GitHub Release — OK for browsers):<br />
+        <span class="url">https://github.com/noumanshakeil/noumanshakeil.github.io/releases/download/windows-1.0.0/PocketMind-Hybrid-AI_1.0.0_x64-setup.exe</span>
+      </p>
+      <p style="margin-top:0.75rem;margin-bottom:0">
+        Microsoft Store Package URL must be a <strong>non-redirecting</strong> host
+        (Azure Blob). GitHub Release links return HTTP 302 and Partner Center rejects them.
+        Publish with <span class="url">PUBLISH-FAT-TO-AZURE-BLOB.ps1</span> and paste that Blob URL into Partner Center.
       </p>
     </section>
 
     <section class="card">
-      <h2>Windows Installer (MSI)</h2>
-      <p>Alternative package for IT / enterprise imaging. Silent: <span class="url">/quiet</span></p>
-      <div class="actions">
-        <a class="btn btn-ghost" href="downloads/1.0.0/PocketMind-Hybrid-AI_1.0.0_x64_en-US.msi">Download MSI</a>
-      </div>
-    </section>
-
-    <section class="card">
-      <h2>Portable app EXE</h2>
+      <h2>What you get</h2>
       <p>
-        Standalone <span class="url">PocketMind Hybrid AI.exe</span>. For local GGUF chat you still need
-        <span class="url">bin\llama.cpp</span> next to the EXE (shipped in the full payload zip, not on this page).
+        One setup.exe installs PocketMind Hybrid AI plus bundled
+        <span class="url">resources\llama.cpp\{cpu,cuda,vulkan}</span>.
+        Add your own GGUF models after install in Settings → Models.
       </p>
-      <div class="actions">
-        <a class="btn btn-ghost" href="downloads/1.0.0/PocketMind-Hybrid-AI.exe">Download portable EXE</a>
-      </div>
     </section>
 
     <p class="note">
-      After installing, add your GGUF models under the app data / models folder shown in Settings.
-      Local inference also needs llama.cpp runtimes (CPU/CUDA/Vulkan) from the desktop payload package.
+      Hosted on the public <span class="url">noumanshakeil.github.io</span> repository
+      (Release asset). The product source repo stays private and is not used for downloads.
     </p>
 
-    <footer>
-      PocketMind Hybrid AI · Windows x64 · Hosted on GitHub Pages
-    </footer>
+    <footer>PocketMind Hybrid AI · Windows x64</footer>
   </main>
 </body>
 </html>
