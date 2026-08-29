@@ -30,9 +30,11 @@ npm run tauri build
 
 Or one-click:
 
-```text
-scripts\BUILD-FAT-INSTALLER.cmd
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\BUILD-FAT-INSTALLER.ps1
 ```
+
+(`.cmd` wrapper also exists: `scripts\BUILD-FAT-INSTALLER.cmd` — run with `cmd /c`, not `powershell -File`.)
 
 ## Outputs
 
