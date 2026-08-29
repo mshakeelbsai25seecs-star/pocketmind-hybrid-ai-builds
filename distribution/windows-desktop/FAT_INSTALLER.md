@@ -46,11 +46,19 @@ Expected Store package size: roughly **hundreds of MB to ~1+ GB** (CUDA dominate
 
 ## Host for Store
 
-Upload only the fat `*-setup.exe` to GitHub Pages, e.g.:
+The fat setup is often **>100 MB** (CUDA), so a normal git push to GitHub Pages will fail.
+Publish it as a **GitHub Release** asset instead (2 GB limit):
 
-`https://noumanshakeil.github.io/downloads/1.0.0/PocketMind-Hybrid-AI_1.0.0_x64-setup.exe`
+```powershell
+powershell -ExecutionPolicy Bypass -File .\distribution\github-pages\PUBLISH-FAT-TO-GITHUB-RELEASE.ps1
+```
 
-Silent install switch: `/S`
+Store package URL (after publish):
+
+`https://github.com/noumanshakeil/nexus-ai-deep-fixed/releases/download/windows-1.0.0/PocketMind-Hybrid-AI_1.0.0_x64-setup.exe`
+
+Silent install switch: `/S`  
+Architecture: **x64** only
 
 ## Notes
 
