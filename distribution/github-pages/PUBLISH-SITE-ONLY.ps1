@@ -1,5 +1,5 @@
 # Publish only the small GitHub Pages site files to noumanshakeil.github.io.
-# Fat setup.exe is published separately via PUBLISH-FAT-TO-GITHUB-RELEASE.ps1.
+# Fat setup.exe is published separately (R2 / Azure / Release).
 param(
   [string]$PagesDir = "D:\noumanshakeil.github.io",
   [string]$SiteSource = "D:\nexus-ai-deep-fixed\distribution\github-pages",
@@ -10,10 +10,10 @@ Set-StrictMode -Version 2
 $ErrorActionPreference = "Stop"
 
 function Invoke-Git {
-  param([Parameter(Mandatory = $true)][string[]]$Args, [switch]$AllowFail)
+  param([Parameter(Mandatory = $true)][string[]]$GitArgs, [switch]$AllowFail)
   $prev = $ErrorActionPreference
   $ErrorActionPreference = "Continue"
-  & git @Args 2>&1 |
+  & git @GitArgs 2>&1 |
     ForEach-Object {
       if ($_ -is [System.Management.Automation.ErrorRecord]) {
         [Console]::Error.WriteLine($_.Exception.Message)
@@ -25,17 +25,17 @@ function Invoke-Git {
   $code = [int]$LASTEXITCODE
   $ErrorActionPreference = $prev
   if (-not $AllowFail -and $code -ne 0) {
-    throw ("git {0} failed with exit code {1}" -f ($Args -join ' '), $code)
+    throw ("git {0} failed with exit code {1}" -f ($GitArgs -join ' '), $code)
   }
-  return $code
 }
 
 Write-Host "PocketMind site publish -> $Repo" -ForegroundColor Green
 
-foreach ($name in @("index.html", "README.md", ".gitignore")) {
+$files = @("index.html", "privacy.html", "README.md", ".gitignore")
+foreach ($name in $files) {
   $p = Join-Path $SiteSource $name
   if (-not (Test-Path -LiteralPath $p)) {
-    throw "Missing site source file: $p`nRun: git checkout origin/cursor/android-studio-setup-7411 -- distribution/github-pages"
+    throw "Missing site source file: $p"
   }
 }
 
@@ -45,37 +45,33 @@ if (-not (Test-Path -LiteralPath $PagesDir)) {
   if ($parent -and -not (Test-Path -LiteralPath $parent)) {
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
   }
-  Invoke-Git -Args @("clone", "https://github.com/$Repo.git", $PagesDir) | Out-Null
+  Invoke-Git -GitArgs @("clone", "https://github.com/$Repo.git", $PagesDir)
 }
 
 Set-Location $PagesDir
-Invoke-Git -Args @("checkout", "main") -AllowFail | Out-Null
-Invoke-Git -Args @("pull", "origin", "main") | Out-Null
+Invoke-Git -GitArgs @("checkout", "main") -AllowFail
+Invoke-Git -GitArgs @("pull", "origin", "main")
 
-Copy-Item -Force (Join-Path $SiteSource "index.html") (Join-Path $PagesDir "index.html")
-Copy-Item -Force (Join-Path $SiteSource "README.md") (Join-Path $PagesDir "README.md")
-Copy-Item -Force (Join-Path $SiteSource ".gitignore") (Join-Path $PagesDir ".gitignore")
+foreach ($name in $files) {
+  Copy-Item -Force (Join-Path $SiteSource $name) (Join-Path $PagesDir $name)
+}
 
-Invoke-Git -Args @("add", "--", "index.html", "README.md", ".gitignore") | Out-Null
+Invoke-Git -GitArgs (@("add", "--") + $files)
 
 $prev = $ErrorActionPreference
 $ErrorActionPreference = "Continue"
-$porcelain = & git status --porcelain -- index.html README.md .gitignore 2>&1
+$porcelain = & git status --porcelain -- @files 2>&1
 $ErrorActionPreference = $prev
 $pending = @($porcelain | Where-Object { $_ -isnot [System.Management.Automation.ErrorRecord] -and -not [string]::IsNullOrWhiteSpace([string]$_) })
 
 if ($pending.Count -eq 0) {
   Write-Host "Site files already up to date; nothing to commit." -ForegroundColor Yellow
 } else {
-  Invoke-Git -Args @("commit", "-m", "Point PocketMind downloads at public Release assets") | Out-Null
-  Invoke-Git -Args @("push", "origin", "main") | Out-Null
+  Invoke-Git -GitArgs @("commit", "-m", "Publish PocketMind site pages including privacy policy")
+  Invoke-Git -GitArgs @("push", "origin", "main")
   Write-Host "Pushed site update." -ForegroundColor Green
 }
 
 Write-Host ""
 Write-Host "Site: https://noumanshakeil.github.io/" -ForegroundColor Green
-Write-Host "Store package URL:" -ForegroundColor Green
-Write-Host "https://github.com/noumanshakeil/noumanshakeil.github.io/releases/download/windows-1.0.0/PocketMind-Hybrid-AI_1.0.0_x64-setup.exe"
-Write-Host ""
-Write-Host "If the download 404s, the Release asset is missing. Re-run:"
-Write-Host "  powershell -ExecutionPolicy Bypass -File .\distribution\github-pages\PUBLISH-FAT-TO-GITHUB-RELEASE.ps1"
+Write-Host "Privacy Policy URL: https://noumanshakeil.github.io/privacy.html" -ForegroundColor Green
