@@ -136,21 +136,26 @@ if (Test-Path -LiteralPath $toolingRoot) { Invoke-SignTree $toolingRoot }
 # 3) Build with Tauri Authenticode when using a store cert thumbprint
 # ---------------------------------------------------------------------------
 $tauriOriginal = $null
-$thumbNormalized = $null
 if ($PSCmdlet.ParameterSetName -eq "Thumbprint") {
   $thumbNormalized = ($CertificateThumbprint -replace "\s", "").ToUpperInvariant()
   Write-Host "`n==> Enabling tauri.conf.json windows.certificateThumbprint for this build..." -ForegroundColor Cyan
   $tauriOriginal = Get-Content -LiteralPath $tauriConf -Raw -Encoding UTF8
-  $confObj = $tauriOriginal | ConvertFrom-Json
-  if (-not $confObj.tauri.bundle.windows) {
-    throw "tauri.conf.json missing tauri.bundle.windows"
+  $patched = $tauriOriginal
+  if ($patched -match '"certificateThumbprint"\s*:\s*null') {
+    $patched = $patched -replace '"certificateThumbprint"\s*:\s*null', ('"certificateThumbprint": "' + $thumbNormalized + '"')
+  } elseif ($patched -match '"certificateThumbprint"\s*:\s*"[^"]*"') {
+    $patched = $patched -replace '"certificateThumbprint"\s*:\s*"[^"]*"', ('"certificateThumbprint": "' + $thumbNormalized + '"')
+  } else {
+    throw "Could not locate certificateThumbprint in tauri.conf.json"
   }
-  $confObj.tauri.bundle.windows.certificateThumbprint = $thumbNormalized
-  $confObj.tauri.bundle.windows.digestAlgorithm = "sha256"
-  if (-not $confObj.tauri.bundle.windows.timestampUrl) {
-    $confObj.tauri.bundle.windows.timestampUrl = $(if ($TimestampUrl) { $TimestampUrl } else { "http://timestamp.digicert.com" })
+  if ($patched -match '"digestAlgorithm"\s*:\s*"[^"]*"') {
+    $patched = $patched -replace '"digestAlgorithm"\s*:\s*"[^"]*"', '"digestAlgorithm": "sha256"'
   }
-  ($confObj | ConvertTo-Json -Depth 30) | Set-Content -LiteralPath $tauriConf -Encoding UTF8
+  $ts = if ($TimestampUrl) { $TimestampUrl } else { "http://timestamp.digicert.com" }
+  if ($patched -match '"timestampUrl"\s*:\s*"[^"]*"') {
+    $patched = $patched -replace '"timestampUrl"\s*:\s*"[^"]*"', ('"timestampUrl": "' + $ts + '"')
+  }
+  Set-Content -LiteralPath $tauriConf -Value $patched -Encoding UTF8 -NoNewline
 }
 
 try {
