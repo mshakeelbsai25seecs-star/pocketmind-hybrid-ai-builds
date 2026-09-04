@@ -120,3 +120,10 @@ Note: This Store package includes the app and a CPU local-inference runtime. Opt
 - Do not resubmit the ~1 GB fat installer
 - Do not keep the non-Microsoft drivers checkbox checked for this package
 - Do not rely on another policy-waiver note alone — that already failed twice
+
+## Next blocker after CPU-only: policy 10.2.9 (code signing)
+
+An unsigned setup.exe will fail certification even if 10.2.4.2 is fixed.
+You must Authenticode-sign the Store package (SHA-256, Trusted Root CA) before
+resubmitting — see **`STORE_RESUBMIT_10_2_9.md`** and
+`scripts\BUILD-STORE-SIGNED-INSTALLER.ps1`.

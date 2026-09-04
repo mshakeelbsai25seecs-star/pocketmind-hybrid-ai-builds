@@ -94,6 +94,9 @@ if (Test-Path -LiteralPath $payload) {
   Get-ChildItem -LiteralPath $payload -Filter "*setup.exe" -ErrorAction SilentlyContinue |
     ForEach-Object { Write-Host ("  Payload: " + $_.FullName) }
 }
-Write-Host "`nNext: upload this setup.exe to your public direct host (R2) and update the Store Package URL."
-Write-Host "Then UNCHECK 'non-Microsoft drivers or NT services' and resubmit."
-Write-Host "See: distribution\windows-desktop\STORE_RESUBMIT_10_2_4_2.md"
+Write-Host "`nWARNING: This setup.exe is NOT Authenticode-signed." -ForegroundColor Yellow
+Write-Host "Microsoft Store policy 10.2.9 rejects unsigned EXE/MSI Package URLs."
+Write-Host "Next: run scripts\BUILD-STORE-SIGNED-INSTALLER.ps1 with your code-signing cert,"
+Write-Host "upload the hyphenated file from distribution\windows-desktop\store-upload\, then resubmit."
+Write-Host "See: distribution\windows-desktop\STORE_RESUBMIT_10_2_9.md"
+Write-Host "(CPU-only / 10.2.4.2 notes: STORE_RESUBMIT_10_2_4_2.md)"

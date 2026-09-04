@@ -18,7 +18,11 @@ Portable Windows desktop build for analysts and power users on Windows 10/11.
 2. Or use the D:-drive builder: [BUILD_ON_D.md](BUILD_ON_D.md).
 3. Run `.\scripts\stage-release.ps1` from this folder.
 4. Copy `../shared/config` and `../shared/docs/QUICK_START.md` into the zip if desired.
-5. For Microsoft Store, host the fat `*-setup.exe` only (GitHub Pages). Zip `payload/` for tester portable packages.
+5. **Microsoft Store (EXE/MSI URL product):**
+   - CPU-only package for policy 10.2.4.2 → `STORE_RESUBMIT_10_2_4_2.md` / `scripts\BUILD-STORE-INSTALLER.ps1`
+   - Authenticode-sign for policy 10.2.9 → `STORE_RESUBMIT_10_2_9.md` / `scripts\BUILD-STORE-SIGNED-INSTALLER.ps1`
+   - Host the hyphenated signed `*-setup.exe` on a direct HTTPS URL (R2). Do not submit the unsigned or fat installer.
+6. Zip `payload/` for tester portable packages (website can still use the fat installer).
 
 ## Default paths
 

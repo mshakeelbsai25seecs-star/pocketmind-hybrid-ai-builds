@@ -1,0 +1,6 @@
+{
+  "Endpoint": "https://eus.codesigning.azure.net",
+  "CodeSigningAccountName": "YOUR_ARTIFACT_SIGNING_ACCOUNT",
+  "CertificateProfileName": "YOUR_CERTIFICATE_PROFILE",
+  "CorrelationId": "pocketmind-store-1.0.0"
+}
