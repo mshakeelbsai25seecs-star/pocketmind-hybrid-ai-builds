@@ -20,9 +20,17 @@ param(
   [string]$ProjectRoot = "D:\nexus-ai-deep-fixed",
   [string]$DevCacheRoot = "D:\DevCache",
   [switch]$SkipLlamaRuntimes,
+  [switch]$SkipCuda,
+  [switch]$SkipVulkan,
+  [switch]$StoreSafe,
   [switch]$SkipWebView2,
   [switch]$SkipBuild
 )
+
+if ($StoreSafe) {
+  $SkipCuda = $true
+  $SkipVulkan = $true
+}
 
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
@@ -347,27 +355,45 @@ Write-Step "Installing npm dependencies"
 Set-Location $ProjectRoot
 npm install --cache $NpmCache
 
-# --- llama.cpp runtimes: download + embed into Tauri resources for fat setup.exe ---
+# --- llama.cpp runtimes: download + embed into Tauri resources for setup.exe ---
+$prepareArgs = @{
+  ProjectRoot = $ProjectRoot
+  TempRoot = Join-Path $DevCacheRoot "llama-runtime-tmp"
+}
+if ($SkipCuda) { $prepareArgs.SkipCuda = $true }
+if ($SkipVulkan) { $prepareArgs.SkipVulkan = $true }
+
 if (-not $SkipLlamaRuntimes) {
   $prepareScript = Join-Path $ProjectRoot "scripts\prepare-windows-bundle-runtimes.ps1"
   if (Test-Path -LiteralPath $prepareScript) {
-    Write-Step "Preparing bundled llama.cpp runtimes (CPU/CUDA/Vulkan) for the installer"
-    & $prepareScript -ProjectRoot $ProjectRoot -TempRoot (Join-Path $DevCacheRoot "llama-runtime-tmp")
+    if ($StoreSafe) {
+      Write-Step "Preparing STORE-SAFE bundled runtimes (CPU only; no CUDA/Vulkan DLLs)"
+    } else {
+      Write-Step "Preparing bundled llama.cpp runtimes for the installer"
+    }
+    & $prepareScript @prepareArgs
   } else {
     $llamaScript = Join-Path $ProjectRoot "scripts\install_llama_cpp_runtimes.ps1"
     if (Test-Path -LiteralPath $llamaScript) {
       Write-Step "Installing llama.cpp Windows runtimes into bin\llama.cpp"
-      & $llamaScript -ProjectPath $ProjectRoot -TempRoot (Join-Path $DevCacheRoot "llama-runtime-tmp")
+      $installArgs = @{
+        ProjectPath = $ProjectRoot
+        TempRoot = Join-Path $DevCacheRoot "llama-runtime-tmp"
+      }
+      if ($SkipCuda) { $installArgs.SkipCuda = $true }
+      if ($SkipVulkan) { $installArgs.SkipVulkan = $true }
+      & $llamaScript @installArgs
     } else {
       Write-Host "Skipping llama runtimes (scripts missing)" -ForegroundColor Yellow
     }
   }
 } else {
-  # Even when download is skipped, sync whatever is already in bin\ into resources\.
+  # Even when download is skipped, sync selected backends from bin\ into resources\.
   $prepareScript = Join-Path $ProjectRoot "scripts\prepare-windows-bundle-runtimes.ps1"
   if (Test-Path -LiteralPath $prepareScript) {
     Write-Step "Syncing existing bin\llama.cpp into Tauri resources (SkipLlamaRuntimes download)"
-    & $prepareScript -ProjectRoot $ProjectRoot -SkipDownload
+    $prepareArgs.SkipDownload = $true
+    & $prepareScript @prepareArgs
   }
 }
 

@@ -59,4 +59,5 @@ if (Test-Path -LiteralPath $payload) {
   Get-ChildItem -LiteralPath $payload -Filter "*setup.exe" -ErrorAction SilentlyContinue |
     ForEach-Object { Write-Host ("  " + $_.FullName) }
 }
-Write-Host "`nUse the *-setup.exe as the Microsoft Store Package URL."
+Write-Host "`nUse the *-setup.exe for direct website downloads (fat / GPU)."
+Write-Host "For Microsoft Store, build scripts\BUILD-STORE-INSTALLER.ps1 instead (CPU-only; policy 10.2.4.2)."

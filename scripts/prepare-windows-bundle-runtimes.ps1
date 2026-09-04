@@ -89,7 +89,13 @@ if (Test-Path -LiteralPath $resourceRoot) {
 }
 New-Item -ItemType Directory -Force -Path $resourceRoot | Out-Null
 
-foreach ($backend in @("cpu", "cuda", "vulkan")) {
+# Only embed backends that were requested. SkipCuda/SkipVulkan must NOT copy leftover
+# folders from a previous fat build into the Store package (policy 10.2.4.2).
+$backends = @("cpu")
+if (-not $SkipCuda) { $backends += "cuda" }
+if (-not $SkipVulkan) { $backends += "vulkan" }
+
+foreach ($backend in $backends) {
   $src = Join-Path $binRoot $backend
   if (-not (Test-Path -LiteralPath $src)) { continue }
   $dst = Join-Path $resourceRoot $backend
@@ -99,10 +105,16 @@ foreach ($backend in @("cpu", "cuda", "vulkan")) {
   Write-Host "  Synced $backend ($count files)"
 }
 
+foreach ($excluded in @("cuda", "vulkan")) {
+  if ($backends -contains $excluded) { continue }
+  Write-Host "  Excluded $excluded from installer bundle (Store-safe / Skip flag)"
+}
+
 $manifest = @(
   "PocketMind bundled llama.cpp runtimes",
   ("PreparedUtc=" + [DateTime]::UtcNow.ToString("o")),
-  ("ProjectRoot=" + $ProjectRoot)
+  ("ProjectRoot=" + $ProjectRoot),
+  ("Backends=" + ($backends -join ","))
 )
 foreach ($backend in @("cpu", "cuda", "vulkan")) {
   $server = Join-Path $resourceRoot "$backend\llama-server.exe"
