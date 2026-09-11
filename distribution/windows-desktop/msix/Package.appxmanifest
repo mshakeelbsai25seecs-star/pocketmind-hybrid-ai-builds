@@ -7,17 +7,20 @@
   IgnorableNamespaces="uap uap10 rescap">
 
   <!--
-    Replace Publisher with the exact CN from Partner Center package identity.
-    Example: Publisher="CN=XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
+    Partner Center product identity (Store ID 9NZ7WF9VXF5R):
+    Name=PocketMind.PocketMindAI
+    Publisher=CN=78BD2D1C-2460-451B-91FD-410288D37531
+    PublisherDisplayName=PocketMind
+    PFN=PocketMind.PocketMindAI_fawhaqqkcp3dj
   -->
   <Identity
-    Name="PocketMind.PocketMindHybridAI"
-    Publisher="CN=REPLACE_WITH_PARTNER_CENTER_PUBLISHER_CN"
+    Name="PocketMind.PocketMindAI"
+    Publisher="CN=78BD2D1C-2460-451B-91FD-410288D37531"
     Version="1.0.0.0"
     ProcessorArchitecture="x64" />
 
   <Properties>
-    <DisplayName>PocketMind Hybrid AI</DisplayName>
+    <DisplayName>PocketMind AI</DisplayName>
     <PublisherDisplayName>PocketMind</PublisherDisplayName>
     <Description>Local-first hybrid AI desktop app with optional cloud providers.</Description>
     <Logo>Assets\StoreLogo.png</Logo>
@@ -39,8 +42,8 @@
       uap10:TrustLevel="mediumIL"
       uap10:RuntimeBehavior="packagedClassicApp">
       <uap:VisualElements
-        DisplayName="PocketMind Hybrid AI"
-        Description="PocketMind Hybrid AI"
+        DisplayName="PocketMind AI"
+        Description="PocketMind AI"
         BackgroundColor="transparent"
         Square150x150Logo="Assets\Square150x150Logo.png"
         Square44x44Logo="Assets\Square44x44Logo.png">

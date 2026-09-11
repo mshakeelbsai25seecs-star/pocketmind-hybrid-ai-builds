@@ -3,12 +3,17 @@
 Use this path only if you are converting the Partner Center product from
 **EXE/MSI (URL)** to **MSIX/PWA**, or creating a new MSIX listing.
 
-Your current PocketMind AI product (`c2aea639-62fc-4bda-b565-4f1ae4f70e9a`) is
-EXE/MSI. Partner Center will **not** accept an `.msix` upload on that listing
-until Microsoft changes the product type (support ticket) or you create a new
-MSIX app (may require releasing the name reservation).
+## Current MSIX product identity (use exactly)
 
-Until then, use the signed EXE flow in `../STORE_RESUBMIT_10_2_9.md`.
+| Field | Value |
+|-------|--------|
+| Store ID | `9NZ7WF9VXF5R` |
+| Package/Identity/Name | `PocketMind.PocketMindAI` |
+| Publisher | `CN=78BD2D1C-2460-451B-91FD-410288D37531` |
+| Publisher display name | `PocketMind` |
+| Package Family Name | `PocketMind.PocketMindAI_fawhaqqkcp3dj` |
+
+These values are already set in `Package.appxmanifest`.
 
 ## Why MSIX helps
 
