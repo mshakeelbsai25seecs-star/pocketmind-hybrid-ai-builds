@@ -42,7 +42,7 @@ Edit `Package.appxmanifest` in this folder and replace:
 
 ## Build (after product type is MSIX)
 
-On the Windows build PC, with [winapp CLI](https://learn.microsoft.com/en-us/windows/apps/dev-tools/winapp-cli/) installed:
+On the Windows build PC:
 
 ```powershell
 cd D:\nexus-ai-deep-fixed
@@ -50,14 +50,27 @@ cd D:\nexus-ai-deep-fixed
 # CPU-only Store build (no need to Authenticode-sign for Store MSIX)
 powershell -ExecutionPolicy Bypass -File .\scripts\BUILD-STORE-INSTALLER.ps1
 
-# Stage loose layout for winapp pack (script helper)
+# Stage loose layout
 powershell -ExecutionPolicy Bypass -File .\distribution\windows-desktop\msix\stage-msix-layout.ps1
 
-# Pack (Store will re-sign; local cert only needed for sideload testing)
-winapp pack .\distribution\windows-desktop\msix\layout
+# Pack with MakeAppx (Windows SDK) — recommended if winapp is missing
+powershell -ExecutionPolicy Bypass -File .\distribution\windows-desktop\msix\PACK-MSIX.ps1
 ```
 
-Upload the `.msix` / `.msixbundle` in Partner Center Packages (upload button — not a URL).
+If `MakeAppx.exe` is missing, install a Windows SDK **or** WinApp CLI:
+
+```powershell
+winget install -e --id Microsoft.WindowsSDK.10.0.26100 --source winget
+# OR
+winget install -e --id Microsoft.winappcli --source winget
+```
+
+Output file:
+
+`distribution\windows-desktop\msix\out\PocketMind.PocketMindAI_1.0.0.0_x64.msix`
+
+Upload that `.msix` in Partner Center → Packages (upload button — not a URL).
+Do **not** buy a code-signing cert for Store MSIX — Microsoft re-signs it.
 
 ## runFullTrust justification (Submission options)
 

@@ -32,6 +32,7 @@ if (-not $ReleaseDir) {
   $candidates = @(
     $(if ($env:CARGO_TARGET_DIR) { Join-Path $env:CARGO_TARGET_DIR "release" } else { $null }),
     "D:\DevCache\Cargo\target\nexus-ai\release",
+    "D:\DevCache\Cargo\target\nexus-ai\release",
     (Join-Path $ProjectRoot "src-tauri\target\release")
   ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
   if (-not $candidates) {
@@ -45,10 +46,15 @@ if (-not (Test-Path -LiteralPath $mainExe)) {
   throw "Missing $mainExe"
 }
 
-$resourceRoot = Join-Path $ProjectRoot "src-tauri\resources\llama.cpp"
-foreach ($banned in @("cuda", "vulkan")) {
-  if (Test-Path -LiteralPath (Join-Path $resourceRoot $banned)) {
-    throw "Refusing to stage MSIX with $banned runtime present. Use Store-safe CPU-only build."
+$resourceRoots = @(
+  (Join-Path $ProjectRoot "src-tauri\resources\llama.cpp"),
+  (Join-Path $ProjectRoot "src-tauri\resources\llama.cpp")
+) | Where-Object { Test-Path -LiteralPath $_ }
+foreach ($resourceRoot in $resourceRoots) {
+  foreach ($banned in @("cuda", "vulkan")) {
+    if (Test-Path -LiteralPath (Join-Path $resourceRoot $banned)) {
+      throw "Refusing to stage MSIX with $banned under $resourceRoot. Use Store-safe CPU-only build."
+    }
   }
 }
 
@@ -79,23 +85,57 @@ if (Test-Path -LiteralPath $resSrc) {
 # Assets from icons (generate Wide/Splash fallbacks from existing art)
 $assetMap = @{
   "StoreLogo.png"           = "StoreLogo.png"
+  "Square30x30Logo.png"     = "StoreLogo.png"
   "Square44x44Logo.png"     = "Square44x44Logo.png"
   "Square71x71Logo.png"     = "Square71x71Logo.png"
   "Square150x150Logo.png"   = "Square150x150Logo.png"
   "Square310x310Logo.png"   = "Square310x310Logo.png"
   "icon.png"                = "Wide310x150Logo.png"
   "128x128.png"             = "SplashScreen.png"
+  "app-icon-master.png"     = "SplashScreen.png"
 }
 foreach ($pair in $assetMap.GetEnumerator()) {
   $from = Join-Path $assetsSrc $pair.Key
   $to = Join-Path $layout "Assets\$($pair.Value)"
-  if (Test-Path -LiteralPath $from) {
+  if ((Test-Path -LiteralPath $from) -and -not (Test-Path -LiteralPath $to)) {
     Copy-Item -LiteralPath $from -Destination $to -Force
   }
 }
 
+# Ensure required logos exist (MakeAppx fails if paths in manifest are missing).
+$requiredAssets = @(
+  "StoreLogo.png",
+  "Square44x44Logo.png",
+  "Square71x71Logo.png",
+  "Square150x150Logo.png",
+  "Square310x310Logo.png",
+  "Wide310x150Logo.png",
+  "SplashScreen.png"
+)
+$fallback = @(
+  (Join-Path $assetsSrc "icon.png"),
+  (Join-Path $assetsSrc "128x128.png"),
+  (Join-Path $assetsSrc "app-icon-master.png")
+) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+foreach ($name in $requiredAssets) {
+  $to = Join-Path $layout "Assets\$name"
+  if (-not (Test-Path -LiteralPath $to)) {
+    if (-not $fallback) { throw "Missing icon assets under $assetsSrc (need $name)" }
+    Copy-Item -LiteralPath $fallback -Destination $to -Force
+  }
+}
+
+# Strip any accidental GPU runtimes from copied resources.
+foreach ($banned in @("cuda", "vulkan")) {
+  Get-ChildItem -LiteralPath $layout -Directory -Recurse -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -ieq $banned } |
+    ForEach-Object {
+      Write-Host "Removing banned runtime folder from layout: $($_.FullName)" -ForegroundColor Yellow
+      Remove-Item -LiteralPath $_.FullName -Recurse -Force
+    }
+}
+
 Write-Host "Done. Next:" -ForegroundColor Green
-Write-Host "  1. Edit Publisher CN in $manifestSrc (and re-run this script)"
-Write-Host "  2. winapp pack `"$layout`""
-Write-Host "  3. Upload .msix in Partner Center (MSIX product type only)"
+Write-Host "  powershell -ExecutionPolicy Bypass -File .\distribution\windows-desktop\msix\PACK-MSIX.ps1"
+Write-Host "Then upload the .msix from distribution\windows-desktop\msix\out\"
 Write-Host "See: distribution\windows-desktop\msix\README.md"
