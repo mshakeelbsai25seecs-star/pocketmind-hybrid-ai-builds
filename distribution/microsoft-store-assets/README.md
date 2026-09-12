@@ -23,8 +23,9 @@ recommended minimum of 1366 × 768.
 ## Store logos
 
 - Required 1:1 box art: `logos/pocketmind-box-art-1080.png` (**1080 × 1080**)
-- Recommended 2:3 poster: `logos/pocketmind-poster-art-1440x2160.png`
-  (**1440 × 2160**)
+- 9:16 poster art (Partner Center exact sizes):
+  - `logos/pocketmind-poster-art-1440x2160.png` (**1440 × 2160**) — preferred
+  - `logos/pocketmind-poster-art-720x1080.png` (**720 × 1080**) — alternate
 
 All files are under 50 MB.
 
