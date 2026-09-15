@@ -4,9 +4,10 @@
   Stage a Store-safe (CPU-only) release folder into an MSIX loose layout.
 
 .DESCRIPTION
-  Copies PocketMind Hybrid AI.exe, DLLs, and CPU-only resources into
-  distribution/windows-desktop/msix/layout with Package.appxmanifest + Assets.
-  Does not Authenticode-sign (Store re-signs MSIX).
+  Copies PocketMind Hybrid AI.exe, DLLs, CPU-only resources, Package.appxmanifest,
+  and sharp tile Assets into distribution/windows-desktop/msix/layout.
+  Prefers prebuilt Assets under distribution/windows-desktop/msix/Assets
+  (required after Store policy 10.1.1.11 tile rejection).
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\distribution\windows-desktop\msix\stage-msix-layout.ps1
@@ -25,7 +26,8 @@ if (-not $ProjectRoot) {
 
 $msixRoot = Join-Path $ProjectRoot "distribution\windows-desktop\msix"
 $layout = Join-Path $msixRoot "layout"
-$assetsSrc = Join-Path $ProjectRoot "src-tauri\icons"
+$prebuiltAssets = Join-Path $msixRoot "Assets"
+$iconsSrc = Join-Path $ProjectRoot "src-tauri\icons"
 $manifestSrc = Join-Path $msixRoot "Package.appxmanifest"
 
 if (-not (Test-Path -LiteralPath $manifestSrc)) {
@@ -35,7 +37,6 @@ if (-not (Test-Path -LiteralPath $manifestSrc)) {
 if (-not $ReleaseDir) {
   $candidates = @(
     $(if ($env:CARGO_TARGET_DIR) { Join-Path $env:CARGO_TARGET_DIR "release" } else { $null }),
-    "D:\DevCache\Cargo\target\nexus-ai\release",
     "D:\DevCache\Cargo\target\nexus-ai\release",
     (Join-Path $ProjectRoot "src-tauri\target\release")
   ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
@@ -52,7 +53,7 @@ if (-not (Test-Path -LiteralPath $mainExe)) {
 
 foreach ($resourceRoot in @(
     (Join-Path $ProjectRoot "src-tauri\resources\llama.cpp"),
-    (Join-Path $ProjectRoot "src-tauri\resources\llama.cpp")
+    (Join-Path $ReleaseDir "resources\llama.cpp")
   )) {
   if (-not (Test-Path -LiteralPath $resourceRoot)) { continue }
   foreach ($banned in @("cuda", "vulkan")) {
@@ -79,7 +80,6 @@ Copy-Item -LiteralPath $mainExe -Destination $layout -Force
 Get-ChildItem -LiteralPath $ReleaseDir -Filter "*.dll" -File -ErrorAction SilentlyContinue |
   ForEach-Object { Copy-Item $_.FullName -Destination $layout -Force }
 
-# Prefer Store-safe resources already next to the release exe (Tauri bundle output).
 $releaseResources = Join-Path $ReleaseDir "resources"
 $resDst = Join-Path $layout "resources"
 if (Test-Path -LiteralPath $releaseResources) {
@@ -92,22 +92,31 @@ if (Test-Path -LiteralPath $releaseResources) {
   }
 }
 
-# Map source icon filenames -> exact names required by Package.appxmanifest
-$assetMap = @{
-  "StoreLogo.png"         = "StoreLogo.png"
-  "Square44x44Logo.png"   = "Square44x44Logo.png"
-  "Square71x71Logo.png"   = "Square71x71Logo.png"
-  "Square150x150Logo.png" = "Square150x150Logo.png"
-  "Square310x310Logo.png" = "Square310x310Logo.png"
-  "icon.png"              = "Wide310x150Logo.png"
-  "128x128.png"           = "SplashScreen.png"
-  "app-icon-master.png"   = "SplashScreen.png"
-}
-foreach ($pair in $assetMap.GetEnumerator()) {
-  $from = Join-Path $assetsSrc $pair.Key
-  $to = Join-Path $layout "Assets\$($pair.Value)"
-  if ((Test-Path -LiteralPath $from) -and -not (Test-Path -LiteralPath $to)) {
-    Copy-Item -LiteralPath $from -Destination $to -Force
+# Prefer sharp prebuilt Store tile assets (fixes 10.1.1.11 blurry tiles).
+if (Test-Path -LiteralPath $prebuiltAssets) {
+  Copy-Item -LiteralPath (Join-Path $prebuiltAssets "*") -Destination (Join-Path $layout "Assets") -Force
+  Write-Host "Copied prebuilt tile Assets from $prebuiltAssets" -ForegroundColor Cyan
+} else {
+  Write-Warning "Missing $prebuiltAssets - falling back to src-tauri/icons"
+  $required = @(
+    "StoreLogo.png",
+    "Square44x44Logo.png",
+    "Square71x71Logo.png",
+    "Square150x150Logo.png",
+    "Square310x310Logo.png",
+    "Wide310x150Logo.png",
+    "SplashScreen.png"
+  )
+  foreach ($name in $required) {
+    $from = Join-Path $iconsSrc $name
+    if (-not (Test-Path -LiteralPath $from)) {
+      throw "Missing tile asset $from"
+    }
+    # Reject tiny placeholder icons (< 1 KB) that caused 10.1.1.11 failures.
+    if ((Get-Item -LiteralPath $from).Length -lt 1024) {
+      throw "Tile asset looks like a placeholder (too small): $from"
+    }
+    Copy-Item -LiteralPath $from -Destination (Join-Path $layout "Assets\$name") -Force
   }
 }
 
@@ -120,18 +129,13 @@ $requiredAssets = @(
   "Wide310x150Logo.png",
   "SplashScreen.png"
 )
-$fallback = @(
-  (Join-Path $assetsSrc "icon.png"),
-  (Join-Path $assetsSrc "128x128.png"),
-  (Join-Path $assetsSrc "Square150x150Logo.png"),
-  (Join-Path $assetsSrc "app-icon-master.png")
-) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-
 foreach ($name in $requiredAssets) {
   $to = Join-Path $layout "Assets\$name"
   if (-not (Test-Path -LiteralPath $to)) {
-    if (-not $fallback) { throw "Missing icon assets under $assetsSrc (need $name)" }
-    Copy-Item -LiteralPath $fallback -Destination $to -Force
+    throw "Layout missing required tile asset: $to"
+  }
+  if ((Get-Item -LiteralPath $to).Length -lt 1024 -and $name -ne "StoreLogo.png") {
+    throw "Layout tile asset still looks like a placeholder: $to"
   }
 }
 
@@ -147,4 +151,5 @@ foreach ($banned in @("cuda", "vulkan")) {
 Write-Host "Done. Next:" -ForegroundColor Green
 Write-Host "  powershell -ExecutionPolicy Bypass -File .\distribution\windows-desktop\msix\PACK-MSIX.ps1"
 Write-Host "Then upload the .msix from distribution\windows-desktop\msix\out\"
+Write-Host "Version in manifest must be higher than previous Store submission (now 1.0.1.0)."
 Write-Host "See: distribution\windows-desktop\msix\README.md"

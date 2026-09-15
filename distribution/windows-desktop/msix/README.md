@@ -21,6 +21,16 @@ These values are already set in `Package.appxmanifest`.
 - Still ship **CPU-only** contents (policy 10.2.4.2)
 - Declare `runFullTrust` (required for classic Tauri/Win32) and justify it under Submission options
 
+## Tile icons (policy 10.1.1.11)
+
+Store rejected the first MSIX because Start tile assets were tiny placeholders and looked blurry.
+
+Sharp assets now live in `distribution/windows-desktop/msix/Assets/` (base + `.scale-200` + `.scale-400`).
+`stage-msix-layout.ps1` copies those into the package layout. Do not replace them with the old
+tiny `src-tauri/icons/Square*.png` placeholders.
+
+After any tile fix, bump `Package.appxmanifest` `Identity Version` before resubmitting.
+
 ## Partner Center product-type change
 
 1. Partner Center → Help → Support
