@@ -90,7 +90,7 @@ if (-not $makeAppx) {
 $outDir = Join-Path $msixRoot "out"
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 if (-not $OutFile) {
-  $OutFile = Join-Path $outDir "PocketMind.PocketMindAI_1.0.0.0_x64.msix"
+  $OutFile = Join-Path $outDir "PocketMind.PocketMindAI_1.0.1.0_x64.msix"
 }
 
 Write-Host "Packing MSIX" -ForegroundColor Green
