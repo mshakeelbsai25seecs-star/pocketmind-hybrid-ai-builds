@@ -16,13 +16,13 @@
   <Identity
     Name="PocketMind.PocketMindAI"
     Publisher="CN=78BD2D1C-2460-451B-91FD-410288D37531"
-    Version="1.0.1.0"
+    Version="1.0.2.0"
     ProcessorArchitecture="x64" />
 
   <Properties>
     <DisplayName>PocketMind AI</DisplayName>
     <PublisherDisplayName>PocketMind</PublisherDisplayName>
-    <Description>Local-first hybrid AI desktop app with optional cloud providers.</Description>
+    <Description>Local-first hybrid AI desktop app with optional cloud providers. Includes in-app reporting for AI-generated content.</Description>
     <Logo>Assets\StoreLogo.png</Logo>
   </Properties>
 

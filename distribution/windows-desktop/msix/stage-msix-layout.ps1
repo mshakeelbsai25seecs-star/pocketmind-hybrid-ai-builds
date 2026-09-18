@@ -151,5 +151,6 @@ foreach ($banned in @("cuda", "vulkan")) {
 Write-Host "Done. Next:" -ForegroundColor Green
 Write-Host "  powershell -ExecutionPolicy Bypass -File .\distribution\windows-desktop\msix\PACK-MSIX.ps1"
 Write-Host "Then upload the .msix from distribution\windows-desktop\msix\out\"
-Write-Host "Version in manifest must be higher than previous Store submission (now 1.0.1.0)."
+Write-Host "Version in manifest must be higher than previous Store submission (now 1.0.2.0)."
 Write-Host "See: distribution\windows-desktop\msix\README.md"
+Write-Host "Certification checklist: distribution\windows-desktop\STORE_RESUBMIT_CERT_FIXES.md"

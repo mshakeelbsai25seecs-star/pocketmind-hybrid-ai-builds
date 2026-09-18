@@ -104,41 +104,51 @@ Website: https://noumanshakeil.github.io/
 
 | Declaration | Select? | Why |
 |-------------|---------|-----|
-| Depends on non-Microsoft drivers or NT services | **Yes** | Local GPU acceleration can use NVIDIA CUDA / GPU drivers and Vulkan runtime components outside Microsoft inbox stacks. |
+| Depends on non-Microsoft drivers or NT services | **No** for the CPU-only Store MSIX | Store MSIX does not ship CUDA/Vulkan payloads. Users may add optional GPU runtimes later from Runtime Manager (outside the Store package). |
 | Tested to meet accessibility guidelines | **No** (unless you completed formal accessibility testing) | Only check if you actually tested against accessibility guidelines. |
 | Supports pen and ink input | **No** | Not a core pen/ink product. |
 | Incorporates generative AI features | **Yes** | Text, images, and code generation are core product capabilities. |
+
+## Generative AI reporting (policy 11.16)
+
+The app provides in-product **Report AI-generated content** controls (Chat, Knowledge Chat, Image Studio, Document Studio, Help, Settings → Advanced) that email `support.pocketmind@gmail.com`. Publisher must review reports and take appropriate action.
+
+## Store listing Description
+
+Paste from `STORE_LISTING_DESCRIPTION.md`. The first two lines must disclose **Microsoft Visual C++ Redistributable**.
 
 ## Notes for certification
 
 Paste this:
 
 ```text
-Product: PocketMind Hybrid AI 1.0.0 (Windows x64 EXE installer)
+Product: PocketMind AI (MSIX) — Product ID 9NZ7WF9VXF5R
 
 Install
-- Package is an EXE installer.
-- Silent switch: /S
-- Architecture: x64 only
-- After install, launch “PocketMind Hybrid AI” from Start Menu.
+- Package is an MSIX for Windows 10/11 Desktop x64.
+- After install, launch “PocketMind AI” / “PocketMind Hybrid AI” from Start.
 
 No account required for local features
 - Core local chat works without sign-in.
 - Online providers and organization server are optional and can remain disabled for certification.
 
-What to verify
-1) App launches on Windows 10/11 x64 with WebView2 available.
-2) Home / Chat UI loads.
-3) Settings → Models / Runtime pages open.
-4) Local runtime discovery shows CPU and, when hardware allows, CUDA/Vulkan options.
-5) Optional: open Image Studio, PocketCode, Characters, and Fortinet SOC Copilot pages to confirm navigation.
-6) Generative AI features are present (chat / image generation / coding assistance). Leave cloud providers disabled unless needed.
+Dependencies disclosed in Description
+- Microsoft Visual C++ Redistributable (x64) is disclosed in the first two lines of the Store Description (policy 10.2.4.1).
+- WebView2 Runtime is typically present on modern Windows.
+- CPU local-inference runtime is included in the Store package.
+- Optional CUDA/Vulkan GPU acceleration is not part of the Store MSIX payload.
 
-Dependencies / drivers
-- App can use non-Microsoft GPU drivers for CUDA/Vulkan acceleration.
-- CPU fallback is included so install/launch should still succeed without NVIDIA/AMD-specific drivers.
-- GGUF model weights are NOT bundled. Local generation may require importing a user-provided .gguf model. UI navigation and settings should still be testable without a model.
-- If a sample local model is required for end-to-end generation testing, contact support.pocketmind@gmail.com and we will provide a temporary test package/instructions.
+Generative AI (policy 11.16)
+- Product uses live generative AI for chat, images, documents, and coding assistance.
+- Users can Report inappropriate AI-generated content in-app; reports go to support.pocketmind@gmail.com.
+
+What to verify
+1) App launches on Windows 10/11 x64 Desktop.
+2) Home / Chat UI loads.
+3) Open an assistant answer → Report (flag) opens the report dialog.
+4) Help Center shows Support & report AI content.
+5) Settings → Advanced → Report an issue works.
+6) Local runtime / Models pages open. GGUF weights are not bundled.
 
 Support contacts for certification questions
 - support.pocketmind@gmail.com

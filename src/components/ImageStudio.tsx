@@ -1,8 +1,9 @@
 import { useMemo, useState, type ReactNode } from 'react';
-import { Download, Image as ImageIcon, Wand2, Crown, Zap, HardDrive, SlidersHorizontal, ExternalLink, Copy, Check, AlertTriangle, Loader2, RefreshCw, Maximize2 } from 'lucide-react';
+import { Download, Image as ImageIcon, Wand2, Crown, Zap, HardDrive, SlidersHorizontal, ExternalLink, Copy, Check, AlertTriangle, Loader2, RefreshCw, Maximize2, Flag } from 'lucide-react';
 import { IMAGE_GENERATION_MODELS, MODEL_CATEGORIES } from '../modelCatalog';
 import { GeneratedImageRecord, ImageGenerationModel, ModelCategoryId } from '../types';
 import { onOpenExternal } from '../openExternal';
+import ReportAiContentModal, { type ReportAiContentTarget } from './ReportAiContentModal';
 
 const IMAGE_CATEGORIES = MODEL_CATEGORIES.filter(c => c.id.startsWith('image-'));
 
@@ -47,6 +48,7 @@ export default function ImageStudio() {
   const [copied, setCopied] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [preview, setPreview] = useState<GeneratedImageRecord | null>(null);
+  const [reportTarget, setReportTarget] = useState<ReportAiContentTarget | null>(null);
 
   const visibleModels = useMemo(() => IMAGE_GENERATION_MODELS.filter(model => {
     const modeMatches = mode === 'offline'
@@ -200,6 +202,11 @@ export default function ImageStudio() {
                       copied={copied === record.id}
                       onCopy={() => copyUrl(record)}
                       onPreview={() => setPreview(record)}
+                      onReport={() => setReportTarget({
+                        contentExcerpt: `Prompt: ${record.prompt}\nImage URL: ${record.url}\nProvider: ${record.provider}`,
+                        sourceLabel: 'Image Studio',
+                        contentKind: 'image',
+                      })}
                     />
                   ))}
                 </div>
@@ -217,7 +224,20 @@ export default function ImageStudio() {
                 <p className="text-white font-semibold truncate">{shortPrompt(preview.prompt)}</p>
                 <p className="text-xs text-surface-400">{preview.provider} • {preview.width}×{preview.height} • seed {preview.seed}</p>
               </div>
-              <button onClick={() => setPreview(null)} className="btn-secondary text-sm shrink-0">Close</button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  className="btn-secondary text-sm inline-flex items-center gap-1"
+                  onClick={() => setReportTarget({
+                    contentExcerpt: `Prompt: ${preview.prompt}\nImage URL: ${preview.url}\nProvider: ${preview.provider}`,
+                    sourceLabel: 'Image Studio preview',
+                    contentKind: 'image',
+                  })}
+                >
+                  <Flag className="w-3.5 h-3.5" /> Report
+                </button>
+                <button onClick={() => setPreview(null)} className="btn-secondary text-sm">Close</button>
+              </div>
             </div>
             <div className="max-h-[78vh] overflow-auto bg-black grid place-items-center p-3">
               <img src={preview.url} alt="Generated preview" className="max-w-full h-auto rounded-2xl" referrerPolicy="no-referrer" />
@@ -225,11 +245,17 @@ export default function ImageStudio() {
           </div>
         </div>
       )}
+
+      <ReportAiContentModal
+        open={Boolean(reportTarget)}
+        target={reportTarget}
+        onClose={() => setReportTarget(null)}
+      />
     </div>
   );
 }
 
-function GalleryCard({ record, copied, onCopy, onPreview }: { record: GeneratedImageRecord; copied: boolean; onCopy: () => void; onPreview: () => void }) {
+function GalleryCard({ record, copied, onCopy, onPreview, onReport }: { record: GeneratedImageRecord; copied: boolean; onCopy: () => void; onPreview: () => void; onReport: () => void }) {
   const [state, setState] = useState<ImageLoadState>('loading');
   const [retryKey, setRetryKey] = useState(0);
   const imgSrc = `${record.url}${record.url.includes('?') ? '&' : '?'}retry=${retryKey}`;
@@ -273,10 +299,11 @@ function GalleryCard({ record, copied, onCopy, onPreview }: { record: GeneratedI
       <div className="p-3 space-y-2 min-w-0">
         <p className="text-sm font-medium line-clamp-2 break-words">{record.prompt}</p>
         <p className="text-xs text-surface-500 truncate">{record.provider} • {record.width}×{record.height} • seed {record.seed}</p>
-        <div className="grid grid-cols-3 gap-2">
+        <div className="grid grid-cols-4 gap-2">
           <button onClick={onCopy} className="btn-secondary text-xs flex items-center justify-center gap-1 min-w-0 px-2">{copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />} <span className="hidden sm:inline">Copy</span></button>
           <button type="button" onClick={onOpenExternal(record.url)} className="btn-secondary text-xs flex items-center justify-center gap-1 min-w-0 px-2"><ExternalLink className="w-3 h-3" /> <span className="hidden sm:inline">Open</span></button>
           <button type="button" onClick={onOpenExternal(record.url)} className="btn-secondary text-xs flex items-center justify-center gap-1 min-w-0 px-2" title="Open image URL (save from browser)"><Download className="w-3 h-3" /> <span className="hidden sm:inline">Save</span></button>
+          <button type="button" onClick={onReport} className="btn-secondary text-xs flex items-center justify-center gap-1 min-w-0 px-2" title="Report AI-generated content"><Flag className="w-3 h-3" /> <span className="hidden sm:inline">Report</span></button>
         </div>
       </div>
     </div>

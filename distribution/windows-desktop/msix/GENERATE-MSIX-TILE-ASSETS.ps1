@@ -6,7 +6,7 @@
 .DESCRIPTION
   Creates distribution/windows-desktop/msix/Assets/*.png from
   src-tauri/icons/app-icon-master.png (or icon.png), including scale-200/400.
-  Also bumps Package.appxmanifest Identity Version to 1.0.1.0 if still 1.0.0.0.
+  Also bumps Package.appxmanifest Identity Version to 1.0.2.0 if still on an older tile-fix version.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\distribution\windows-desktop\msix\GENERATE-MSIX-TILE-ASSETS.ps1
@@ -121,12 +121,12 @@ foreach ($name in @(
 
 if (Test-Path -LiteralPath $manifest) {
   $text = Get-Content -LiteralPath $manifest -Raw
-  if ($text -match 'Version="1\.0\.0\.0"') {
-    $text = $text -replace 'Version="1\.0\.0\.0"', 'Version="1.0.1.0"'
+  if ($text -match 'Version="1\.0\.[01]\.0"') {
+    $text = $text -replace 'Version="1\.0\.[01]\.0"', 'Version="1.0.2.0"'
     Set-Content -LiteralPath $manifest -Value $text -Encoding UTF8
-    Write-Host "Bumped Package.appxmanifest version to 1.0.1.0" -ForegroundColor Cyan
+    Write-Host "Bumped Package.appxmanifest version to 1.0.2.0" -ForegroundColor Cyan
   } else {
-    Write-Host "Manifest version left unchanged (not 1.0.0.0)."
+    Write-Host "Manifest version left unchanged (not 1.0.0.0/1.0.1.0)."
   }
 }
 
@@ -139,4 +139,4 @@ Write-Host ""
 Write-Host "Done. Next:" -ForegroundColor Green
 Write-Host "  powershell -ExecutionPolicy Bypass -File .\distribution\windows-desktop\msix\stage-msix-layout.ps1"
 Write-Host "  powershell -ExecutionPolicy Bypass -File .\distribution\windows-desktop\msix\PACK-MSIX.ps1"
-Write-Host "Upload the new 1.0.1.0 .msix (not the old 1.0.0.0)."
+Write-Host "Upload the new 1.0.2.0 .msix (not older 1.0.0.0 / 1.0.1.0 packages)."

@@ -30,6 +30,12 @@ Sharp assets now live in `distribution/windows-desktop/msix/Assets/` (base + `.s
 tiny `src-tauri/icons/Square*.png` placeholders.
 
 After any tile fix, bump `Package.appxmanifest` `Identity Version` before resubmitting.
+Current package version target: **1.0.2.0** (includes Report AI content for policy 11.16).
+
+Certification resubmit checklist for 10.2.4.1 / 11.16 / 10.1.2.7:
+`distribution/windows-desktop/STORE_RESUBMIT_CERT_FIXES.md`
+Store Description paste (Visual C++ in first two lines):
+`distribution/windows-desktop/STORE_LISTING_DESCRIPTION.md`
 
 ## Partner Center product-type change
 
