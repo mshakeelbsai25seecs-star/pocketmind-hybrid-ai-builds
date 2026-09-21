@@ -35,12 +35,15 @@ if (-not (Test-Path -LiteralPath $manifestSrc)) {
 }
 
 if (-not $ReleaseDir) {
+  # Wrap in @() so a single match stays an array. Otherwise PowerShell unwraps
+  # to a string and $candidates[0] is the first character ("D").
   $candidates = @(
     $(if ($env:CARGO_TARGET_DIR) { Join-Path $env:CARGO_TARGET_DIR "release" } else { $null }),
     "D:\DevCache\Cargo\target\nexus-ai\release",
     (Join-Path $ProjectRoot "src-tauri\target\release")
   ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
-  if (-not $candidates) {
+  $candidates = @($candidates)
+  if ($candidates.Count -eq 0) {
     throw "No release dir. Build with scripts\BUILD-STORE-INSTALLER.ps1 first."
   }
   $ReleaseDir = $candidates[0]
