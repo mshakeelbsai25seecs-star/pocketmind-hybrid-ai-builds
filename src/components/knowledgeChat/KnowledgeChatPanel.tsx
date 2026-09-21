@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { listen } from '@tauri-apps/api/event';
-import { BookOpenCheck, Loader2, Send, StopCircle } from 'lucide-react';
+import { BookOpenCheck, Flag, Loader2, Send, StopCircle } from 'lucide-react';
+import ReportAiContentModal, { type ReportAiContentTarget } from '../ReportAiContentModal';
 import { useAppStore } from '../../store';
 import { Conversation, GenerationParams, Message } from '../../types';
 import { ONLINE_CHAT_MODELS } from '../../modelCatalog';
@@ -302,6 +303,7 @@ export default function KnowledgeChatPanel() {
   const [lastSearch, setLastSearch] = useState<KcSearchResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [reportTarget, setReportTarget] = useState<ReportAiContentTarget | null>(null);
   const [conversationLoading, setConversationLoading] = useState(false);
   const [serverRagCreds, setServerRagCreds] = useState<ServerRagCredentials | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -1406,6 +1408,7 @@ export default function KnowledgeChatPanel() {
   };
 
   return (
+    <>
     <section className="panel-shell p-4 sm:p-6 flex flex-col min-h-[20rem] relative z-10">
       <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4 mb-4">
         <div>
@@ -1611,6 +1614,22 @@ export default function KnowledgeChatPanel() {
                     title="Sources used"
                   />
                 )}
+                {message.content && message.content !== 'Thinking...' && (
+                  <div className="mt-3">
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-1.5 text-[11px] px-2 py-1 rounded-lg text-surface-500 hover:bg-surface-100 dark:hover:bg-surface-800"
+                      title="Report AI-generated content"
+                      onClick={() => setReportTarget({
+                        contentExcerpt: message.content,
+                        sourceLabel: 'Knowledge Chat',
+                        contentKind: 'text',
+                      })}
+                    >
+                      <Flag className="w-3 h-3" /> Report
+                    </button>
+                  </div>
+                )}
               </>
             ) : (
               <div className="text-sm whitespace-pre-wrap leading-6 text-surface-800 dark:text-surface-100">{message.content}</div>
@@ -1657,5 +1676,12 @@ export default function KnowledgeChatPanel() {
         </div>
       </div>
     </section>
+
+    <ReportAiContentModal
+      open={Boolean(reportTarget)}
+      target={reportTarget}
+      onClose={() => setReportTarget(null)}
+    />
+    </>
   );
 }

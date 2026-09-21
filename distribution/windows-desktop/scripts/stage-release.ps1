@@ -56,6 +56,9 @@ if (Test-Path $llamaSrc) {
 }
 
 $llamaSrc = Join-Path $RepoRoot "bin\llama.cpp"
+if (-not (Test-Path $llamaSrc)) {
+  $llamaSrc = Join-Path $RepoRoot "src-tauri\resources\llama.cpp"
+}
 $llamaDst = Join-Path $OutDir "bin\llama.cpp"
 if (Test-Path $llamaSrc) {
   New-Item -ItemType Directory -Path $llamaDst -Force | Out-Null
@@ -63,10 +66,20 @@ if (Test-Path $llamaSrc) {
     $src = Join-Path $llamaSrc $backend
     if (Test-Path $src) {
       Copy-Item $src -Destination (Join-Path $llamaDst $backend) -Recurse -Force
-      Write-Host "Copied bin/llama.cpp/$backend"
+      Write-Host "Copied llama.cpp/$backend -> payload/bin/llama.cpp/$backend"
       $copied = $true
     }
   }
+} else {
+  Write-Warning "No llama.cpp runtimes found under bin\ or src-tauri\resources\. Run scripts\prepare-windows-bundle-runtimes.ps1 before release."
+}
+
+# Also mirror resources layout next to the portable EXE for discovery parity with installed builds
+$resLlama = Join-Path $OutDir "resources\llama.cpp"
+if (Test-Path (Join-Path $OutDir "bin\llama.cpp")) {
+  New-Item -ItemType Directory -Force -Path $resLlama | Out-Null
+  Copy-Item (Join-Path $OutDir "bin\llama.cpp\*") $resLlama -Recurse -Force
+  Write-Host "Mirrored payload/resources/llama.cpp for portable EXE discovery"
 }
 
 foreach ($doc in @("INSTALL.md", "WHAT_IS_INCLUDED.md", "README.md")) {

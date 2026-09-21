@@ -70,6 +70,10 @@ __pycache__/
 src-tauri/resources/tooling/**/*
 !src-tauri/resources/tooling/MANIFEST.json
 
+# Bundled llama.cpp runtimes are staged at build time (too large for git)
+src-tauri/resources/llama.cpp/**
+!src-tauri/resources/llama.cpp/README.md
+
 # Models & customer data (never commit GGUF weights or SOC corpora)
 runtime-data/
 /models/

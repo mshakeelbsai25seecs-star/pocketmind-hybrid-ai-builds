@@ -5,9 +5,10 @@ import { listen } from '@tauri-apps/api/event';
 import {
   Send, Square, Bot, User, Copy, Check, Trash2,
   Paperclip, Sparkles, AlertCircle, Download, MessageSquare,
-  SlidersHorizontal, RotateCcw, FileText, X,
-  UploadCloud, Info, Power, ChevronDown
+  SlidersHorizontal, ClipboardCopy, RotateCcw, FileText, X,
+  UploadCloud, Info, Power, ChevronDown, Flag
 } from 'lucide-react';
+import ReportAiContentModal, { type ReportAiContentTarget } from './ReportAiContentModal';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -999,6 +1000,7 @@ export default function ChatView() {
   const [input, setInput] = useState('');
   const chatInputRef = useAutoResizeTextarea(input);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [reportTarget, setReportTarget] = useState<ReportAiContentTarget | null>(null);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [busyCreatingChat, setBusyCreatingChat] = useState(false);
   const [generationStatus, setGenerationStatus] = useState<string | null>(null);
@@ -2070,6 +2072,19 @@ export default function ChatView() {
                   <button onClick={() => handleCopy(message.content, message.id)} className="p-1.5 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors" title="Copy">
                     {copiedId === message.id ? <Check className="w-3 h-3 text-green-500" /> : <Copy className="w-3 h-3 text-surface-400" />}
                   </button>
+                  <button
+                    type="button"
+                    onClick={() => setReportTarget({
+                      contentExcerpt: message.content,
+                      sourceLabel: `Chat · ${activeConversationTitle || 'conversation'}`,
+                      contentKind: 'text',
+                    })}
+                    className="p-1.5 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors"
+                    title="Report AI-generated content"
+                    aria-label="Report AI-generated content"
+                  >
+                    <Flag className="w-3 h-3 text-surface-400" />
+                  </button>
                   {(['docx', 'pptx', 'pdf'] as const).map(fmt => (
                     <button
                       key={fmt}
@@ -2170,6 +2185,12 @@ export default function ChatView() {
           <p className="text-xs text-center text-surface-400 mt-2">{currentModel?.startsWith('enterprise:') ? 'Organization server mode' : currentModel?.startsWith('remote:') ? 'Online API mode' : currentModel ? 'Local model selected • first response may take longer while the GGUF loads' : 'No model selected'} {attachments.length > 0 ? `• ${attachments.length} indexed attachment(s) ready` : ''}</p>
         </div>
       </div>
+
+      <ReportAiContentModal
+        open={Boolean(reportTarget)}
+        target={reportTarget}
+        onClose={() => setReportTarget(null)}
+      />
     </div>
   );
 }

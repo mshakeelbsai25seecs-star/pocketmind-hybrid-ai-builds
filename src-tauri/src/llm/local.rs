@@ -247,6 +247,277 @@ impl LlamaCppBackend {
         self.generate_stream_inner(request, tx, cancel).await
     }
 
+    async fn generate_stream_inner(
+        &self,
+        request: GenerationRequest,
+        tx: mpsc::Sender<GenerationChunk>,
+        cancel: Arc<AtomicBool>,
+    ) -> AppResult<()> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(600))
+            .build()
+            .map_err(|e| AppError::InferenceError(format!("Failed to create generation client: {e}")))?;
+
+        let formatting_only = "Answer the latest user message directly and stop. Do not invent follow-up questions, fake user messages, future prompts, quizzes, or examples the user did not ask for. Do not ask and answer your own questions. Ignore older chat history when it conflicts with the latest user request. Do not write documentation about Mistral, workflow engines, Kubernetes, or model cards unless the user specifically asks for that topic. Do not repeat words, phrases, paragraphs, or the user prompt. Use plain, clean Markdown for headings, lists, and code when helpful. Put headings, bullet points, numbered points, and fenced code blocks on separate lines. Use inline code for single keywords or short phrases such as `def`, `class`, `return`, `params`, `lambda functions`, file names, and variable names. Use fenced code blocks only for complete runnable multi-line code examples, not for single words, labels, or fragments. Never put `def`, `class`, `return`, `params`, or `lambda functions` in a fenced code block by themselves. Do not output LaTeX, TikZ, PGF, Asymptote, tabular, graph, or diagram source unless the user explicitly asks for that exact format. Never use placeholders like [object Object].";
+        let system = match &request.system_prompt {
+            Some(sys) if !sys.trim().is_empty()
+                && (is_soc_system_prompt(sys) || is_knowledge_system_prompt(sys) || is_code_workspace_system_prompt(sys)) =>
+            {
+                sys.trim().to_string()
+            }
+            Some(sys) if !sys.trim().is_empty() => sys.trim().to_string(),
+            _ => formatting_only.to_string(),
+        };
+
+        let mmproj_ready = self.loaded_mmproj.lock().await.is_some();
+        let use_multimodal = mmproj_ready && !request.images.is_empty();
+
+        let temperature = request.params.temperature.clamp(0.05, 0.75);
+        let top_p = request.params.top_p.clamp(0.10, 0.85);
+        let repeat_penalty = request.params.repetition_penalty.clamp(1.18, 1.60);
+        let max_tokens = if is_soc_system_prompt(&system) {
+            request.params.max_tokens.clamp(256, 1536)
+        } else {
+            request.params.max_tokens.clamp(32, 1024)
+        };
+
+        let (url, body) = if use_multimodal {
+            let mut messages = vec![serde_json::json!({"role": "system", "content": system})];
+            let user_text = if request.messages.is_empty() {
+                request.prompt.trim().to_string()
+            } else {
+                request
+                    .messages
+                    .iter()
+                    .rev()
+                    .find(|m| m.role == "user")
+                    .map(|m| m.content.trim().to_string())
+                    .unwrap_or_else(|| request.prompt.trim().to_string())
+            };
+            let mut parts: Vec<Value> = Vec::new();
+            if !user_text.is_empty() {
+                parts.push(serde_json::json!({"type": "text", "text": user_text}));
+            }
+            for img in &request.images {
+                let mime = if img.mime.trim().is_empty() { "image/png" } else { img.mime.trim() };
+                let url = format!("data:{mime};base64,{}", img.base64.trim());
+                parts.push(serde_json::json!({
+                    "type": "image_url",
+                    "image_url": { "url": url }
+                }));
+            }
+            messages.push(serde_json::json!({"role": "user", "content": parts}));
+            (
+                format!("http://127.0.0.1:{}/v1/chat/completions", self.port),
+                serde_json::json!({
+                    "messages": messages,
+                    "stream": true,
+                    "temperature": temperature,
+                    "top_p": top_p,
+                    "max_tokens": max_tokens,
+                }),
+            )
+        } else {
+            let mut messages = vec![serde_json::json!({"role": "system", "content": system})];
+            if request.messages.is_empty() {
+                messages.push(serde_json::json!({"role": "user", "content": request.prompt.trim()}));
+            } else {
+                for m in request.messages.iter().take(24) {
+                    let role = match m.role.as_str() {
+                        "assistant" => "assistant",
+                        "system" => "system",
+                        _ => "user",
+                    };
+                    let content = m.content.trim();
+                    if !content.is_empty() {
+                        messages.push(serde_json::json!({"role": role, "content": content}));
+                    }
+                }
+            }
+            let _ = messages;
+            let prompt = build_manual_prompt(&request, &system);
+            (
+                format!("http://127.0.0.1:{}/completion", self.port),
+                serde_json::json!({
+                    "prompt": prompt,
+                    "stream": true,
+                    "temperature": temperature,
+                    "top_k": request.params.top_k,
+                    "top_p": top_p,
+                    "min_p": 0.08,
+                    "repeat_penalty": repeat_penalty,
+                    "repeat_last_n": 512,
+                    "frequency_penalty": 0.45,
+                    "presence_penalty": 0.0,
+                    "n_predict": max_tokens,
+                    "cache_prompt": false,
+                    "stop": [
+                        "<end_of_turn>", "</s>", "<|eot_id|>", "<|end|>", "<|im_end|>",
+                        "[INST]", "[/INST]", "\nUser:", "\nuser:", "\nLatest user message:",
+                        "\nQuestion:", "\nQ:", "Can you also", "Would you like me to", "Let me know if you",
+                        "[asy]", "graphsize=", "\\begin{tikzpicture}", "\\end{verbatim}",
+                        "\\node", "\\draw", "\\foreach", "\\begin{tabular}"
+                    ]
+                }),
+            )
+        };
+        let response = client
+            .post(&url)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| AppError::InferenceError(format!("Local llama-server is unreachable: {e}")))?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let text = response.text().await.unwrap_or_default();
+            return Err(AppError::InferenceError(format!("llama-server rejected the request ({status}): {text}")));
+        }
+
+        let mut stream = response.bytes_stream();
+        let mut pending = String::new();
+        let mut full_text = String::new();
+        let mut tokens_generated: u32 = 0;
+
+        while let Some(chunk) = stream.next().await {
+            if cancel.load(Ordering::Relaxed) {
+                let _ = tx
+                    .send(GenerationChunk {
+                        text: String::new(),
+                        finish_reason: Some("stop".to_string()),
+                        tokens_generated,
+                        tokens_per_sec: 0.0,
+                        tool_calls: None,
+                        reasoning: None,
+                    })
+                    .await;
+                return Ok(());
+            }
+            let bytes = match chunk {
+                Ok(b) => b,
+                Err(e) => {
+                    // Connection reset / process death mid-stream — unload so the next
+                    // turn relaunches instead of talking to a dead port.
+                    let mut proc_lock = self.process.lock().await;
+                    if let Some(ref mut child) = *proc_lock {
+                        let _ = child.kill().await;
+                    }
+                    *proc_lock = None;
+                    *self.model_loaded.lock().await = false;
+                    *self.loaded_model_path.lock().await = None;
+                    *self.loaded_runtime_signature.lock().await = None;
+                    runtime_discovery::set_chat_gpu_layers_active(0);
+
+                    let detail = e.to_string();
+                    let low = detail.to_ascii_lowercase();
+                    let hint = if low.contains("10054")
+                        || low.contains("forcibly closed")
+                        || low.contains("connection reset")
+                        || low.contains("broken pipe")
+                    {
+                        " llama-server likely crashed from low RAM/VRAM. Close other apps, use a smaller Q4 model, GPU layers 0, context 2048, then retry."
+                    } else {
+                        ""
+                    };
+                    return Err(AppError::InferenceError(format!(
+                        "Streaming from llama-server failed: {detail}.{hint}"
+                    )));
+                }
+            };
+            pending.push_str(&String::from_utf8_lossy(&bytes));
+
+            while let Some(pos) = pending.find('\n') {
+                let line = pending[..pos].trim().to_string();
+                pending = pending[pos + 1..].to_string();
+                if line.is_empty() { continue; }
+
+                let data = line.strip_prefix("data:").unwrap_or(&line).trim();
+                if data == "[DONE]" { continue; }
+
+                let Ok(json) = serde_json::from_str::<Value>(data) else { continue; };
+                let piece = json
+                    .get("content")
+                    .and_then(|v| v.as_str())
+                    .or_else(|| json.get("response").and_then(|v| v.as_str()))
+                    .or_else(|| json
+                        .get("choices")
+                        .and_then(|c| c.get(0))
+                        .and_then(|c| c.get("delta"))
+                        .and_then(|d| d.get("content"))
+                        .and_then(|v| v.as_str()))
+                    .or_else(|| json
+                        .get("choices")
+                        .and_then(|c| c.get(0))
+                        .and_then(|c| c.get("text"))
+                        .and_then(|v| v.as_str()))
+                    .unwrap_or("");
+
+                if let Some(cleaned_piece) = ingest_stream_piece(&mut full_text, piece) {
+                    tokens_generated = tokens_generated.saturating_add(1);
+                    let _ = tx.send(GenerationChunk {
+                        text: cleaned_piece,
+                        finish_reason: None,
+                        tokens_generated: 1,
+                        tokens_per_sec: 0.0,
+                        tool_calls: None,
+                    reasoning: None,
+}).await;
+                }
+            }
+        }
+
+        if !pending.trim().is_empty() {
+            let data = pending.trim().strip_prefix("data:").unwrap_or(pending.trim()).trim();
+            if let Ok(json) = serde_json::from_str::<Value>(data) {
+                if let Some(piece) = json.get("content").and_then(|v| v.as_str()).or_else(|| json.get("response").and_then(|v| v.as_str())) {
+                    if let Some(cleaned_piece) = ingest_stream_piece(&mut full_text, piece) {
+                        tokens_generated = tokens_generated.saturating_add(1);
+                        let _ = tx.send(GenerationChunk { text: cleaned_piece, finish_reason: None, tokens_generated: 1, tokens_per_sec: 0.0, tool_calls: None,
+                    reasoning: None,
+}).await;
+                    }
+                }
+            }
+        }
+
+        let mut final_text = clean_repetition_artifacts(&full_text);
+        final_text = clean_template_artifacts(&final_text);
+        final_text = strip_unwanted_generation_prefixes(&final_text);
+        final_text = remove_trailing_self_questions(&final_text);
+
+        if final_text.trim().is_empty() {
+            let _ = tx.send(GenerationChunk {
+                text: "[The selected model returned an empty response. Try a shorter prompt, lower creativity, or run Model Health Check.]".to_string(),
+                finish_reason: Some("stop".to_string()),
+                tokens_generated,
+                tokens_per_sec: 0.0,
+                tool_calls: None,
+                    reasoning: None,
+}).await;
+        } else if normalize_stream_compare(&final_text) != normalize_stream_compare(&full_text) {
+            let _ = tx.send(GenerationChunk {
+                text: final_text,
+                finish_reason: Some("stop".to_string()),
+                tokens_generated,
+                tokens_per_sec: 0.0,
+                tool_calls: None,
+                    reasoning: None,
+}).await;
+        } else {
+            let _ = tx.send(GenerationChunk {
+                text: "".to_string(),
+                finish_reason: Some("stop".to_string()),
+                tokens_generated,
+                tokens_per_sec: 0.0,
+                tool_calls: None,
+                    reasoning: None,
+}).await;
+        }
+
+        Ok(())
+    }
+
+
     pub async fn current_mmproj_path(&self) -> Option<String> {
         self.loaded_mmproj.lock().await.clone()
     }
@@ -976,276 +1247,6 @@ impl InferenceBackend for LlamaCppBackend {
     async fn generate_stream(&self, request: GenerationRequest, tx: mpsc::Sender<GenerationChunk>) -> AppResult<()> {
         self.generate_stream_inner(request, tx, self.generation_cancel.clone())
             .await
-    }
-
-    async fn generate_stream_inner(
-        &self,
-        request: GenerationRequest,
-        tx: mpsc::Sender<GenerationChunk>,
-        cancel: Arc<AtomicBool>,
-    ) -> AppResult<()> {
-        let client = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(600))
-            .build()
-            .map_err(|e| AppError::InferenceError(format!("Failed to create generation client: {e}")))?;
-
-        let formatting_only = "You are PocketMind Hybrid AI. Answer the latest user message directly and briefly. Use plain Markdown. Do not invent follow-ups or repeat yourself.";
-        let system = match &request.system_prompt {
-            Some(sys) if !sys.trim().is_empty()
-                && (is_soc_system_prompt(sys) || is_knowledge_system_prompt(sys) || is_code_workspace_system_prompt(sys)) =>
-            {
-                sys.trim().to_string()
-            }
-            Some(sys) if !sys.trim().is_empty() => sys.trim().to_string(),
-            _ => formatting_only.to_string(),
-        };
-
-        let mmproj_ready = self.loaded_mmproj.lock().await.is_some();
-        let use_multimodal = mmproj_ready && !request.images.is_empty();
-
-        let temperature = request.params.temperature.clamp(0.05, 0.75);
-        let top_p = request.params.top_p.clamp(0.10, 0.85);
-        let repeat_penalty = request.params.repetition_penalty.clamp(1.18, 1.60);
-        let max_tokens = if is_soc_system_prompt(&system) {
-            request.params.max_tokens.clamp(256, 1536)
-        } else {
-            request.params.max_tokens.clamp(32, 1024)
-        };
-
-        let (url, body) = if use_multimodal {
-            let mut messages = vec![serde_json::json!({"role": "system", "content": system})];
-            let user_text = if request.messages.is_empty() {
-                request.prompt.trim().to_string()
-            } else {
-                request
-                    .messages
-                    .iter()
-                    .rev()
-                    .find(|m| m.role == "user")
-                    .map(|m| m.content.trim().to_string())
-                    .unwrap_or_else(|| request.prompt.trim().to_string())
-            };
-            let mut parts: Vec<Value> = Vec::new();
-            if !user_text.is_empty() {
-                parts.push(serde_json::json!({"type": "text", "text": user_text}));
-            }
-            for img in &request.images {
-                let mime = if img.mime.trim().is_empty() { "image/png" } else { img.mime.trim() };
-                let url = format!("data:{mime};base64,{}", img.base64.trim());
-                parts.push(serde_json::json!({
-                    "type": "image_url",
-                    "image_url": { "url": url }
-                }));
-            }
-            messages.push(serde_json::json!({"role": "user", "content": parts}));
-            (
-                format!("http://127.0.0.1:{}/v1/chat/completions", self.port),
-                serde_json::json!({
-                    "messages": messages,
-                    "stream": true,
-                    "temperature": temperature,
-                    "top_p": top_p,
-                    "max_tokens": max_tokens,
-                }),
-            )
-        } else {
-            let mut messages = vec![serde_json::json!({"role": "system", "content": system})];
-            if request.messages.is_empty() {
-                messages.push(serde_json::json!({"role": "user", "content": request.prompt.trim()}));
-            } else {
-                for m in request.messages.iter().take(24) {
-                    let role = match m.role.as_str() {
-                        "assistant" => "assistant",
-                        "system" => "system",
-                        _ => "user",
-                    };
-                    let content = m.content.trim();
-                    if !content.is_empty() {
-                        messages.push(serde_json::json!({"role": role, "content": content}));
-                    }
-                }
-            }
-            let _ = messages;
-            let prompt = build_manual_prompt(&request, &system);
-            (
-                format!("http://127.0.0.1:{}/completion", self.port),
-                serde_json::json!({
-                    "prompt": prompt,
-                    "stream": true,
-                    "temperature": temperature,
-                    "top_k": request.params.top_k,
-                    "top_p": top_p,
-                    "min_p": 0.08,
-                    "repeat_penalty": repeat_penalty,
-                    "repeat_last_n": 512,
-                    "frequency_penalty": 0.45,
-                    "presence_penalty": 0.0,
-                    "n_predict": max_tokens,
-                    "cache_prompt": false,
-                    "stop": [
-                        "<end_of_turn>", "</s>", "<|eot_id|>", "<|end|>", "<|im_end|>",
-                        "[INST]", "[/INST]", "\nUser:", "\nuser:", "\nLatest user message:",
-                        "\nQuestion:", "\nQ:", "Can you also", "Would you like me to", "Let me know if you",
-                        "[asy]", "graphsize=", "\\begin{tikzpicture}", "\\end{verbatim}",
-                        "\\node", "\\draw", "\\foreach", "\\begin{tabular}"
-                    ]
-                }),
-            )
-        };
-        let response = client
-            .post(&url)
-            .json(&body)
-            .send()
-            .await
-            .map_err(|e| AppError::InferenceError(format!("Local llama-server is unreachable: {e}")))?;
-
-        if !response.status().is_success() {
-            let status = response.status();
-            let text = response.text().await.unwrap_or_default();
-            return Err(AppError::InferenceError(format!("llama-server rejected the request ({status}): {text}")));
-        }
-
-        let mut stream = response.bytes_stream();
-        let mut pending = String::new();
-        let mut full_text = String::new();
-        let mut tokens_generated: u32 = 0;
-
-        while let Some(chunk) = stream.next().await {
-            if cancel.load(Ordering::Relaxed) {
-                let _ = tx
-                    .send(GenerationChunk {
-                        text: String::new(),
-                        finish_reason: Some("stop".to_string()),
-                        tokens_generated,
-                        tokens_per_sec: 0.0,
-                        tool_calls: None,
-                        reasoning: None,
-                    })
-                    .await;
-                return Ok(());
-            }
-            let bytes = match chunk {
-                Ok(b) => b,
-                Err(e) => {
-                    // Connection reset / process death mid-stream — unload so the next
-                    // turn relaunches instead of talking to a dead port.
-                    let mut proc_lock = self.process.lock().await;
-                    if let Some(ref mut child) = *proc_lock {
-                        let _ = child.kill().await;
-                    }
-                    *proc_lock = None;
-                    *self.model_loaded.lock().await = false;
-                    *self.loaded_model_path.lock().await = None;
-                    *self.loaded_runtime_signature.lock().await = None;
-                    runtime_discovery::set_chat_gpu_layers_active(0);
-
-                    let detail = e.to_string();
-                    let low = detail.to_ascii_lowercase();
-                    let hint = if low.contains("10054")
-                        || low.contains("forcibly closed")
-                        || low.contains("connection reset")
-                        || low.contains("broken pipe")
-                    {
-                        " llama-server likely crashed from low RAM/VRAM. Close other apps, use a smaller Q4 model, GPU layers 0, context 2048, then retry."
-                    } else {
-                        ""
-                    };
-                    return Err(AppError::InferenceError(format!(
-                        "Streaming from llama-server failed: {detail}.{hint}"
-                    )));
-                }
-            };
-            pending.push_str(&String::from_utf8_lossy(&bytes));
-
-            while let Some(pos) = pending.find('\n') {
-                let line = pending[..pos].trim().to_string();
-                pending = pending[pos + 1..].to_string();
-                if line.is_empty() { continue; }
-
-                let data = line.strip_prefix("data:").unwrap_or(&line).trim();
-                if data == "[DONE]" { continue; }
-
-                let Ok(json) = serde_json::from_str::<Value>(data) else { continue; };
-                let piece = json
-                    .get("content")
-                    .and_then(|v| v.as_str())
-                    .or_else(|| json.get("response").and_then(|v| v.as_str()))
-                    .or_else(|| json
-                        .get("choices")
-                        .and_then(|c| c.get(0))
-                        .and_then(|c| c.get("delta"))
-                        .and_then(|d| d.get("content"))
-                        .and_then(|v| v.as_str()))
-                    .or_else(|| json
-                        .get("choices")
-                        .and_then(|c| c.get(0))
-                        .and_then(|c| c.get("text"))
-                        .and_then(|v| v.as_str()))
-                    .unwrap_or("");
-
-                if let Some(cleaned_piece) = ingest_stream_piece(&mut full_text, piece) {
-                    tokens_generated = tokens_generated.saturating_add(1);
-                    let _ = tx.send(GenerationChunk {
-                        text: cleaned_piece,
-                        finish_reason: None,
-                        tokens_generated: 1,
-                        tokens_per_sec: 0.0,
-                        tool_calls: None,
-                    reasoning: None,
-}).await;
-                }
-            }
-        }
-
-        if !pending.trim().is_empty() {
-            let data = pending.trim().strip_prefix("data:").unwrap_or(pending.trim()).trim();
-            if let Ok(json) = serde_json::from_str::<Value>(data) {
-                if let Some(piece) = json.get("content").and_then(|v| v.as_str()).or_else(|| json.get("response").and_then(|v| v.as_str())) {
-                    if let Some(cleaned_piece) = ingest_stream_piece(&mut full_text, piece) {
-                        tokens_generated = tokens_generated.saturating_add(1);
-                        let _ = tx.send(GenerationChunk { text: cleaned_piece, finish_reason: None, tokens_generated: 1, tokens_per_sec: 0.0, tool_calls: None,
-                    reasoning: None,
-}).await;
-                    }
-                }
-            }
-        }
-
-        let mut final_text = clean_repetition_artifacts(&full_text);
-        final_text = clean_template_artifacts(&final_text);
-        final_text = strip_unwanted_generation_prefixes(&final_text);
-        final_text = remove_trailing_self_questions(&final_text);
-
-        if final_text.trim().is_empty() {
-            let _ = tx.send(GenerationChunk {
-                text: "[The selected model returned an empty response. Try a shorter prompt, lower creativity, or run Model Health Check.]".to_string(),
-                finish_reason: Some("stop".to_string()),
-                tokens_generated,
-                tokens_per_sec: 0.0,
-                tool_calls: None,
-                    reasoning: None,
-}).await;
-        } else if normalize_stream_compare(&final_text) != normalize_stream_compare(&full_text) {
-            let _ = tx.send(GenerationChunk {
-                text: final_text,
-                finish_reason: Some("stop".to_string()),
-                tokens_generated,
-                tokens_per_sec: 0.0,
-                tool_calls: None,
-                    reasoning: None,
-}).await;
-        } else {
-            let _ = tx.send(GenerationChunk {
-                text: "".to_string(),
-                finish_reason: Some("stop".to_string()),
-                tokens_generated,
-                tokens_per_sec: 0.0,
-                tool_calls: None,
-                    reasoning: None,
-}).await;
-        }
-
-        Ok(())
     }
 
     async fn unload_model(&self) -> AppResult<()> {

@@ -13,14 +13,21 @@ Portable Windows desktop build for analysts and power users on Windows 10/11.
 
 ## Before you ship
 
-1. Run `npm run tauri build` on a Windows machine.
-2. Run `.\scripts\stage-release.ps1` from this folder.
-3. Copy `../shared/config` and `../shared/docs/QUICK_START.md` into the zip if desired.
-4. Zip `payload/` + docs as `PocketMind Hybrid AI-Windows-Desktop-v0.1.0.zip`.
+1. On Windows, build the **fat self-contained installer** (embeds CPU/CUDA/Vulkan runtimes):
+   see [FAT_INSTALLER.md](FAT_INSTALLER.md) (`scripts\prepare-windows-bundle-runtimes.ps1` + `npm run tauri build`).
+2. Or use the D:-drive builder: [BUILD_ON_D.md](BUILD_ON_D.md).
+3. Run `.\scripts\stage-release.ps1` from this folder.
+4. Copy `../shared/config` and `../shared/docs/QUICK_START.md` into the zip if desired.
+5. **Microsoft Store (EXE/MSI URL product):**
+   - CPU-only package for policy 10.2.4.2 → `STORE_RESUBMIT_10_2_4_2.md` / `scripts\BUILD-STORE-INSTALLER.ps1`
+   - Authenticode-sign for policy 10.2.9 → `STORE_RESUBMIT_10_2_9.md` / `scripts\BUILD-STORE-SIGNED-INSTALLER.ps1`
+   - Host the hyphenated signed `*-setup.exe` on a direct HTTPS URL (R2). Do not submit the unsigned or fat installer.
+6. Zip `payload/` for tester portable packages (website can still use the fat installer).
 
 ## Default paths
 
-`C:\ProgramData\PocketMind` — configurable in Settings → Deployment.
+On Windows the app prefers **`D:\PocketMind`** when D: exists (models, indexes, cache).  
+`C:\ProgramData\PocketMind` is not the primary data root.
 
 ## Runtimes
 

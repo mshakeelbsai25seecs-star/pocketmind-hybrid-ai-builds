@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FileText, Loader2, Save, Sparkles, AlertTriangle } from 'lucide-react';
+import { FileText, Flag, Loader2, Save, Sparkles, AlertTriangle } from 'lucide-react';
 import { save } from '@tauri-apps/api/dialog';
 import { useAppStore } from '../store';
 import {
@@ -12,6 +12,7 @@ import {
   type DocExportProbe,
   type DocSpecResult,
 } from '../docStudio';
+import ReportAiContentModal, { type ReportAiContentTarget } from './ReportAiContentModal';
 
 const FORMATS: { id: DocFormatId; label: string }[] = [
   { id: 'docx', label: 'DOCX' },
@@ -45,6 +46,7 @@ export default function DocumentStudio() {
   const [probe, setProbe] = useState<DocExportProbe | null>(null);
   const [recent, setRecent] = useState<string[]>([]);
   const [installBusy, setInstallBusy] = useState(false);
+  const [reportTarget, setReportTarget] = useState<ReportAiContentTarget | null>(null);
 
   useEffect(() => {
     void (async () => {
@@ -216,7 +218,20 @@ export default function DocumentStudio() {
 
       {specResult && (
         <section className="rounded-3xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 p-6 shadow-soft">
-          <h2 className="text-lg font-bold mb-3">Preview</h2>
+          <div className="flex items-center justify-between gap-3 mb-3">
+            <h2 className="text-lg font-bold">Preview</h2>
+            <button
+              type="button"
+              className="btn-secondary text-xs inline-flex items-center gap-1.5"
+              onClick={() => setReportTarget({
+                contentExcerpt: specResult.preview_markdown || brief,
+                sourceLabel: 'Document Studio',
+                contentKind: 'document',
+              })}
+            >
+              <Flag className="w-3.5 h-3.5" /> Report AI content
+            </button>
+          </div>
           <pre className="whitespace-pre-wrap text-sm text-surface-700 dark:text-surface-300 font-sans max-h-[28rem] overflow-y-auto">
             {specResult.preview_markdown}
           </pre>
@@ -231,6 +246,12 @@ export default function DocumentStudio() {
           </ul>
         </section>
       )}
+
+      <ReportAiContentModal
+        open={Boolean(reportTarget)}
+        target={reportTarget}
+        onClose={() => setReportTarget(null)}
+      />
     </div>
   );
 }

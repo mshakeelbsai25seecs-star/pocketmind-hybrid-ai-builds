@@ -1,4 +1,6 @@
-import { HelpCircle, Cpu, FileText, Image, Shield, Zap, AlertTriangle, MessageSquare, Download, CheckCircle2, Rocket } from 'lucide-react';
+import { HelpCircle, Cpu, FileText, Shield, Zap, AlertTriangle, MessageSquare, Download, CheckCircle2, Rocket, Flag, Mail } from 'lucide-react';
+import { onOpenExternal } from '../openExternal';
+import { AI_CONTENT_REPORT_EMAIL } from '../reportAiContent';
 
 const sections = [
   {
@@ -77,6 +79,15 @@ const sections = [
     ],
   },
   {
+    icon: Flag,
+    title: 'Report AI-generated content',
+    items: [
+      'PocketMind includes live generative AI for chat, images, documents, and coding help.',
+      'Use Report on any assistant answer in Chat or Knowledge Chat, or Report on Image Studio / Document Studio outputs.',
+      `You can also email ${AI_CONTENT_REPORT_EMAIL}. We review reports and act on policy-violating content.`,
+    ],
+  },
+  {
     icon: AlertTriangle,
     title: 'Troubleshooting',
     items: [
@@ -138,6 +149,37 @@ export default function HelpCenter() {
         ))}
       </div>
 
+      <section className="rounded-3xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 p-6 shadow-soft">
+        <div className="flex items-start gap-3">
+          <Mail className="w-5 h-5 text-primary-600 dark:text-primary-400 mt-1" />
+          <div className="space-y-3">
+            <div>
+              <h2 className="font-bold">Support &amp; report AI content</h2>
+              <p className="text-sm text-surface-600 dark:text-surface-400 mt-1 max-w-3xl">
+                Use in-app Report controls on AI outputs, or email support directly. We review reports of inappropriate generative AI content and take action when policies are violated.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="btn-primary text-sm inline-flex items-center gap-2"
+                onClick={onOpenExternal(`mailto:${AI_CONTENT_REPORT_EMAIL}?subject=${encodeURIComponent('[PocketMind AI] Report AI content')}`)}
+              >
+                <Flag className="w-4 h-4" /> Email report
+              </button>
+              <button
+                type="button"
+                className="btn-secondary text-sm inline-flex items-center gap-2"
+                onClick={onOpenExternal(`mailto:${AI_CONTENT_REPORT_EMAIL}`)}
+              >
+                <Mail className="w-4 h-4" /> Contact support
+              </button>
+            </div>
+            <p className="text-xs text-surface-500">{AI_CONTENT_REPORT_EMAIL}</p>
+          </div>
+        </div>
+      </section>
+
       <section className="rounded-3xl border border-primary-200 dark:border-primary-900/60 bg-primary-50 dark:bg-primary-950/20 p-6">
         <div className="flex items-start gap-3">
           <Rocket className="w-5 h-5 text-primary-600 dark:text-primary-400 mt-1" />
@@ -157,7 +199,8 @@ export default function HelpCenter() {
                 'Storage manager and backup/restore',
                 'Runtime diagnostics and stuck-engine recovery',
                 'Attachment extraction warnings',
-                'Responsive sidebar with named chat management'
+                'Responsive sidebar with named chat management',
+                'Report inappropriate AI-generated content',
               ].map(item => (
                 <div key={item} className="flex items-start gap-2 rounded-2xl bg-white/70 dark:bg-surface-900/60 p-3 border border-primary-200/60 dark:border-primary-900/40">
                   <CheckCircle2 className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />

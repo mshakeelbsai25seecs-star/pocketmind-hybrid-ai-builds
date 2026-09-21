@@ -12,6 +12,7 @@
     "test:agent-parity": "npx --yes tsx scripts/agent-parity.selftest.ts",
     "test:agent-terminal": "npx --yes tsx scripts/agent-terminal.selftest.ts",
     "test:tool-protocol": "npx --yes tsx -e \"import { toolProtocolForModel } from './src/codeWorkspace/toolSchemas.ts'; const cases=[['remote:anthropic/x','native'],['remote:gemini/x','native'],['remote:groq/x','native'],['D:/m.gguf','json']]; for (const [p,e] of cases){ const g=toolProtocolForModel(p); if(g!==e){ console.error(p,g,e); process.exit(1);} } console.log('tool-protocol ok');\"",
+    "test:report-ai-content": "npx --yes tsx scripts/report-ai-content.selftest.ts",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:dev:macos": "bash scripts/tauri-dev-macos.sh",

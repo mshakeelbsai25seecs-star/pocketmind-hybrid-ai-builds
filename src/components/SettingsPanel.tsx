@@ -5,13 +5,15 @@ import SecuritySettingsPanel from './SecuritySettingsPanel';
 import AuditLogPanel from './AuditLogPanel';
 import McpSettingsPanel from './McpSettingsPanel';
 import RefreshButton from './RefreshButton';
-import { Key, Shield, Cpu, Palette, Globe, Database, ExternalLink, Trash2, CheckCircle, AlertTriangle, Loader2 } from 'lucide-react';
+import { Key, Shield, Cpu, Palette, Globe, Database, ExternalLink, Trash2, CheckCircle, AlertTriangle, Loader2, Flag, Mail } from 'lucide-react';
 import { useAppStore } from '../store';
 import { CHAT_API_PROVIDERS } from '../apiProviders';
 import { validateApiKey, type ApiKeyValidation } from '../apiKeyValidation';
 import { onOpenExternal, openExternal } from '../openExternal';
 import { fetchDeploymentConfig } from '../deploymentConfig';
 import type { RuntimeDiagnostics, SystemInfo } from '../types';
+import { AI_CONTENT_REPORT_EMAIL } from '../reportAiContent';
+import ReportAiContentModal, { type ReportAiContentTarget } from './ReportAiContentModal';
 
 type SettingsTab = 'general' | 'providers' | 'mcp' | 'deployment' | 'security' | 'audit' | 'advanced';
 
@@ -27,6 +29,7 @@ export default function SettingsPanel() {
   const [advancedBusy, setAdvancedBusy] = useState(false);
   const [advancedMessage, setAdvancedMessage] = useState('');
   const [refreshBusy, setRefreshBusy] = useState(false);
+  const [reportTarget, setReportTarget] = useState<ReportAiContentTarget | null>(null);
 
   useEffect(() => {
     try {
@@ -327,9 +330,44 @@ export default function SettingsPanel() {
                 {advancedMessage && <p className="text-xs text-surface-600 dark:text-surface-300 mt-2 break-words">{advancedMessage}</p>}
               </div>
             </div>
+            <div className="glass-panel rounded-xl p-6">
+              <h3 className="font-semibold flex items-center gap-2 mb-4"><Flag className="w-5 h-5 text-amber-500" />Report AI content</h3>
+              <div className="space-y-3 text-sm text-surface-500">
+                <p>
+                  PocketMind uses live generative AI. If an AI response is inappropriate, harmful, or otherwise concerning, report it to the publisher.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="btn-primary text-sm inline-flex items-center gap-2"
+                    onClick={() => setReportTarget({
+                      contentExcerpt: '(General report — user did not attach a specific AI output.)',
+                      sourceLabel: 'Settings → Advanced',
+                      contentKind: 'other',
+                    })}
+                  >
+                    <Flag className="w-4 h-4" /> Report an issue
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-secondary text-sm inline-flex items-center gap-2"
+                    onClick={onOpenExternal(`mailto:${AI_CONTENT_REPORT_EMAIL}`)}
+                  >
+                    <Mail className="w-4 h-4" /> Email support
+                  </button>
+                </div>
+                <p className="text-xs">{AI_CONTENT_REPORT_EMAIL}</p>
+              </div>
+            </div>
           </div>
         )}
       </div>
+
+      <ReportAiContentModal
+        open={Boolean(reportTarget)}
+        target={reportTarget}
+        onClose={() => setReportTarget(null)}
+      />
     </div>
   );
 }

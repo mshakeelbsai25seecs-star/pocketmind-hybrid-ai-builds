@@ -82,7 +82,7 @@ impl HardwareMonitor {
         let cpus = self.system.cpus();
         let logical = std::thread::available_parallelism()
             .map(|n| n.get())
-            .unwrap_or_else(|| cpus.len());
+            .unwrap_or_else(|_| cpus.len());
         let physical = self.system.physical_core_count().unwrap_or(logical);
         let cpu = CPUInfo {
             brand: cpus.first().map(|c| c.brand().to_string()).unwrap_or_else(|| "Unknown".to_string()),
@@ -214,7 +214,7 @@ impl HardwareMonitor {
     #[cfg(windows)]
     fn detect_dxgi_adapters() -> Vec<(String, u64)> {
         use windows::Win32::Graphics::Dxgi::{
-            CreateDXGIFactory1, IDXGIFactory1, IDXGIAdapter1,
+            CreateDXGIFactory1, IDXGIAdapter1, IDXGIFactory1, DXGI_ADAPTER_DESC1,
         };
 
         unsafe {
@@ -230,10 +230,11 @@ impl HardwareMonitor {
                     Err(_) => break,
                 };
                 index += 1;
-                let desc = match adapter.GetDesc1() {
-                    Ok(d) => d,
-                    Err(_) => continue,
-                };
+                // windows 0.54 uses an out-parameter for GetDesc1 (not a returned struct).
+                let mut desc = std::mem::zeroed::<DXGI_ADAPTER_DESC1>();
+                if adapter.GetDesc1(&mut desc).is_err() {
+                    continue;
+                }
                 let name = String::from_utf16_lossy(
                     &desc
                         .Description

@@ -107,12 +107,23 @@ pub fn candidate_roots() -> Vec<PathBuf> {
 
     if let Ok(exe) = env::current_exe() {
         if let Some(parent) = exe.parent() {
+            // Prefer the install/resource layouts used by the fat Windows bundle:
+            //   <app>/resources/llama.cpp/{cpu,cuda,vulkan}/llama-server.exe
+            //   <app>/bin/llama.cpp/{cpu,cuda,vulkan}/llama-server.exe
+            roots.push(parent.to_path_buf());
+            roots.push(parent.join("resources"));
             let mut cur = Some(parent);
             while let Some(p) = cur {
                 roots.push(p.to_path_buf());
                 cur = p.parent();
             }
         }
+    }
+
+    // Dev builds: src-tauri/resources next to the crate.
+    let manifest_resources = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources");
+    if manifest_resources.is_dir() {
+        roots.push(manifest_resources);
     }
 
     roots.sort();
