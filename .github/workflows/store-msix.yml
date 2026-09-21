@@ -104,7 +104,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub Release
-        if: ${{ github.event_name == 'push' || inputs.create_release }}
+        if: ${{ github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.create_release) }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
