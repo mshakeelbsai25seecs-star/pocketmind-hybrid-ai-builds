@@ -1,11 +1,13 @@
-# Store resubmit — certification fixes (10.2.4.1 + 11.16 + 10.1.2.7)
+# Store resubmit — certification + store-parity (1.0.3.0)
 
 Product: **PocketMind AI**  
 Product ID: **9NZ7WF9VXF5R**  
 Package identity: `PocketMind.PocketMindAI`  
-Target package version: **1.0.2.0** (or next unused version after your last failed package)
+Target package version: **1.0.3.0**
 
-## Failures from certification report
+Full Partner Center upload steps: `PARTNER_CENTER_MSIX_UPLOAD.md`
+
+## Failures from prior certification (still apply)
 
 1. **10.2.4.1 Security - Software Dependencies** — undisclosed Microsoft Visual C++
 2. **11.16 Live Generative AI Content** — missing in-app report path for AI output
@@ -19,24 +21,17 @@ Open **Store listing → Description** and paste the text from:
 
 `distribution/windows-desktop/STORE_LISTING_DESCRIPTION.md`
 
-The **first two lines must remain**:
-
-```text
-Requires Microsoft Visual C++ Redistributable (x64). Install from Microsoft if Windows prompts for missing VC++ runtime DLLs.
-This Store package includes PocketMind AI and a CPU local-inference runtime. ...
-```
-
-Do not bury the Visual C++ line below other marketing copy.
+The **first two lines must remain** the Visual C++ + CPU package disclosure.
 
 ### B) Privacy URL (fixes 10.1.2.7)
 
-You own this step. Ensure the Properties privacy policy URL opens a real page globally before resubmit. Keep Properties → Privacy policy pointing at a working URL (or paste full privacy text if Partner Center requires it). See `STORE_PROPERTIES.md`.
+Ensure Properties privacy policy URL opens a real page globally before resubmit. See `STORE_PROPERTIES.md`.
 
-### C) Package (ships 11.16 Report feature)
+### C) Package (ships 11.16 Report + store-parity)
 
 1. Build/stage the Store MSIX from this branch (CPU-only layout; no CUDA/Vulkan payload).
-2. Pack version **1.0.2.0** (manifest already bumped in repo).
-3. Upload **only** the new MSIX under Packages.
+2. Pack version **1.0.3.0**.
+3. Upload **only** the new MSIX under Packages (file upload for MSIX product type).
 4. Remove older failed packages from the submission.
 5. Device family: **Windows 10/11 Desktop** only.
 6. Keep `runFullTrust` justification.
@@ -50,24 +45,25 @@ Do **not** Authenticode-sign the Store MSIX — Microsoft re-signs it.
 Users can report inappropriate AI-generated content from:
 
 - Chat — flag icon on assistant messages
-- Knowledge Chat — Report on answers
 - Image Studio — Report on gallery / preview
 - Document Studio — Report AI content on outline preview
 - Help Center — Support & report section + mailto
 - Settings → Advanced — Report an issue
+
+(Reports may also remain available on Knowledge Chat panel code paths used by SOC retrieval; Knowledge Chat is not a primary Store nav surface on this branch.)
 
 Reports open email to `support.pocketmind@gmail.com` with reason + excerpt (clipboard fallback if mailto fails).
 
 ## Notes for certification (optional paste)
 
 ```text
-Product: PocketMind AI (MSIX) — Product ID 9NZ7WF9VXF5R
+Product: PocketMind AI (MSIX) — Product ID 9NZ7WF9VXF5R — package 1.0.3.0
 
 10.2.4.1
 - Store Description line 1 discloses Microsoft Visual C++ Redistributable (x64).
 
 11.16
-- App includes Report AI-generated content controls on Chat, Knowledge Chat, Image Studio, Document Studio, Help, and Settings → Advanced.
+- App includes Report AI-generated content controls on Chat, Image Studio, Document Studio, Help, and Settings → Advanced.
 - Reports are emailed to support.pocketmind@gmail.com for publisher review and action.
 
 10.1.2.7
@@ -76,10 +72,12 @@ Product: PocketMind AI (MSIX) — Product ID 9NZ7WF9VXF5R
 Package
 - CPU Store MSIX only; optional GPU runtimes are not in the Store package payload.
 - No account required for local features.
+- Store-parity surfaces: PocketCode, Model Manager, SOC Copilot, Control Center, Characters, Hardware & Runtime, Image Studio.
 ```
 
 ## Do not
 
-- Do not upload an old package that lacks the Report UI
+- Do not upload an old package that lacks the Report UI or store-parity surfaces
 - Do not put Visual C++ disclosure only in Notes / System requirements — it must be in the Description’s first two lines
 - Do not reintroduce CUDA/Vulkan into the Store MSIX payload
+- Do not claim Windows cmd/PowerShell PTY was live-tested on Linux CI agents

@@ -90,7 +90,12 @@ if (-not $makeAppx) {
 $outDir = Join-Path $msixRoot "out"
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 if (-not $OutFile) {
-  $OutFile = Join-Path $outDir "PocketMind.PocketMindAI_1.0.2.0_x64.msix"
+  $ver = "1.0.3.0"
+  $manifestText = Get-Content -LiteralPath $appxManifest -Raw
+  if ($manifestText -match 'Version="([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)"') {
+    $ver = $Matches[1]
+  }
+  $OutFile = Join-Path $outDir ("PocketMind.PocketMindAI_{0}_x64.msix" -f $ver)
 }
 
 Write-Host "Packing MSIX" -ForegroundColor Green

@@ -28,7 +28,9 @@
 [CmdletBinding()]
 param(
   [string]$ProjectRoot = "D:\nexus-ai-deep-fixed",
-  [switch]$SkipLlamaDownload
+  [string]$DevCacheRoot = "D:\DevCache",
+  [switch]$SkipLlamaDownload,
+  [switch]$AllowNonDDrive
 )
 
 $ErrorActionPreference = "Stop"
@@ -48,12 +50,18 @@ if (-not (Test-Path -LiteralPath $builder)) {
   throw "Missing $builder"
 }
 
-Write-Host "`n==> Building Store-safe NSIS setup.exe..." -ForegroundColor Cyan
-if ($SkipLlamaDownload) {
-  & $builder -ProjectRoot $ProjectRoot -StoreSafe -SkipLlamaRuntimes
-} else {
-  & $builder -ProjectRoot $ProjectRoot -StoreSafe
+$buildArgs = @{
+  ProjectRoot = $ProjectRoot
+  DevCacheRoot = $DevCacheRoot
+  StoreSafe = $true
 }
+if ($SkipLlamaDownload) { $buildArgs.SkipLlamaRuntimes = $true }
+if ($AllowNonDDrive -or $env:GITHUB_ACTIONS -eq "true" -or $env:CI -eq "true") {
+  $buildArgs.AllowNonDDrive = $true
+}
+
+Write-Host "`n==> Building Store-safe NSIS setup.exe..." -ForegroundColor Cyan
+& $builder @buildArgs
 if ($LASTEXITCODE -ne 0) {
   throw "build-desktop-windows.ps1 failed with exit code $LASTEXITCODE"
 }
@@ -78,17 +86,25 @@ if (Test-Path -LiteralPath $stage) {
   & $stage -RepoRoot $ProjectRoot
 }
 
-$nsis = "D:\DevCache\Cargo\target\nexus-ai\release\bundle\nsis"
+$nsisCandidates = @(
+  (Join-Path $DevCacheRoot "Cargo\target\nexus-ai\release\bundle\nsis"),
+  "D:\DevCache\Cargo\target\nexus-ai\release\bundle\nsis"
+)
 $payload = Join-Path $ProjectRoot "distribution\windows-desktop\payload"
 Write-Host "`nDone." -ForegroundColor Green
 Write-Host "Store Package setup.exe:"
-if (Test-Path -LiteralPath $nsis) {
-  Get-ChildItem -LiteralPath $nsis -Filter "*setup.exe" | ForEach-Object {
-    Write-Host ("  " + $_.FullName)
-    Write-Host ("  Size: {0:N1} MB" -f ($_.Length / 1MB))
+$foundNsis = $false
+foreach ($nsis in $nsisCandidates) {
+  if (Test-Path -LiteralPath $nsis) {
+    $foundNsis = $true
+    Get-ChildItem -LiteralPath $nsis -Filter "*setup.exe" | ForEach-Object {
+      Write-Host ("  " + $_.FullName)
+      Write-Host ("  Size: {0:N1} MB" -f ($_.Length / 1MB))
+    }
   }
-} else {
-  Write-Host "  $nsis  (folder not found yet)"
+}
+if (-not $foundNsis) {
+  Write-Host "  (NSIS output folder not found yet — MSIX staging uses release exe under CARGO_TARGET_DIR)"
 }
 if (Test-Path -LiteralPath $payload) {
   Get-ChildItem -LiteralPath $payload -Filter "*setup.exe" -ErrorAction SilentlyContinue |

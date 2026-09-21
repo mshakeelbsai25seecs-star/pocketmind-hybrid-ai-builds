@@ -1,0 +1,118 @@
+name: Store MSIX (CPU-only)
+
+# Builds a Partner Center–uploadable CPU-only MSIX on windows-latest.
+# Trigger manually; artifacts + optional GitHub Release tag store-msix-1.0.3.0.
+
+on:
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Create/update GitHub Release store-msix-1.0.3.0 with the .msix'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  pack-msix:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install WebView2 Evergreen Runtime
+        shell: pwsh
+        run: |
+          $installer = Join-Path $env:RUNNER_TEMP 'MicrosoftEdgeWebView2Setup.exe'
+          Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/p/?LinkId=2124703' -OutFile $installer -UseBasicParsing
+          Start-Process -FilePath $installer -ArgumentList '/silent','/install' -Wait
+
+      - name: npm ci
+        run: npm ci
+
+      - name: Build Store-safe package (CPU only)
+        shell: pwsh
+        run: |
+          $root = $env:GITHUB_WORKSPACE
+          $cache = Join-Path $env:RUNNER_TEMP 'DevCache'
+          New-Item -ItemType Directory -Force -Path $cache | Out-Null
+          $env:CARGO_TARGET_DIR = Join-Path $cache 'Cargo\target\nexus-ai'
+          powershell -ExecutionPolicy Bypass -File (Join-Path $root 'scripts\BUILD-STORE-INSTALLER.ps1') `
+            -DevCacheRoot $cache -AllowNonDDrive
+
+      - name: Stage MSIX layout
+        shell: pwsh
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}\DevCache\Cargo\target\nexus-ai
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\distribution\windows-desktop\msix\stage-msix-layout.ps1
+
+      - name: Pack MSIX (MakeAppx)
+        shell: pwsh
+        run: |
+          powershell -ExecutionPolicy Bypass -File .\distribution\windows-desktop\msix\PACK-MSIX.ps1
+
+      - name: Verify package
+        shell: pwsh
+        run: |
+          $msix = Get-ChildItem -LiteralPath '.\distribution\windows-desktop\msix\out' -Filter '*.msix' | Select-Object -First 1
+          if (-not $msix) { throw 'No .msix produced' }
+          Write-Host ("MSIX: {0} ({1:N1} MB)" -f $msix.FullName, ($msix.Length / 1MB))
+          if ($msix.Name -notmatch '1\.0\.3\.0') {
+            Write-Warning "Filename does not contain 1.0.3.0: $($msix.Name)"
+          }
+          # Ban CUDA/Vulkan folders in layout
+          $layout = '.\distribution\windows-desktop\msix\layout'
+          foreach ($banned in @('cuda','vulkan')) {
+            $hits = Get-ChildItem -LiteralPath $layout -Directory -Recurse -ErrorAction SilentlyContinue |
+              Where-Object { $_.Name -ieq $banned }
+            if ($hits) { throw "Banned folder in layout: $banned" }
+          }
+          "MSIX_PATH=$($msix.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "MSIX_NAME=$($msix.Name)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Upload MSIX artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketMind-Store-MSIX-1.0.3.0
+          path: distribution/windows-desktop/msix/out/*.msix
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: ${{ inputs.create_release }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $msix = $env:MSIX_PATH
+          $tag = 'store-msix-1.0.3.0'
+          $title = 'PocketMind AI Store MSIX 1.0.3.0'
+          $notes = @'
+CPU-only Microsoft Store MSIX (policy 10.2.4.2). Identity PocketMind.PocketMindAI / publisher CN=78BD2D1C-2460-451B-91FD-410288D37531.
+
+Upload this file in Partner Center → Packages. Do not Authenticode-sign; Microsoft re-signs Store MSIX.
+
+GitHub Release download URLs redirect (HTTP 302) — fine for humans, not for Partner Center Package URL fields.
+'@
+          $exists = $false
+          gh release view $tag 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) { $exists = $true }
+          if (-not $exists) {
+            gh release create $tag $msix --title $title --notes $notes
+          } else {
+            gh release upload $tag $msix --clobber
+          }
+          gh release view $tag --json url,assets --jq '{url:.url, assets:[.assets[].browserDownloadUrl]}'

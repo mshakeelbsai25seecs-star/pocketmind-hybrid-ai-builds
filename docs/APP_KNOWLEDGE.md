@@ -39,7 +39,7 @@ Core promise: local data stays on device unless the user opts into online/org ba
 | Legacy EXE/URL product UUID | `c2aea639-62fc-4bda-b565-4f1ae4f70e9a` |
 | MSIX Application Id | `PocketMindHybridAI` |
 | Executable | `PocketMind Hybrid AI.exe` |
-| Current MSIX Identity Version | **1.0.2.0** |
+| Current MSIX Identity Version | **1.0.3.0** |
 | Android package | `com.pocketmind.hybridai` (`versionName` 1.0.2 / `versionCode` 3) |
 
 ### Contacts
@@ -58,7 +58,7 @@ Core promise: local data stays on device unless the user opts into online/org ba
 |--------|------|
 | `main` | Default |
 | `cursor/android-studio-setup-7411` | Store tooling / prior Store work base |
-| `cursor/store-cert-11-16-report-7411` | VC++ disclosure docs + in-app Report AI (policy 11.16) + MSIX 1.0.2.0 |
+| `cursor/store-cert-11-16-report-7411` | VC++ disclosure docs + in-app Report AI (policy 11.16) + MSIX 1.0.3.0 |
 
 ---
 
@@ -142,7 +142,7 @@ PRODUCT_GUIDE.md     Full feature encyclopedia
 
 ### Current resubmit target
 
-- Package: `PocketMind.PocketMindAI_1.0.2.0_x64.msix`
+- Package: `PocketMind.PocketMindAI_1.0.3.0_x64.msix`
 - Device family: Windows 10/11 **Desktop only**
 - Do **not** Authenticode-sign Store MSIX
 - Description paste: `distribution/windows-desktop/STORE_LISTING_DESCRIPTION.md`
@@ -153,7 +153,7 @@ PRODUCT_GUIDE.md     Full feature encyclopedia
 After packing on Windows:
 
 ```text
-D:\nexus-ai-deep-fixed\distribution\windows-desktop\msix\out\PocketMind.PocketMindAI_1.0.2.0_x64.msix
+D:\nexus-ai-deep-fixed\distribution\windows-desktop\msix\out\PocketMind.PocketMindAI_1.0.3.0_x64.msix
 ```
 
 Scripts:
@@ -162,7 +162,7 @@ Scripts:
 - Pack: `distribution/windows-desktop/msix/PACK-MSIX.ps1`
 - Manifest: `distribution/windows-desktop/msix/Package.appxmanifest`
 
-If packing still outputs `…_1.0.0.0_x64.msix`, the local clone is on an old script/branch — force bump layout `AppxManifest.xml` to `1.0.2.0` and pack with an explicit output filename.
+If packing still outputs `…_1.0.0.0_x64.msix`, the local clone is on an old script/branch — force bump layout `AppxManifest.xml` to `1.0.3.0` and pack with an explicit output filename.
 
 ### In-app Report AI (policy 11.16)
 
@@ -309,9 +309,9 @@ Also copied for static serving:
 ## 8. Publisher next steps (Store)
 
 1. Be on branch `cursor/store-cert-11-16-report-7411` (or merge it).
-2. Rebuild/stage the Store layout and pack **1.0.2.0** MSIX.
+2. Rebuild/stage the Store layout and pack **1.0.3.0** MSIX.
 3. Upload only:
-   `distribution\windows-desktop\msix\out\PocketMind.PocketMindAI_1.0.2.0_x64.msix`
+   `distribution\windows-desktop\msix\out\PocketMind.PocketMindAI_1.0.3.0_x64.msix`
 4. Paste Description from `STORE_LISTING_DESCRIPTION.md` (VC++ lines must stay first).
 5. Fix privacy URL so it resolves globally.
 6. Confirm generative AI declaration = Yes; keep Report feature in the built app.
@@ -321,4 +321,4 @@ Also copied for static serving:
 
 ## 9. One-line summary
 
-**PocketMind AI** (`9NZ7WF9VXF5R`, PFN `PocketMind.PocketMindAI_fawhaqqkcp3dj`) is a Tauri + React local-first hybrid AI desktop app shipping a CPU-only Store MSIX (`1.0.2.0`) with optional post-install GPU runtimes and cloud/org backends; Store tiles live in `distribution/windows-desktop/msix/Assets/`, listing art in `distribution/microsoft-store-assets/`, and app icons in `src-tauri/icons/` + `src/assets/`.
+**PocketMind AI** (`9NZ7WF9VXF5R`, PFN `PocketMind.PocketMindAI_fawhaqqkcp3dj`) is a Tauri + React local-first hybrid AI desktop app shipping a CPU-only Store MSIX (`1.0.3.0`) with optional post-install GPU runtimes and cloud/org backends; Store tiles live in `distribution/windows-desktop/msix/Assets/`, listing art in `distribution/microsoft-store-assets/`, and app icons in `src-tauri/icons/` + `src/assets/`.
