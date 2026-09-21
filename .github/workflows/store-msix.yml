@@ -59,6 +59,14 @@ jobs:
       - name: npm ci
         run: npm ci
 
+      - name: Cache Cargo target (Store MSIX)
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/DevCache/Cargo/target/nexus-ai
+          key: store-msix-target-${{ hashFiles('src-tauri/Cargo.lock', 'src-tauri/Cargo.toml', 'crates/**/Cargo.toml', 'package-lock.json') }}-${{ hashFiles('src-tauri/src/**/*.rs', 'crates/**/src/**/*.rs', 'src/**/*.{ts,tsx}', 'index.html') }}
+          restore-keys: |
+            store-msix-target-
+
       - name: Sync Tauri bundle.resources
         shell: bash
         run: |
