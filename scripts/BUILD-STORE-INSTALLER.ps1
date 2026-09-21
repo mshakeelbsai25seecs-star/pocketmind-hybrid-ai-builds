@@ -104,7 +104,7 @@ foreach ($nsis in $nsisCandidates) {
   }
 }
 if (-not $foundNsis) {
-  Write-Host "  (NSIS output folder not found yet — MSIX staging uses release exe under CARGO_TARGET_DIR)"
+  Write-Host "  (NSIS output folder not found yet - MSIX staging uses release exe under CARGO_TARGET_DIR)"
 }
 if (Test-Path -LiteralPath $payload) {
   Get-ChildItem -LiteralPath $payload -Filter "*setup.exe" -ErrorAction SilentlyContinue |

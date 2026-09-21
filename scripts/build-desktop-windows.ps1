@@ -200,7 +200,7 @@ if (-not (Test-Path -LiteralPath "D:\")) {
   if ($DevCacheRoot -like "D:\*") {
     $fallbackRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { Join-Path $ProjectRoot ".devcache" }
     $DevCacheRoot = Join-Path $fallbackRoot "DevCache"
-    Write-Host "No D: drive — using DevCacheRoot=$DevCacheRoot" -ForegroundColor Yellow
+    Write-Host "No D: drive - using DevCacheRoot=$DevCacheRoot" -ForegroundColor Yellow
   }
 }
 
