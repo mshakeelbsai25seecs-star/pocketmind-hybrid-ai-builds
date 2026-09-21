@@ -19,12 +19,23 @@ jobs:
       - run: npm run test:kc-selftest
       - run: npm run test:tool-protocol
 
+  # Pure Rust lib tests — no WebKit/GTK (works on every OS).
+  pocketcode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo test pocketcode-workspace
+        working-directory: crates/pocketcode-workspace
+        run: cargo test
+
   rust:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # ubuntu-22.04 still ships webkit2gtk-4.0 (Tauri 1). ubuntu-latest (24.04) only has 4.1.
+        os: [ubuntu-22.04, windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -32,7 +43,33 @@ jobs:
         with:
           node-version: '20'
           cache: npm
+      - name: Install Linux WebKit/GTK deps (Tauri 1)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libssl-dev \
+            libgtk-3-dev \
+            libwebkit2gtk-4.0-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            pkg-config
       - run: npm ci
+      - name: Seed Tauri resource globs for CI
+        # tauri.conf.json ships resources/tooling/** and resources/llama.cpp/**;
+        # gitignore keeps those trees empty except MANIFEST/README at the top level,
+        # and Tauri 1 fails the build when ** matches nothing nested.
+        shell: bash
+        run: |
+          mkdir -p src-tauri/resources/tooling/_ci
+          mkdir -p src-tauri/resources/llama.cpp/_ci
+          printf 'ci\n' > src-tauri/resources/tooling/_ci/keep.txt
+          printf 'ci\n' > src-tauri/resources/llama.cpp/_ci/keep.txt
       - name: cargo test
         working-directory: src-tauri
         run: cargo test knowledge_chat
