@@ -10,6 +10,18 @@ on:
         description: 'Create/update GitHub Release store-msix-1.0.3.0 with the .msix'
         type: boolean
         default: true
+  push:
+    branches:
+      - cursor/store-parity-pocketcode-1e43
+    paths:
+      - '.github/workflows/store-msix.yml'
+      - 'distribution/windows-desktop/msix/**'
+      - 'scripts/BUILD-STORE-INSTALLER.ps1'
+      - 'scripts/build-desktop-windows.ps1'
+      - 'src-tauri/**'
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
 
 permissions:
   contents: write
@@ -92,7 +104,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub Release
-        if: ${{ inputs.create_release }}
+        if: ${{ github.event_name == 'push' || inputs.create_release }}
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
