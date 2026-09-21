@@ -21,6 +21,12 @@ mod code_workspace;
 mod cw_checkpoints;
 mod cw_symbol_index;
 mod cw_terminal;
+mod cw_pty;
+mod cw_git;
+mod cw_diagnostics;
+mod cw_debug;
+mod cw_output;
+mod image_studio;
 mod cw_plans;
 mod cw_ocr;
 mod cw_pdf_pages;
@@ -208,6 +214,24 @@ fn main() {
             power_commands::cw_terminal_kill,
             power_commands::cw_terminal_list,
             power_commands::cw_terminal_kill_all,
+            power_commands::cw_pty_shells,
+            power_commands::cw_pty_spawn,
+            power_commands::cw_pty_write,
+            power_commands::cw_pty_resize,
+            power_commands::cw_pty_kill,
+            power_commands::cw_pty_list,
+            power_commands::cw_git_status,
+            power_commands::cw_git_diff,
+            power_commands::cw_diagnostics_run,
+            power_commands::cw_output_snapshot,
+            power_commands::cw_output_clear,
+            power_commands::cw_debug_start,
+            power_commands::cw_debug_eval,
+            power_commands::cw_debug_stop,
+            power_commands::cw_debug_current,
+            power_commands::image_studio_generate,
+            power_commands::image_studio_save_b64,
+            power_commands::image_studio_save_bytes,
             power_commands::cw_delete_file,
             power_commands::cw_checkpoint_begin,
             power_commands::cw_checkpoint_snapshot_write,

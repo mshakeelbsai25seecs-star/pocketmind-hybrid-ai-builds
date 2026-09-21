@@ -152,7 +152,7 @@ export interface GenerationChunk {
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 export type PerformanceMode = 'low-ram' | 'battery-saver' | 'balanced' | 'maximum-speed' | 'maximum-quality';
-export type AppView = 'chat' | 'home' | 'soc' | 'knowledge-chat' | 'code-workspace' | 'hardware' | 'runtime' | 'models' | 'enterprise-server' | 'image-studio' | 'document-studio' | 'diagnostics' | 'characters' | 'settings' | 'setup' | 'prompts' | 'storage' | 'backup' | 'help';
+export type AppView = 'chat' | 'home' | 'soc' | 'knowledge-chat' | 'code-workspace' | 'hardware' | 'runtime' | 'hardware-runtime' | 'models' | 'enterprise-server' | 'control-center' | 'image-studio' | 'document-studio' | 'diagnostics' | 'characters' | 'settings' | 'setup' | 'prompts' | 'storage' | 'backup' | 'help';
 
 export type SocKnowledgeCategory =
   | 'FortiSIEM Guide'
@@ -556,7 +556,7 @@ export interface ImageGenerationModel {
   type: 'image';
   mode: 'offline' | 'online';
   tier: 'free' | 'premium';
-  provider: 'pollinations' | 'huggingface' | 'together' | 'stability' | 'replicate' | 'local';
+  provider: 'pollinations' | 'huggingface' | 'together' | 'stability' | 'replicate' | 'openai' | 'local';
   providerName: string;
   modelId: string;
   name: string;

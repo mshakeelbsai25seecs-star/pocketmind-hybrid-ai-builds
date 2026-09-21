@@ -147,7 +147,7 @@ export default function SecuritySettingsPanel() {
         </label>
 
         <label className="block">
-          <span className="block text-sm font-medium mb-2">Chat style</span>
+          <span className="block text-sm font-medium mb-2">Fortinet Copilot retrieval style</span>
           <select
             value={form.knowledge_chat_mode}
             onChange={e => update('knowledge_chat_mode', e.target.value as ProductConfig['knowledge_chat_mode'])}

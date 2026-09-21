@@ -1,6 +1,6 @@
 import type { AppView } from './types';
 
-/** Conversation.mode values that belong to Knowledge Chat. */
+/** Legacy conversation.mode values from removed Knowledge Chat. Hidden from the sidebar. */
 export const KNOWLEDGE_CHAT_MODES = ['knowledge', 'knowledge-server-rag'] as const;
 
 export type HistoryModeKey = 'chat' | 'knowledge' | 'pocketcode' | 'soc';
@@ -30,7 +30,8 @@ export function historyModeForView(view: AppView): HistoryModeKey | null {
     case 'chat':
       return 'chat';
     case 'knowledge-chat':
-      return 'knowledge';
+      // Knowledge Chat was removed from the product. Do not show a KC history rail.
+      return 'chat';
     case 'code-workspace':
       return 'pocketcode';
     case 'soc':
@@ -64,7 +65,7 @@ export function historySectionTitle(historyMode: HistoryModeKey): string {
     case 'chat':
       return 'Chats';
     case 'knowledge':
-      return 'Knowledge chats';
+      return 'Chats';
     case 'pocketcode':
       return 'PocketCode';
     case 'soc':

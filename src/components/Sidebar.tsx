@@ -129,11 +129,6 @@ export default function Sidebar() {
   };
 
   const handleNewChat = async () => {
-    if (historyMode === 'knowledge') {
-      setActiveView('knowledge-chat');
-      setSidebarOpen(false);
-      return;
-    }
     if (historyMode === 'pocketcode' || activeView === 'code-workspace') {
       useAppStore.getState().requestNewPocketcodeSession();
       setActiveView('code-workspace');
@@ -174,8 +169,7 @@ export default function Sidebar() {
     const msgs = await invoke<Message[]>('get_messages', { conversationId: id });
     setMessages(id, msgs);
     if (isKnowledgeChatMode(conv.mode)) {
-      useAppStore.getState().rememberConversationForMode('knowledge', id);
-      setActiveView('knowledge-chat');
+      return;
     } else if (conv.mode === 'soc') {
       useAppStore.getState().rememberConversationForMode('soc', id);
       setActiveView('soc');
@@ -202,11 +196,6 @@ export default function Sidebar() {
         return;
       }
       store.setActiveConversation(null);
-    } else if (targetHistory === 'knowledge') {
-      const active = store.conversations.find(c => c.id === store.activeConversationId);
-      if (active && !isKnowledgeChatMode(active.mode)) {
-        store.setActiveConversation(null);
-      }
     } else if (targetHistory === 'pocketcode') {
       const active = store.conversations.find(c => c.id === store.activeConversationId);
       if (active && !isPocketCodeMode(active.mode)) {
@@ -265,25 +254,21 @@ export default function Sidebar() {
   };
 
   const primaryNavItems = [
-    { id: 'home' as const, icon: Home, label: 'Home' },
     { id: 'chat' as const, icon: MessageSquare, label: 'Chats' },
-    { id: 'soc' as const, icon: ShieldCheck, label: 'Fortinet Copilot' },
-    { id: 'knowledge-chat' as const, icon: LibraryBig, label: 'Knowledge Chat' },
     ...(FEATURE_FLAGS.codeWorkspace ? [{ id: 'code-workspace' as const, icon: Code2, label: 'PocketCode' }] : []),
-    { id: 'models' as const, icon: Download, label: 'Models' },
-    { id: 'enterprise-server' as const, icon: ServerCog, label: 'Org Server' },
     { id: 'image-studio' as const, icon: ImageIcon, label: 'Image Studio' },
-    { id: 'document-studio' as const, icon: FileText, label: 'Document Studio' },
+    { id: 'characters' as const, icon: Users, label: 'Characters' },
+    { id: 'soc' as const, icon: ShieldCheck, label: 'Fortinet Copilot' },
+    { id: 'models' as const, icon: Download, label: 'Model Manager' },
+    { id: 'hardware-runtime' as const, icon: Cpu, label: 'Hardware & Runtime' },
+    { id: 'control-center' as const, icon: ServerCog, label: 'Control Center' },
   ];
 
   const toolsNavItems = [
-    { id: 'hardware' as const, icon: Cpu, label: 'System' },
-    { id: 'runtime' as const, icon: Monitor, label: 'Runtime' },
-    { id: 'diagnostics' as const, icon: Wrench, label: 'Diagnostics' },
+    { id: 'home' as const, icon: Home, label: 'Home' },
     { id: 'prompts' as const, icon: BookOpen, label: 'Prompts' },
-    { id: 'characters' as const, icon: Users, label: 'Characters' },
+    { id: 'document-studio' as const, icon: FileText, label: 'Document Studio' },
     { id: 'storage' as const, icon: HardDrive, label: 'Storage' },
-    { id: 'backup' as const, icon: DatabaseBackup, label: 'Backup' },
     { id: 'help' as const, icon: HelpCircle, label: 'Help' },
     { id: 'settings' as const, icon: Settings, label: 'Settings' },
   ];
@@ -322,8 +307,8 @@ export default function Sidebar() {
               draggable={false}
             />
             <div className="min-w-0">
-              <span className="app-brand-name font-black text-xl tracking-tight block truncate text-primary-400 dark:text-primary-300">PocketMind Hybrid AI</span>
-              <span className="text-[11px] text-surface-500 block truncate">Offline AI workspace</span>
+              <span className="app-brand-name font-black text-xl tracking-tight block truncate text-white">PocketMind Hybrid AI</span>
+              <span className="text-[11px] text-surface-500 block truncate">Private / on-device</span>
             </div>
           </div>
           <button
@@ -337,6 +322,13 @@ export default function Sidebar() {
 
         <div className="flex-shrink-0 bg-white dark:bg-black">
           <div className="px-3 pb-3 pt-1">
+            <button
+              type="button"
+              onClick={() => void handleNewChat()}
+              className="w-full mb-3 flex items-center gap-2 px-3 py-2.5 rounded-xl bg-primary-500 text-surface-950 font-semibold text-sm hover:bg-primary-400"
+            >
+              <Plus className="w-4 h-4" /> New Chat
+            </button>
             <p className="px-1 pb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-surface-500">Workspace</p>
             {FEATURE_FLAGS.workspaceProfiles && profiles.length > 0 && (
               <div className="mb-2 px-1 space-y-1">
@@ -434,7 +426,7 @@ export default function Sidebar() {
               <button
                 onClick={() => void handleNewChat()}
                 className="p-1.5 rounded-lg hover:bg-surface-200 dark:hover:bg-surface-800 transition-colors"
-                title={historyMode === 'knowledge' ? 'Open Knowledge Chat' : 'New chat'}
+                title="New chat"
               >
                 <Plus className="w-4 h-4" />
               </button>
@@ -443,16 +435,14 @@ export default function Sidebar() {
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
-              placeholder={historyMode === 'knowledge' ? 'Search knowledge chats…' : 'Search chats…'}
+              placeholder="Search chats…"
               className="input-field mb-3 text-sm flex-shrink-0 shadow-sm"
             />
 
             <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-1 sidebar-chat-scroll">
               {filteredConversations.length === 0 && (
                 <div className="rounded-2xl border border-dashed border-surface-300 dark:border-surface-700 p-4 text-sm text-surface-500 text-center">
-                  {historyMode === 'knowledge'
-                    ? 'No knowledge chats yet. Open Knowledge Chat to start.'
-                    : 'No chats yet. Start a new conversation.'}
+                  No chats yet. Start a new conversation.
                 </div>
               )}
 
@@ -508,14 +498,17 @@ export default function Sidebar() {
           <div className="flex-1 min-h-0 p-4 text-xs text-surface-500">
             {activeView === 'code-workspace'
               ? 'Agent history lives inside PocketCode.'
-              : 'Switch to Chats or Knowledge Chat to see that mode’s history.'}
+              : 'Switch to Chats to see conversation history.'}
           </div>
         )}
 
-        <div className="p-4 border-t border-surface-200 dark:border-surface-800 flex-shrink-0">
-          <div className="flex items-center gap-2 text-xs text-surface-500">
-            <div className="w-2 h-2 rounded-full bg-green-500" />
-            <span className="truncate">{setupCompleted ? 'Ready' : 'Setup incomplete'} • {currentModel?.startsWith('enterprise:') ? 'server' : currentModel?.startsWith('remote:') ? 'online' : 'local'}</span>
+        <div className="p-4 border-t border-white/10 flex-shrink-0">
+          <div className="flex items-center gap-2 text-xs">
+            <div className="w-2 h-2 rounded-full bg-primary-400" />
+            <div>
+              <p className="text-primary-300 font-medium">Private / On-device</p>
+              <p className="text-surface-500 truncate">{setupCompleted ? 'All data stays on this device.' : 'Setup incomplete'} · {currentModel?.startsWith('enterprise:') ? 'org server' : currentModel?.startsWith('remote:') ? 'online' : 'local'}</p>
+            </div>
           </div>
         </div>
       </aside>

@@ -1766,7 +1766,7 @@ Dense vectors are generated locally from indexed chunks when a local GGUF embedd
             ) : kcRetrievalBusy ? (
               <div className="rounded-2xl border border-dashed border-surface-300 dark:border-surface-700 p-6 text-center text-sm text-surface-500 dark:text-surface-400 flex items-center justify-center gap-2">
                 <Loader2 className="w-4 h-4 animate-spin" />
-                Searching company Knowledge Chat index…
+                Searching company knowledge index…
               </div>
             ) : retrievalResults.length === 0 ? (
               <div className="rounded-2xl border border-dashed border-surface-300 dark:border-surface-700 p-6 text-center text-sm text-surface-500 dark:text-surface-400">

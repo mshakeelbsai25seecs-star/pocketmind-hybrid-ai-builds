@@ -1229,6 +1229,13 @@ export default function ChatView() {
     }
   };
 
+  const didAutoCreate = useRef(false);
+  useEffect(() => {
+    if (didAutoCreate.current || activeConversationId || !currentModel || busyCreatingChat) return;
+    didAutoCreate.current = true;
+    void createChat();
+  }, [activeConversationId, currentModel, busyCreatingChat]);
+
   const exportChat = async (kind: ChatExportKind) => {
     setExportMenuOpen(false);
     try {
@@ -1872,6 +1879,10 @@ export default function ChatView() {
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5 xl:gap-2 w-full xl:w-auto xl:max-w-[min(100%,52rem)] xl:flex-shrink-0">
+          <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] text-primary-300 font-medium mr-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-primary-400" />
+            Private / On-device
+          </span>
           <RefreshButton title="Refresh" onClick={refreshChatView} busy={refreshBusy} className="text-xs xl:text-sm px-2.5 xl:px-3 py-1.5 xl:py-2" />
           <button
             type="button"
@@ -2170,7 +2181,7 @@ export default function ChatView() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={currentModel ? 'Message PocketMind Hybrid AI...' : 'Select a model before chatting...'}
+              placeholder={currentModel ? 'Ask anything…' : 'Select a model before chatting...'}
               rows={1}
               disabled={!currentModel || isGenerating}
               className="composer-textarea w-full bg-transparent border-none focus:outline-none resize-none py-1.5 px-1 text-[13px] leading-relaxed min-h-[2.5rem] max-h-[min(40vh,20rem)] text-surface-900 dark:text-surface-100 placeholder:text-surface-400 disabled:opacity-60"

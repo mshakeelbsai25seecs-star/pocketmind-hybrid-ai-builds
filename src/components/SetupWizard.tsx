@@ -65,7 +65,7 @@ export default function SetupWizard() {
             {steps.map((s, i) => <span key={s} className={`px-3 py-1 rounded-full text-xs font-semibold ${i <= step ? 'bg-primary-500 text-white' : 'bg-surface-100 dark:bg-surface-800 text-surface-500'}`}>{i + 1}. {s}</span>)}
           </div>
 
-          {step === 0 && <Panel icon={Sparkles} title="Welcome to PocketMind Hybrid AI Desktop" desc="This wizard checks that the local engine is ready, confirms your models folder, helps you import the first chat model, and offers downloads for Knowledge Chat embeddings, reranker, and optional Unlimited-OCR. You can skip downloads and do them later in Settings." />}
+          {step === 0 && <Panel icon={Sparkles} title="Welcome to PocketMind Hybrid AI Desktop" desc="This wizard checks that the local engine is ready, confirms your models folder, helps you import the first chat model, and offers downloads for Fortinet Copilot embeddings, reranker, and optional Unlimited-OCR. You can skip downloads and do them later in Settings." />}
           {step === 1 && <Panel icon={Wrench} title="Engine check" desc="PocketMind Hybrid AI needs its local engine files (llama-server) under bin/llama.cpp or next to the app.">
             <button onClick={refresh} className="btn-secondary mb-4" disabled={busy}>{busy ? 'Checking...' : 'Run check'}</button>
             <CheckRow ok={!!diag?.llama_server_found} label="Local engine found" detail={diag?.llama_server_path || diag?.llama_server_error || 'Not checked yet'} />
@@ -84,7 +84,7 @@ export default function SetupWizard() {
             </div>
             <p className="text-sm text-surface-500 mt-3 break-all">Selected: {store.currentModel || 'None yet'}</p>
           </Panel>}
-          {step === 4 && <Panel icon={Library} title="Knowledge Chat & OCR models (optional)" desc="Download embeddings, reranker, and optional Unlimited-OCR weights. Not required for basic chat. Large files download on demand — nothing is bundled in the installer.">
+          {step === 4 && <Panel icon={Library} title="Company knowledge & OCR models (optional)" desc="Download embeddings, reranker, and optional Unlimited-OCR weights used by Fortinet Copilot. Not required for basic chat. Large files download on demand — nothing is bundled in the installer.">
             <SupportModelsPanel compact />
             <p className="text-xs text-surface-500 mt-3">You can return anytime under Settings → Deployment (same download list) or Settings → Security (OCR details).</p>
           </Panel>}

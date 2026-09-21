@@ -67,7 +67,7 @@ export default function HomeDashboard() {
   const cards = [
     { title: 'PocketCode', desc: 'Open a project folder and run the coding agent: search, edit, terminal, checkpoints, and plans — without cluttering your repo.', icon: Code2, action: 'Open PocketCode', view: 'code-workspace' as const },
     { title: 'Fortinet Copilot', desc: 'Triage alerts, run validators, write reports, and search your company documents.', icon: ShieldCheck, action: 'Open SOC', view: 'soc' as const },
-    { title: 'Knowledge Chat', desc: 'Index company folders and ask grounded questions.', icon: FileText, action: 'Open Knowledge Chat', view: 'knowledge-chat' as const },
+    { title: 'Image Studio', desc: 'Generate, compare, and export images.', icon: FileText, action: 'Open Image Studio', view: 'image-studio' as const },
     { title: 'Chat', desc: 'Local or online conversations.', icon: MessageSquare, action: 'Open Chat', view: 'chat' as const },
     { title: 'Models', desc: 'Import, scan, and select GGUF models.', icon: Download, action: 'Manage Models', view: 'models' as const },
   ];
@@ -80,7 +80,7 @@ export default function HomeDashboard() {
             <div className="space-y-3 flex-1 min-w-0">
               <h1 className="app-brand-name text-3xl sm:text-4xl font-black tracking-tight text-primary-400 dark:text-primary-300">PocketMind Hybrid AI Desktop</h1>
               <p className="max-w-xl text-surface-600 dark:text-surface-300">
-                Local AI for security analysts and developers: Fortinet Copilot, Knowledge Chat, PocketCode agent workspace, and on-device models.
+                Local AI for security analysts and developers: Fortinet Copilot, PocketCode, Image Studio, and on-device models.
               </p>
               <div className="flex flex-wrap gap-3">
                 <button onClick={createChat} disabled={!currentModel} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">New Chat</button>

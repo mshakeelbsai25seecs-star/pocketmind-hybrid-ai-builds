@@ -190,7 +190,7 @@ export default function EnterpriseServer() {
       const title = `Server: ${normalizeModelName(id)}`;
       if (dest === 'pocketcode') {
         store.setActiveView('code-workspace');
-        setStatus(`${title} is active for PocketCode (org chat completions — not Knowledge Chat Server RAG).`);
+        setStatus(`${title} is active for PocketCode (org chat completions).`);
       } else {
         const conversationId = await invoke<string>('create_conversation', {
           title: 'New Chat',
@@ -364,8 +364,8 @@ export default function EnterpriseServer() {
                     try {
                       await saveConfig({ serverRag: next });
                       setStatus(next
-                        ? 'Server RAG enabled — Knowledge Chat will use the organization gateway.'
-                        : 'Server RAG disabled — Knowledge Chat uses local indexing again.');
+                        ? 'Server RAG enabled — Fortinet Copilot will use the organization gateway.'
+                        : 'Server RAG disabled — Fortinet Copilot uses local indexing again.');
                     } catch (err) {
                       setServerRagEnabled(!next);
                       setError(humanError(err));
@@ -374,13 +374,13 @@ export default function EnterpriseServer() {
                   className="h-4 w-4 rounded border-surface-300"
                 />
                 <span className="text-sm font-bold text-surface-700 dark:text-surface-200">
-                  Server RAG (Knowledge Chat on org gateway)
+                  Server RAG (Fortinet Copilot on org gateway)
                 </span>
               </label>
               <p className="text-xs text-surface-500">
-                Knowledge Chat thin client: the desktop app sends questions and a Bearer token only.
+                Thin client: the desktop app sends questions and a Bearer token only.
                 Collections, embeddings, rerank, and answers run on the Full Server RAG stack
-                (<code className="mx-1">/v1/knowledge/*</code>). Leave off to keep local Knowledge Chat.
+                (<code className="mx-1">/v1/knowledge/*</code>). Leave off to keep local company-knowledge indexing.
                 This is separate from PocketCode remote agent-host modes.
               </p>
               {serverRagReachable === true && (
@@ -401,7 +401,7 @@ export default function EnterpriseServer() {
                   onChange={e => setEmbeddingsEnabled(e.target.checked)}
                   className="h-4 w-4 rounded border-surface-300"
                 />
-                <span className="text-sm font-bold text-surface-700 dark:text-surface-200">Use organization server for Knowledge Chat embeddings</span>
+                <span className="text-sm font-bold text-surface-700 dark:text-surface-200">Use organization server for company-knowledge embeddings</span>
               </label>
               <p className="text-xs text-surface-500">
                 When enabled, dense indexing and query embedding are offloaded to the organization server's

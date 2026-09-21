@@ -23,19 +23,21 @@
 
   body {
     @apply text-surface-900 dark:text-surface-100 bg-surface-50;
-    font-family: "Comic Sans MS", "Comic Sans", cursive;
+    font-family: Inter, "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     overflow: hidden;
   }
 
-  /* Comic Sans app-wide; brand name uses a clean sans instead */
-  button, input, textarea, select, option, label, p, span, a, li, h1, h2, h3, h4, h5, h6,
-  code, kbd, samp, pre, .font-mono, .font-sans, .font-serif {
-    font-family: "Comic Sans MS", "Comic Sans", cursive;
+  button, input, textarea, select, option, label, p, span, a, li, h1, h2, h3, h4, h5, h6 {
+    font-family: Inter, "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  }
+
+  code, kbd, samp, pre, .font-mono {
+    font-family: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
   }
 
   .app-brand-name {
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+    font-family: Inter, "Segoe UI", ui-sans-serif, system-ui, sans-serif !important;
   }
 
   .dark body {
@@ -331,7 +333,7 @@
     @apply pl-1;
   }
 
-  /* Knowledge Chat: readable prose — separate from flashy assistant chat markdown. */
+  /* Grounded answers: readable prose — separate from flashy assistant chat markdown. */
   .nexus-markdown-knowledge {
     @apply max-w-none text-[0.9375rem] leading-[1.65] font-normal text-surface-700 dark:text-surface-300;
     -webkit-font-smoothing: antialiased;

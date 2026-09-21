@@ -2162,12 +2162,14 @@ pub async fn save_enterprise_server_config(
     server_rag_enabled: Option<bool>,
 ) -> AppResult<EnterpriseServerConfig> {
     let normalized_url = normalize_enterprise_base_url(&base_url);
-    if normalized_url.is_empty() {
-        return Err(AppError::Unknown(
-            "Organization server URL is required.".to_string(),
-        ));
-    }
     let db = state.db.lock().await;
+    if normalized_url.is_empty() {
+        db.set_setting(KEY_ENTERPRISE_BASE_URL, "")
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+        db.set_setting(KEY_ENTERPRISE_SELECTED_MODEL, "")
+            .map_err(|e| AppError::DatabaseError(e.to_string()))?;
+        let _ = db.delete_api_key(ENTERPRISE_PROVIDER);
+    } else {
     db.set_setting(KEY_ENTERPRISE_BASE_URL, &normalized_url)
         .map_err(|e| AppError::DatabaseError(e.to_string()))?;
     if let Some(model) = selected_model.as_deref() {
@@ -2204,6 +2206,7 @@ pub async fn save_enterprise_server_config(
                 .map_err(|e| AppError::DatabaseError(e.to_string()))?;
         }
     }
+    } // disconnect vs save
     let saved = EnterpriseServerConfig {
         base_url: db
             .get_setting(KEY_ENTERPRISE_BASE_URL)

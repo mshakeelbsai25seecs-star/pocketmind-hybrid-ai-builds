@@ -134,7 +134,7 @@ export default function DeploymentSettingsPanel() {
         <div className="grid gap-4">
           {[
             ['modelsDir', 'Models directory', 'GGUF chat models'],
-            ['embeddingModelPath', 'Code embedding model (GGUF)', 'Qwen3-Embedding-8B for Knowledge Chat code partition (last-token pooling)'],
+            ['embeddingModelPath', 'Code embedding model (GGUF)', 'Qwen3-Embedding-8B for Fortinet Copilot / code partition (last-token pooling)'],
             ['rerankerModelPath', 'Reranker model (GGUF)', 'Qwen3-Reranker-4B GGUF under models/rerankers (llama.cpp RANK; not ONNX)'],
             ['socDataRoot', 'Company SOC data root', 'Grounded SOC knowledge collection root'],
             ['exportDir', 'Export directory', 'SOC reports and validator exports'],
