@@ -65,6 +65,10 @@ jobs:
 
       - name: Build Store-safe package (CPU only)
         shell: pwsh
+        env:
+          # Authenticated GitHub API for ggml-org/llama.cpp release lookups (avoids shared-IP 403 rate limits).
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           $root = $env:GITHUB_WORKSPACE
           $cache = Join-Path $env:RUNNER_TEMP 'DevCache'
