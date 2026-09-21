@@ -112,13 +112,7 @@ jobs:
           $msix = $env:MSIX_PATH
           $tag = 'store-msix-1.0.3.0'
           $title = 'PocketMind AI Store MSIX 1.0.3.0'
-          $notes = @'
-CPU-only Microsoft Store MSIX (policy 10.2.4.2). Identity PocketMind.PocketMindAI / publisher CN=78BD2D1C-2460-451B-91FD-410288D37531.
-
-Upload this file in Partner Center → Packages. Do not Authenticode-sign; Microsoft re-signs Store MSIX.
-
-GitHub Release download URLs redirect (HTTP 302) — fine for humans, not for Partner Center Package URL fields.
-'@
+          $notes = "CPU-only Microsoft Store MSIX (policy 10.2.4.2). Identity PocketMind.PocketMindAI / publisher CN=78BD2D1C-2460-451B-91FD-410288D37531. Upload this file in Partner Center Packages. Do not Authenticode-sign; Microsoft re-signs Store MSIX. GitHub Release download URLs redirect (HTTP 302) — fine for humans, not for Partner Center Package URL fields."
           $exists = $false
           gh release view $tag 2>$null | Out-Null
           if ($LASTEXITCODE -eq 0) { $exists = $true }
