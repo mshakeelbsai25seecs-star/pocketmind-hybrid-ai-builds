@@ -430,6 +430,18 @@ if (-not (Get-Command link.exe -ErrorAction SilentlyContinue)) {
   throw "link.exe not found on PATH. Install VC++ Build Tools, then re-run this script."
 }
 
+$syncResources = Join-Path $ProjectRoot "scripts\sync-tauri-bundle-resources.mjs"
+if (Test-Path -LiteralPath $syncResources) {
+  Write-Step "Syncing tauri.conf.json bundle.resources before build"
+  Push-Location $ProjectRoot
+  try {
+    & node $syncResources
+    if ($LASTEXITCODE -ne 0) { throw "sync-tauri-bundle-resources.mjs failed ($LASTEXITCODE)" }
+  } finally {
+    Pop-Location
+  }
+}
+
 npm run tauri build
 if ($LASTEXITCODE -ne 0) {
   throw "tauri build failed with exit code $LASTEXITCODE"

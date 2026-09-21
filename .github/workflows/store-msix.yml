@@ -55,6 +55,14 @@ jobs:
       - name: npm ci
         run: npm ci
 
+      - name: Sync Tauri bundle.resources
+        shell: bash
+        run: |
+          mkdir -p src-tauri/resources/tooling/ci-keep src-tauri/resources/llama.cpp/ci-keep
+          printf 'ci\n' > src-tauri/resources/tooling/ci-keep/keep.txt
+          printf 'ci\n' > src-tauri/resources/llama.cpp/ci-keep/keep.txt
+          node scripts/sync-tauri-bundle-resources.mjs
+
       - name: Build Store-safe package (CPU only)
         shell: pwsh
         run: |

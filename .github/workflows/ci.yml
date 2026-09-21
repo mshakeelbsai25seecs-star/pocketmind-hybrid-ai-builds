@@ -61,15 +61,15 @@ jobs:
             pkg-config
       - run: npm ci
       - name: Seed Tauri resource globs for CI
-        # tauri.conf.json ships resources/tooling/** and resources/llama.cpp/**;
-        # gitignore keeps those trees empty except MANIFEST/README at the top level,
-        # and Tauri 1 fails the build when ** matches nothing nested.
+        # Ensure nested non-hidden keep files exist; sync-tauri-bundle-resources.mjs
+        # then writes explicit + backend paths into tauri.conf.json.
         shell: bash
         run: |
-          mkdir -p src-tauri/resources/tooling/_ci
-          mkdir -p src-tauri/resources/llama.cpp/_ci
-          printf 'ci\n' > src-tauri/resources/tooling/_ci/keep.txt
-          printf 'ci\n' > src-tauri/resources/llama.cpp/_ci/keep.txt
+          mkdir -p src-tauri/resources/tooling/ci-keep
+          mkdir -p src-tauri/resources/llama.cpp/ci-keep
+          printf 'ci\n' > src-tauri/resources/tooling/ci-keep/keep.txt
+          printf 'ci\n' > src-tauri/resources/llama.cpp/ci-keep/keep.txt
+          node scripts/sync-tauri-bundle-resources.mjs
       - name: cargo test
         working-directory: src-tauri
         run: cargo test knowledge_chat
