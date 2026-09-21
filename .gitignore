@@ -72,9 +72,13 @@ src-tauri/resources/tooling/**/*
 !src-tauri/resources/tooling/ci-keep/
 !src-tauri/resources/tooling/ci-keep/**
 
-# Bundled llama.cpp runtimes are staged at build time (too large for git)
+# Bundled llama.cpp runtimes are staged at build time (too large for git).
+# Keep markers tracked. Backend binaries stay ignored; sync-tauri-bundle-resources.mjs
+# lists them as explicit tauri.conf paths so Tauri 1 embeds them despite gitignore
+# (Tauri's /** glob walker skips gitignored files).
 src-tauri/resources/llama.cpp/**
 !src-tauri/resources/llama.cpp/README.md
+!src-tauri/resources/llama.cpp/BUNDLE_MANIFEST.txt
 !src-tauri/resources/llama.cpp/ci-keep/
 !src-tauri/resources/llama.cpp/ci-keep/**
 

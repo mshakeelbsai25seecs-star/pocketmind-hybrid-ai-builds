@@ -141,7 +141,8 @@ $ciKeepDir = Join-Path $resourceRoot "ci-keep"
 New-Item -ItemType Directory -Force -Path $ciKeepDir | Out-Null
 Set-Content -LiteralPath (Join-Path $ciKeepDir "keep.txt") -Value "ci keep for tauri resource bundling" -Encoding UTF8
 
-# Rewrite tauri.conf.json resources so backend folders are embedded (and empty ** globs are avoided).
+# Rewrite tauri.conf.json resources with explicit backend file paths (Tauri 1
+# /** globs skip gitignored binaries under resources/llama.cpp/).
 $sync = Join-Path $ProjectRoot "scripts\sync-tauri-bundle-resources.mjs"
 if (Test-Path -LiteralPath $sync) {
   Write-Step "Syncing tauri.conf.json bundle.resources to match prepared runtimes"

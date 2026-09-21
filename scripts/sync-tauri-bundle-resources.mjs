@@ -3,8 +3,13 @@
  * Rewrite src-tauri/tauri.conf.json bundle.resources so Tauri 1 never sees an
  * empty `dir/**` glob, while still embedding llama.cpp backends when present.
  *
- * Always includes tooling markers + scripts. Adds resources/llama.cpp/<backend>/**
- * for each backend directory that exists on disk (cpu/cuda/vulkan).
+ * Always includes tooling markers + scripts. For each backend directory that
+ * exists on disk (cpu/cuda/vulkan), lists every file as an *explicit* path.
+ *
+ * Important: do NOT use `resources/llama.cpp/<backend>/**` globs. Tauri 1's
+ * resource walker respects .gitignore, and those binaries are gitignored, so
+ * the glob matches nothing even when files exist on disk. Explicit paths are
+ * included directly and still embed correctly.
  */
 import fs from 'fs';
 import path from 'path';
@@ -12,7 +17,8 @@ import { fileURLToPath } from 'url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const confPath = path.join(root, 'src-tauri', 'tauri.conf.json');
-const llamaRoot = path.join(root, 'src-tauri', 'resources', 'llama.cpp');
+const srcTauri = path.join(root, 'src-tauri');
+const llamaRoot = path.join(srcTauri, 'resources', 'llama.cpp');
 
 const conf = JSON.parse(fs.readFileSync(confPath, 'utf8'));
 
@@ -31,61 +37,49 @@ for (const rel of [
   'resources/llama.cpp/ci-keep/keep.txt',
   'resources/llama.cpp/BUNDLE_MANIFEST.txt',
 ]) {
-  const abs = path.join(root, 'src-tauri', ...rel.split('/').slice(1));
-  // rel is resources/... so under src-tauri
-  const abs2 = path.join(root, 'src-tauri', rel.replace(/^resources\//, 'resources/'));
-  if (fs.existsSync(path.join(root, 'src-tauri', rel))) {
-    resources.push(rel);
-  } else if (fs.existsSync(abs2)) {
+  if (fs.existsSync(path.join(srcTauri, rel))) {
     resources.push(rel);
   }
+}
+
+function listFilesRecursive(absDir) {
+  const out = [];
+  for (const name of fs.readdirSync(absDir)) {
+    const abs = path.join(absDir, name);
+    if (fs.statSync(abs).isDirectory()) {
+      out.push(...listFilesRecursive(abs));
+    } else {
+      out.push(abs);
+    }
+  }
+  return out;
 }
 
 for (const backend of ['cpu', 'cuda', 'vulkan']) {
   const dir = path.join(llamaRoot, backend);
-  if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) {
-    // Prefer directory entry; Tauri expands to /**. Ensure at least one nested file.
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) continue;
+
+  let files = listFilesRecursive(dir);
+  if (files.length === 0) {
     const keep = path.join(dir, 'ci-keep.txt');
-    if (!fs.existsSync(keep)) {
-      // If the backend only has binaries, that's enough for /** to match.
-      const files = fs.readdirSync(dir);
-      if (files.length === 0) {
-        fs.writeFileSync(keep, 'keep\n');
-      }
-    }
-    resources.push(`resources/llama.cpp/${backend}/**`);
+    fs.writeFileSync(keep, 'keep\n');
+    files = [keep];
   }
+
+  for (const abs of files) {
+    const rel = path.relative(srcTauri, abs).split(path.sep).join('/');
+    resources.push(rel);
+  }
+  console.log(`  backend ${backend}: ${files.length} file(s)`);
 }
 
-// Verify every non-glob path exists; every glob has a match.
+// Verify every path exists (no globs expected after rewrite).
 for (const r of resources) {
   if (r.includes('*')) {
-    const base = r.replace(/\/\*\*$/, '').replace(/\/\*$/, '');
-    const abs = path.join(root, 'src-tauri', base);
-    if (!fs.existsSync(abs)) {
-      throw new Error(`Resource glob base missing: ${r} -> ${abs}`);
-    }
-    const walk = (d) => {
-      for (const name of fs.readdirSync(d)) {
-        const p = path.join(d, name);
-        if (fs.statSync(p).isDirectory()) {
-          if (walk(p)) return true;
-        } else {
-          return true;
-        }
-      }
-      return false;
-    };
-    if (!walk(abs)) {
-      fs.writeFileSync(path.join(abs, 'ci-keep.txt'), 'keep\n');
-    }
-  } else if (r.startsWith('../')) {
-    const abs = path.join(root, 'src-tauri', r);
-    if (!fs.existsSync(abs)) throw new Error(`Missing resource: ${r}`);
-  } else {
-    const abs = path.join(root, 'src-tauri', r);
-    if (!fs.existsSync(abs)) throw new Error(`Missing resource: ${r}`);
+    throw new Error(`Unexpected glob in bundle.resources (use explicit paths): ${r}`);
   }
+  const abs = path.join(srcTauri, r);
+  if (!fs.existsSync(abs)) throw new Error(`Missing resource: ${r}`);
 }
 
 conf.tauri.bundle.resources = resources;

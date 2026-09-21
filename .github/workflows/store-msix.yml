@@ -18,10 +18,14 @@ on:
       - 'distribution/windows-desktop/msix/**'
       - 'scripts/BUILD-STORE-INSTALLER.ps1'
       - 'scripts/build-desktop-windows.ps1'
+      - 'scripts/prepare-windows-bundle-runtimes.ps1'
+      - 'scripts/sync-tauri-bundle-resources.mjs'
+      - 'scripts/install_llama_cpp_runtimes.ps1'
       - 'src-tauri/**'
       - 'src/**'
       - 'package.json'
       - 'package-lock.json'
+      - '.gitignore'
 
 permissions:
   contents: write
