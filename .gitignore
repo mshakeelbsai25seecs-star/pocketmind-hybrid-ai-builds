@@ -66,13 +66,17 @@ dist-server-client/PocketMind-llama-cpp-server/PocketMind-llama-cpp-server/
 __pycache__/
 *.pyc
 
-# Vendored Code Workspace tooling (keep MANIFEST.json only)
+# Vendored Code Workspace tooling (keep MANIFEST.json + tiny .keep for Tauri bundle)
 src-tauri/resources/tooling/**/*
 !src-tauri/resources/tooling/MANIFEST.json
+!src-tauri/resources/tooling/.keep/
+!src-tauri/resources/tooling/.keep/**
 
 # Bundled llama.cpp runtimes are staged at build time (too large for git)
 src-tauri/resources/llama.cpp/**
 !src-tauri/resources/llama.cpp/README.md
+!src-tauri/resources/llama.cpp/.keep/
+!src-tauri/resources/llama.cpp/.keep/**
 
 # Models & customer data (never commit GGUF weights or SOC corpora)
 runtime-data/

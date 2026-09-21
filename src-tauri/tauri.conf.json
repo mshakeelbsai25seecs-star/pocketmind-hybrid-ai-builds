@@ -77,8 +77,9 @@
         "signingIdentity": null
       },
       "resources": [
-        "resources/tooling/**",
-        "resources/llama.cpp/**",
+        "resources/tooling",
+        "resources/llama.cpp",
+        "resources/kc_intent_defaults.json",
         "../scripts/unlimited_ocr_worker.py",
         "../scripts/soc_pdf_ocr.py",
         "../scripts/doc_export_worker.py",
