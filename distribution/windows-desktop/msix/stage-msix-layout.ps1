@@ -96,9 +96,17 @@ if (Test-Path -LiteralPath $releaseResources) {
 }
 
 # Prefer sharp prebuilt Store tile assets (fixes 10.1.1.11 blurry tiles).
+# Use Get-ChildItem — Copy-Item -LiteralPath with "*" does not expand wildcards
+# (Windows PowerShell 5.1), so the layout Assets folder stayed empty.
 if (Test-Path -LiteralPath $prebuiltAssets) {
-  Copy-Item -LiteralPath (Join-Path $prebuiltAssets "*") -Destination (Join-Path $layout "Assets") -Force
-  Write-Host "Copied prebuilt tile Assets from $prebuiltAssets" -ForegroundColor Cyan
+  $assetFiles = @(Get-ChildItem -LiteralPath $prebuiltAssets -File -ErrorAction Stop)
+  if ($assetFiles.Count -eq 0) {
+    throw "Prebuilt Assets folder is empty: $prebuiltAssets"
+  }
+  foreach ($f in $assetFiles) {
+    Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $layout "Assets\$($f.Name)") -Force
+  }
+  Write-Host "Copied $($assetFiles.Count) prebuilt tile Assets from $prebuiltAssets" -ForegroundColor Cyan
 } else {
   Write-Warning "Missing $prebuiltAssets - falling back to src-tauri/icons"
   $required = @(
