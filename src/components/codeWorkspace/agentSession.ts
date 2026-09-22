@@ -63,10 +63,12 @@ class AgentSession {
   private listeners = new Set<Listener>();
   private abort: AbortController | null = null;
   private deleteResolver: ((d: EditDecision) => void) | null = null;
+  private editResolver: ((d: EditDecision) => void) | null = null;
   private sandboxResolver: ((d: SandboxGateResult) => void) | null = null;
   private mcpResolver: ((d: EditDecision) => void) | null = null;
   /** Per-session always-allow keys: `server.tool` */
   private mcpAlwaysAllow = new Set<string>();
+  private alwaysAllowWrites = false;
 
   private running = false;
   private status: string | null = null;
@@ -181,6 +183,39 @@ class AgentSession {
   setAutoApproveSandbox(v: boolean) {
     this.autoApproveSandbox = v;
     this.emit();
+  }
+
+  /** Block until Allow/Deny for a file write. */
+  waitForEditDecision(patch: PendingPatch): Promise<EditDecision> {
+    if (this.alwaysAllowWrites) {
+      return Promise.resolve('accepted');
+    }
+    this.editResolver?.('rejected');
+    this.editResolver = null;
+    this.setPartial({
+      pendingPatch: { ...patch, status: 'pending' },
+      waitingFor: 'edit',
+      status: `Approval required: file write ${patch.path}`,
+    });
+    return new Promise<EditDecision>((resolve) => {
+      this.editResolver = resolve;
+    });
+  }
+
+  resolveEdit(decision: EditDecision, alwaysAllow = false) {
+    if (!this.editResolver) return;
+    const resolve = this.editResolver;
+    this.editResolver = null;
+    if (alwaysAllow && decision === 'accepted') this.alwaysAllowWrites = true;
+    this.setPartial({
+      pendingPatch: decision === 'accepted' ? { ...this.pendingPatch!, status: 'accepted' } : null,
+      waitingFor: this.running ? 'model' : 'idle',
+      status:
+        decision === 'accepted'
+          ? 'File write allowed — agent continuing…'
+          : 'File write denied — agent continuing…',
+    });
+    resolve(decision);
   }
 
   /** Block until Confirm/Cancel delete. */
@@ -378,6 +413,8 @@ class AgentSession {
     void invoke('stop_generation').catch(() => undefined);
     this.deleteResolver?.('rejected');
     this.deleteResolver = null;
+    this.editResolver?.('rejected');
+    this.editResolver = null;
     this.sandboxResolver?.(sandboxCancelled('Sandbox run cancelled because the agent was stopped.'));
     this.sandboxResolver = null;
     this.mcpResolver?.('rejected');
@@ -488,6 +525,11 @@ class AgentSession {
             this.emit();
           },
           onApplyEdit: async (patch) => {
+            const decision = await this.waitForEditDecision({ ...patch, status: 'pending' });
+            if (decision !== 'accepted') {
+              this.setPartial({ pendingPatch: null, waitingFor: this.running ? 'model' : 'idle' });
+              return 'rejected';
+            }
             if (runId) {
               try {
                 await cwCheckpointSnapshotWrite(input.workspaceRoot, runId, patch.path);
@@ -497,11 +539,13 @@ class AgentSession {
             }
             await input.onApplyWrite(patch.path, patch.modified);
             this.setPartial({
+              pendingPatch: null,
               status: runId
-                ? `Auto-edited ${patch.path} · Checkpoint ${runId}`
-                : `Auto-edited ${patch.path}`,
+                ? `Wrote ${patch.path} · Checkpoint ${runId}`
+                : `Wrote ${patch.path}`,
               waitingFor: 'model',
             });
+            return 'accepted';
           },
           onPendingDelete: async (req) => {
             const decision = await this.waitForDeleteDecision(req);
@@ -518,7 +562,7 @@ class AgentSession {
           onSandboxRequest: (payload) => this.waitForSandbox(payload),
           onMcpRequest: (req) => this.waitForMcpDecision(req),
           onStatus: (msg) => {
-            if (this.waitingFor === 'delete' || this.waitingFor === 'sandbox' || this.waitingFor === 'mcp') return;
+            if (this.waitingFor === 'delete' || this.waitingFor === 'sandbox' || this.waitingFor === 'mcp' || this.waitingFor === 'edit') return;
             this.setPartial({ status: msg, waitingFor: 'model' });
           },
           onPlan: (plan) => {
@@ -551,6 +595,8 @@ class AgentSession {
       this.abort = null;
       this.deleteResolver?.('rejected');
       this.deleteResolver = null;
+      this.editResolver?.('rejected');
+      this.editResolver = null;
       this.sandboxResolver?.(sandboxCancelled('Sandbox run cancelled because the agent ended.'));
       this.sandboxResolver = null;
       this.mcpResolver?.('rejected');

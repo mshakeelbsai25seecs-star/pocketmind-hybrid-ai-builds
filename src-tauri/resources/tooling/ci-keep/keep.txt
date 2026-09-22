@@ -1,0 +1,1 @@
+ci keep for tauri resource bundling

@@ -222,7 +222,7 @@ ${TERMINAL_POLICY}
 ${FINISH_POLICY}
 
 Mode rules:
-- CREATE or OVERWRITE project files ONLY with apply_edit (auto-applied; checkpoints allow undo).
+- CREATE or OVERWRITE project files ONLY with apply_edit. Each write waits for explicit user Allow/Deny.
 - New file: apply_edit with old_string "" and new_string = full contents.
 - Default new-file path is the workspace root (e.g. "add.py", "README.md"). Do NOT invent a subdirectory (e.g. "new_folder/...") unless the user asks for one or an existing project layout clearly requires it (e.g. "src/main.rs" in a Rust/Node tree).
 - apply_edit old_string MUST be copied from a tool result (unique match).

@@ -2,6 +2,7 @@ import { AlertTriangle } from 'lucide-react';
 import { agentSession, useAgentSession } from './agentSession';
 import SandboxPanel from './SandboxPanel';
 import { FEATURE_FLAGS } from '../../featureFlags';
+import { useAppStore } from '../../store';
 
 /**
  * Always-visible permission gates for delete Confirm, MCP Confirm, and optional sandbox Confirm.
@@ -17,8 +18,10 @@ export default function AgentPermissionOverlay() {
     sandboxConfirming,
     waitingFor,
     running,
+    pendingPatch,
   } = useAgentSession();
-
+  const activeView = useAppStore(s => s.activeView);
+  const showEdit = waitingFor === 'edit' && pendingPatch != null && activeView !== 'code-workspace';
   const showDelete = waitingFor === 'delete' && pendingDelete != null;
   const showMcp = waitingFor === 'mcp' && pendingMcp != null;
   const showSandbox =
@@ -27,7 +30,7 @@ export default function AgentPermissionOverlay() {
     && sandboxPending != null
     && !agentSession.getSnapshot().autoApproveSandbox;
 
-  if (!showDelete && !showSandbox && !showMcp) return null;
+  if (!showEdit && !showDelete && !showSandbox && !showMcp) return null;
 
   return (
     <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center p-3 sm:p-6 bg-black/50 backdrop-blur-[2px]">
@@ -45,7 +48,8 @@ export default function AgentPermissionOverlay() {
           <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
           <div>
             <p className="text-sm font-bold text-surface-900 dark:text-surface-50">
-              {showDelete ? 'Confirm file delete'
+              {showEdit ? 'Approval required — file write'
+                : showDelete ? 'Confirm file delete'
                 : showMcp ? 'Allow MCP tool call'
                   : 'Agent needs sandbox permission'}
             </p>
@@ -57,6 +61,15 @@ export default function AgentPermissionOverlay() {
           </div>
         </div>
 
+        {showEdit && pendingPatch && (
+          <div className="space-y-3">
+            <p className="text-sm font-semibold break-all">{pendingPatch.path}</p>
+            <div className="flex flex-wrap gap-2">
+              <button type="button" onClick={() => agentSession.resolveEdit('accepted')} className="btn-primary text-sm">Allow</button>
+              <button type="button" onClick={() => agentSession.resolveEdit('rejected')} className="btn-secondary text-sm">Deny</button>
+            </div>
+          </div>
+        )}
         {showDelete && pendingDelete && (
           <div className="space-y-3">
             <p className="text-sm font-semibold break-all">

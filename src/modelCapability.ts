@@ -1,7 +1,7 @@
 /**
  * Gates PocketCode write/run tools to ≥20B local models, local VL+mmproj models,
  * large online models, or any organization (enterprise:) server model.
- * Smaller text-only models keep read-only Knowledge Chat / Codebase Explorer.
+ * Smaller text-only models stay read-only in PocketCode (Ask / explore).
  */
 
 import { modelSupportsVision } from './codeWorkspace/visionCapability';
@@ -21,9 +21,13 @@ export function looksLikeLocalVisionModel(modelPath: string | null | undefined):
 }
 
 const LARGE_ONLINE_IDS = [
+  'gpt-6-astra',
+  'gpt-5.6',
   'gpt-5.5',
   'gpt-5.4',
   'gpt-5',
+  'claude-fable-5',
+  'claude-opus-5',
   'gpt-4o',
   'gpt-4.1',
   'gpt-4-turbo',
@@ -42,6 +46,11 @@ const LARGE_ONLINE_IDS = [
   'deepseek-reasoner',
   'deepseek-v3',
   'deepseek-chat-v3',
+  'gpt-oss-120b',
+  'qwen3.6-27b',
+  'gemini-3.8',
+  'gemini-3.6',
+  'gemini-3.5',
   'llama-3.3-70b',
   'llama-3.1-70b',
   'llama-3.1-405b',

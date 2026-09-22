@@ -256,7 +256,7 @@ export interface AgentLoopCallbacks {
    * Auto-apply path: write immediately after preview (no Accept dialog).
    * Still called so the host can checkpoint + write.
    */
-  onApplyEdit: (patch: PendingPatch) => Promise<void>;
+  onApplyEdit: (patch: PendingPatch) => Promise<'accepted' | 'rejected'>;
   /** Must resolve only after the user Confirms or Cancels delete. */
   onPendingDelete: (req: PendingDelete) => Promise<'accepted' | 'rejected'>;
   /** After a delete is confirmed and removed from disk — refresh file tree / close preview. */
@@ -601,11 +601,13 @@ async function executeToolRaw(
         path,
         original: preview.original,
         modified: preview.modified,
-        status: 'accepted',
+        status: 'pending',
       };
-      callbacks.onStatus?.(`Auto-editing ${path}…`);
-      await callbacks.onApplyEdit(patch);
-      // Summarize — do not re-paste huge diffs into the transcript.
+      callbacks.onStatus?.(`Waiting for file-write approval: ${path}`);
+      const decision = await callbacks.onApplyEdit(patch);
+      if (decision !== 'accepted') {
+        return `Edit DENIED by user for ${path}. Do not retry the same write unless the user asks. Continue with another approach, or call done.`;
+      }
       const origLen = preview.original.length;
       const modLen = preview.modified.length;
       return `Edit written to ${path} (was ${origLen} chars → ${modLen} chars). ${continueHint}`;

@@ -14,7 +14,7 @@ export function isOnlineRemotePath(path: string | null | undefined): boolean {
   return !!path && path.startsWith('remote:');
 }
 
-/** Short label for UI (Chat, Knowledge Chat, Models). */
+/** Short label for UI (Chat, Models, PocketCode). */
 export function answerModelLabel(path: string | null | undefined, localModels: LocalModelRecord[] = []): string {
   if (!path) return 'No model selected';
   if (path.startsWith('enterprise:')) {

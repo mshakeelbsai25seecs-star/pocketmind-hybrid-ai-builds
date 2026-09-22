@@ -38,8 +38,17 @@ import {
 } from '../../attachments/prepareAttachments';
 import AgentTranscript from './AgentTranscript';
 import FilePreviewPane from './FilePreviewPane';
+import GitDiffPane from './GitDiffPane';
+import IdeBottomPanel from './IdeBottomPanel';
+import McpToolsPanel from './McpToolsPanel';
+import FileWriteApproval from './FileWriteApproval';
+import {
+  gitDiff,
+  gitStatus,
+  type GitDiffResult,
+  type GitFileStatus,
+} from '../../codeWorkspace/ideApi';
 import SandboxPanel from './SandboxPanel';
-import TerminalPanel from './TerminalPanel';
 import ComposerModelBar from './ComposerModelBar';
 import { useAutoResizeTextarea } from '../../hooks/useAutoResizeTextarea';
 import PaneResizeHandle from './PaneResizeHandle';
@@ -79,6 +88,21 @@ function pathsReferToSameFile(a: string | null | undefined, b: string | null | u
   return na.endsWith(`/${nb}`) || nb.endsWith(`/${na}`);
 }
 
+function gitMark(path: string, files: GitFileStatus[]): string | null {
+  const n = path.replace(/\\/g, '/').toLowerCase();
+  const row = files.find(f => {
+    const p = f.path.replace(/\\/g, '/').toLowerCase();
+    return p === n || n.endsWith(`/${p}`) || p.endsWith(`/${n.split('/').pop()}`);
+  });
+  if (!row) return null;
+  if (row.conflicted) return 'U';
+  if (row.untracked) return 'U';
+  if (row.worktree === 'M' || row.index === 'M') return 'M';
+  if (row.worktree === 'A' || row.index === 'A') return 'A';
+  if (row.worktree === 'D' || row.index === 'D') return 'D';
+  return row.worktree !== ' ' ? row.worktree : row.index;
+}
+
 function TreeNode({
   workspaceRoot,
   entry,
@@ -86,6 +110,7 @@ function TreeNode({
   selectedPath,
   onSelect,
   treeEpoch,
+  gitFiles,
 }: {
   workspaceRoot: string;
   entry: DirEntryInfo;
@@ -94,6 +119,7 @@ function TreeNode({
   onSelect: (path: string, isDir: boolean) => void;
   /** Bumped after agent create/edit/delete so expanded folders reload. */
   treeEpoch: number;
+  gitFiles: GitFileStatus[];
 }) {
   const [openDir, setOpenDir] = useState(depth < 2);
   const [children, setChildren] = useState<DirEntryInfo[]>([]);
@@ -128,6 +154,9 @@ function TreeNode({
       >
         <File className="w-3.5 h-3.5 shrink-0 opacity-70" />
         <span className="truncate">{entry.name}</span>
+        {gitMark(entry.path, gitFiles) && (
+          <span className="ml-auto text-[10px] text-amber-300 font-mono">{gitMark(entry.path, gitFiles)}</span>
+        )}
       </button>
     );
   }
@@ -154,6 +183,7 @@ function TreeNode({
           selectedPath={selectedPath}
           onSelect={onSelect}
           treeEpoch={treeEpoch}
+          gitFiles={gitFiles}
         />
       ))}
     </div>
@@ -325,8 +355,15 @@ export default function CodeWorkspaceLayout() {
   const [tree, setTree] = useState<DirEntryInfo[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [openFilePath, setOpenFilePath] = useState<string | null>(null);
+  const [openTabs, setOpenTabs] = useState<string[]>([]);
+  const [editorTab, setEditorTab] = useState<'editor' | 'diff'>('diff');
   const [editorContent, setEditorContent] = useState('');
   const [editorError, setEditorError] = useState<string | null>(null);
+  const [gitFiles, setGitFiles] = useState<GitFileStatus[]>([]);
+  const [gitNote, setGitNote] = useState<string | null>(null);
+  const [diffResult, setDiffResult] = useState<GitDiffResult | null>(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+  const [bottomPx, setBottomPx] = useState(220);
   /** Forces expanded folder nodes to re-list after agent mutations. */
   const [treeEpoch, setTreeEpoch] = useState(0);
   const openFilePathRef = useRef<string | null>(null);
@@ -539,6 +576,23 @@ export default function CodeWorkspaceLayout() {
     await setSetting('cw.agent_mode', next);
   }, [agentMode, session.running]);
 
+  const refreshGit = useCallback(async (root?: string) => {
+    const r = root ?? workspaceRoot;
+    if (!r) {
+      setGitFiles([]);
+      setGitNote(null);
+      return;
+    }
+    try {
+      const report = await gitStatus(r);
+      setGitFiles(report.files || []);
+      setGitNote(report.error || (report.is_repo ? (report.branch ? `git ${report.branch}` : null) : 'Not a git repository'));
+    } catch (err) {
+      setGitFiles([]);
+      setGitNote(formatInvokeError(err));
+    }
+  }, [workspaceRoot]);
+
   const refreshTree = useCallback(async (root?: string, opts?: { bustCache?: boolean }) => {
     const r = root ?? workspaceRoot;
     if (!r) return;
@@ -546,10 +600,11 @@ export default function CodeWorkspaceLayout() {
       const entries = await cwListDir(r, '.');
       setTree(entries.sort((a, b) => Number(b.is_dir) - Number(a.is_dir) || a.name.localeCompare(b.name)));
       if (opts?.bustCache !== false) setTreeEpoch(v => v + 1);
+      await refreshGit(r);
     } catch (err) {
       setLocalStatus(formatInvokeError(err));
     }
-  }, [workspaceRoot]);
+  }, [workspaceRoot, refreshGit]);
 
   useEffect(() => {
     if (workspaceRoot) {
@@ -613,15 +668,30 @@ export default function CodeWorkspaceLayout() {
     setOpenFilePath(null);
     setEditorContent('');
     await refreshTree(selected);
-    // Background OCR/extract so agents can read_file/grep PDFs without a full Knowledge Chat index.
+    // Background OCR/extract so agents can read_file/grep PDFs without a separate index.
     void prepareWorkspacePdfs(selected);
+  };
+
+  const loadDiff = async (path: string) => {
+    if (!workspaceRoot) return;
+    setDiffLoading(true);
+    try {
+      setDiffResult(await gitDiff(workspaceRoot, path));
+    } catch (err) {
+      setDiffResult(null);
+      setLocalStatus(formatInvokeError(err));
+    } finally {
+      setDiffLoading(false);
+    }
   };
 
   const openFile = async (path: string) => {
     if (!workspaceRoot) return;
     setSelectedPath(path);
     setOpenFilePath(path);
+    setOpenTabs(prev => (prev.includes(path) ? prev : [...prev, path]));
     setEditorError(null);
+    void loadDiff(path);
     try {
       const text = await cwReadFile(workspaceRoot, path, 0, 4000, true);
       setEditorContent(text);
@@ -887,6 +957,7 @@ export default function CodeWorkspaceLayout() {
         if (pathsReferToSameFile(openFilePathRef.current, path)) {
           setEditorContent(content);
           setEditorError(null);
+          void loadDiff(path);
         }
       },
       onFileDeleted: async (path) => {
@@ -1082,7 +1153,7 @@ export default function CodeWorkspaceLayout() {
           <div className="flex items-center gap-0.5 px-1 py-0.5 mb-0.5 sticky top-0 z-10 bg-surface-50/95 dark:bg-black">
             <div className="min-w-0 flex-1 px-1">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-surface-500">
-                {remoteWorkspace ? 'Remote files' : 'Files'}
+                {remoteWorkspace ? 'Remote files' : 'Explorer'}
               </p>
               <p className="text-[11px] text-surface-700 dark:text-surface-300 truncate" title={workspaceRoot || undefined}>
                 {folderLabel}
@@ -1133,6 +1204,7 @@ export default function CodeWorkspaceLayout() {
               depth={0}
               selectedPath={selectedPath}
               treeEpoch={treeEpoch}
+              gitFiles={gitFiles}
               onSelect={(path, isDir) => {
                 if (!isDir) void openFile(path);
                 else setSelectedPath(path);
@@ -1144,15 +1216,62 @@ export default function CodeWorkspaceLayout() {
         <PaneResizeHandle onDrag={onResizeLeft} title="Resize files pane" />
 
         <section className="flex flex-col min-h-0 min-w-0 flex-1">
+          {openTabs.length > 0 && (
+            <div className="flex items-center gap-1 px-1 border-b border-white/10 overflow-x-auto shrink-0">
+              {openTabs.map(tab => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => void openFile(tab)}
+                  className={`px-2 py-1 text-[11px] rounded-t ${openFilePath === tab ? 'bg-white/10 text-white' : 'text-surface-500'}`}
+                >
+                  {basename(tab)}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="flex items-center gap-2 px-2 py-1 border-b border-white/10 text-[11px] font-semibold uppercase tracking-wider">
+            <button type="button" onClick={() => setEditorTab('editor')} className={editorTab === 'editor' ? 'text-white' : 'text-surface-500'}>Editor</button>
+            <button type="button" onClick={() => setEditorTab('diff')} className={editorTab === 'diff' ? 'text-white' : 'text-surface-500'}>
+              Diff{diffResult?.unified ? ` (${diffResult.unified.split('\n').filter(l => l.startsWith('+') && !l.startsWith('+++')).length > 0 ? '1' : '0'})` : ''}
+            </button>
+            {gitNote && <span className="ml-auto normal-case tracking-normal font-normal text-surface-500 truncate">{gitNote}</span>}
+          </div>
           <div className="flex-1 min-h-0 overflow-hidden">
-            <FilePreviewPane
-              workspaceRoot={workspaceRoot}
-              filePath={openFilePath}
-              content={editorContent}
-              error={editorError}
+            {editorTab === 'diff' ? (
+              <GitDiffPane diff={diffResult} loading={diffLoading} />
+            ) : (
+              <FilePreviewPane
+                workspaceRoot={workspaceRoot}
+                filePath={openFilePath}
+                content={editorContent}
+                error={editorError}
+              />
+            )}
+          </div>
+          <div className="shrink-0 border-t border-white/10" style={{ height: bottomPx }}>
+            <IdeBottomPanel
+              workspaceRoot={workspaceRoot || null}
+              onOpenFile={(path, line) => {
+                void openFile(path);
+                if (line) setLocalStatus(`Opened ${basename(path)}:${line}`);
+              }}
             />
           </div>
-          <TerminalPanel />
+          <div
+            className="h-1 cursor-row-resize bg-transparent hover:bg-primary-500/40"
+            onMouseDown={e => {
+              const startY = e.clientY;
+              const startH = bottomPx;
+              const move = (ev: MouseEvent) => setBottomPx(Math.min(420, Math.max(140, startH - (ev.clientY - startY))));
+              const up = () => {
+                window.removeEventListener('mousemove', move);
+                window.removeEventListener('mouseup', up);
+              };
+              window.addEventListener('mousemove', move);
+              window.addEventListener('mouseup', up);
+            }}
+          />
           {checkpoints.length > 0 && (
             <div className="border-t border-surface-200 dark:border-surface-800 flex-shrink-0">
               <button
@@ -1272,6 +1391,8 @@ export default function CodeWorkspaceLayout() {
           )}
 
           <div ref={chatScrollRef} className="flex-1 min-h-0 overflow-y-auto px-2.5 space-y-4 pb-3">
+            <FileWriteApproval />
+            <McpToolsPanel />
             {reviewPlan && (agentMode === 'plan' || reviewPlan.status === 'draft' || reviewPlan.status === 'approved') && (
               <PlanReviewPanel
                 plan={reviewPlan}

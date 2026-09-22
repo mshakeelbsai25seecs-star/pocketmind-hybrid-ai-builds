@@ -2,24 +2,20 @@ import { useEffect, useState } from 'react';
 import { useAppStore } from '../store';
 import Sidebar from './Sidebar';
 import ChatView from './ChatView';
-import HardwareMonitor from './HardwareMonitor';
-import RuntimeManager from './RuntimeManager';
 import ModelManager from './ModelManager';
-import CharacterEditor from './CharacterEditor';
+import CharacterStudio from './CharacterStudio';
 import SettingsPanel from './SettingsPanel';
 import HomeDashboard from './HomeDashboard';
-import DiagnosticsPanel from './DiagnosticsPanel';
 import SetupWizard from './SetupWizard';
 import PromptLibrary from './PromptLibrary';
 import StorageManager from './StorageManager';
-import BackupRestore from './BackupRestore';
 import HelpCenter from './HelpCenter';
 import ImageStudio from './ImageStudio';
 import DocumentStudio from './DocumentStudio';
-import EnterpriseServer from './EnterpriseServer';
-import SocWorkspace from './SocWorkspace';
-import KnowledgeChatWorkspace from './knowledgeChat/KnowledgeChatWorkspace';
+import SocCopilot from './SocCopilot';
 import CodeWorkspaceLayout from './codeWorkspace/CodeWorkspaceLayout';
+import HardwareRuntimeManager from './HardwareRuntimeManager';
+import ControlCenter, { tabForView } from './ControlCenter';
 import AgentPermissionOverlay from './codeWorkspace/AgentPermissionOverlay';
 import QuickComposeOverlay from './QuickComposeOverlay';
 import { useAgentSession } from './codeWorkspace/agentSession';
@@ -58,6 +54,10 @@ export default function Layout() {
     }
   }, [hydrated, setupCompleted, activeView, setActiveView]);
 
+  useEffect(() => {
+    if (activeView === 'knowledge-chat') setActiveView('chat');
+  }, [activeView, setActiveView]);
+
   return (
     <div className="relative flex h-screen w-screen overflow-hidden app-gradient-bg text-surface-950 dark:text-surface-50">
       <Sidebar />
@@ -65,8 +65,7 @@ export default function Layout() {
         {activeView === 'home' && <HomeDashboard />}
         {activeView === 'setup' && <SetupWizard />}
         {activeView === 'chat' && <ChatView />}
-        {activeView === 'soc' && <SocWorkspace />}
-        {activeView === 'knowledge-chat' && <KnowledgeChatWorkspace />}
+        {activeView === 'soc' && <SocCopilot />}
         {keepCodeWorkspace && (
           <div
             className={
@@ -78,18 +77,17 @@ export default function Layout() {
             <CodeWorkspaceLayout />
           </div>
         )}
-        {activeView === 'hardware' && <HardwareMonitor />}
-        {activeView === 'runtime' && <RuntimeManager />}
+        {(activeView === 'hardware' || activeView === 'runtime' || activeView === 'hardware-runtime') && <HardwareRuntimeManager />}
         {activeView === 'models' && <ModelManager />}
-        {activeView === 'enterprise-server' && <EnterpriseServer />}
+        {(activeView === 'control-center' || activeView === 'enterprise-server' || activeView === 'diagnostics' || activeView === 'backup') && (
+          <ControlCenter initialTab={tabForView(activeView)} />
+        )}
         {activeView === 'image-studio' && <ImageStudio />}
         {activeView === 'document-studio' && <DocumentStudio />}
-        {activeView === 'diagnostics' && <DiagnosticsPanel />}
-        {activeView === 'characters' && <CharacterEditor />}
+        {activeView === 'characters' && <CharacterStudio />}
         {activeView === 'settings' && <SettingsPanel />}
         {activeView === 'prompts' && <PromptLibrary />}
         {activeView === 'storage' && <StorageManager />}
-        {activeView === 'backup' && <BackupRestore />}
         {activeView === 'help' && <HelpCenter />}
       </main>
       <AgentPermissionOverlay />

@@ -14,7 +14,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { useAppStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
-import { AttachmentContext, Conversation, LocalModelRecord, Message } from '../types';
+import { AttachmentContext, Conversation, LocalModelRecord, Message, SystemInfo } from '../types';
 import {
   mergeGenerationParams,
   PendingChatOptions,
@@ -33,6 +33,7 @@ import { modelSupportsVision } from '../codeWorkspace/visionCapability';
 import { onOpenExternal } from '../openExternal';
 import { useAutoResizeTextarea } from '../hooks/useAutoResizeTextarea';
 import { filterChatSelectableLocalModels } from '../localModels';
+import { formatInvokeError } from '../lib/formatInvokeError';
 
 import RefreshButton from './RefreshButton';
 
@@ -47,19 +48,7 @@ function isDocExportError(raw: string): boolean {
 }
 
 function humanError(err: unknown): string {
-  let raw = '';
-  if (err instanceof Error) raw = err.message;
-  else if (typeof err === 'string') raw = err;
-  else if (err && typeof err === 'object') {
-    const anyErr = err as any;
-    if (typeof anyErr.message === 'string') raw = anyErr.message;
-    else if (typeof anyErr.error === 'string') raw = anyErr.error;
-    else {
-      try { raw = JSON.stringify(err, null, 2); } catch { raw = String(err); }
-    }
-  } else {
-    raw = String(err || 'Unknown error');
-  }
+  let raw = formatInvokeError(err);
   if (isDocExportError(raw)) {
     return raw.replace(/^error:\s*/i, '').trim();
   }
@@ -91,6 +80,66 @@ function humanError(err: unknown): string {
     return 'Local llama-server crashed mid-reply (usually low RAM/VRAM). Close other apps, use a smaller Q4 GGUF, set GPU layers to 0 / CPU, context 2048, then retry. Free RAM is often under 1 GB when this happens.';
   }
   return raw;
+}
+
+function fmtFreeBytes(bytes?: number | null): string {
+  if (bytes == null || bytes < 0 || !Number.isFinite(bytes)) return '—';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let v = bytes;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i += 1;
+  }
+  return `${v.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+}
+
+/** Compact free-memory label for the chat top bar, by offload mode. */
+function freeMemoryLabel(info: SystemInfo | null, gpuLayers: number, modelLoaded: boolean): { text: string; title: string } {
+  const ramFree = info?.memory?.available_bytes ?? info?.memory?.free_bytes ?? 0;
+  const gpu = info?.gpus?.[0];
+  const vramTotal = gpu?.vram_total_bytes ?? 0;
+  const vramUsed = gpu?.vram_used_bytes ?? 0;
+  const vramFree = vramTotal > 0 ? Math.max(0, vramTotal - vramUsed) : 0;
+
+  // CPU-only (Hardware → CPU Safe / gpu_layers 0): system RAM only.
+  if (gpuLayers === 0) {
+    return {
+      text: `Free RAM ${fmtFreeBytes(ramFree)}`,
+      title: 'CPU-only mode: system RAM free (GPU VRAM excluded)',
+    };
+  }
+
+  // GPU-only full offload (typical CUDA select uses 999 / very high layers).
+  if (gpuLayers >= 999) {
+    if (vramTotal > 0) {
+      return {
+        text: modelLoaded
+          ? `Free VRAM ${fmtFreeBytes(vramFree)}`
+          : `Free VRAM ${fmtFreeBytes(vramFree)} · load model for live figure`,
+        title: 'GPU-only: free GPU VRAM (after model load when available)',
+      };
+    }
+    return {
+      text: `Free RAM ${fmtFreeBytes(ramFree)}`,
+      title: 'GPU-only layers set but no VRAM reported — showing system RAM free',
+    };
+  }
+
+  // GPU offloading (partial layers) or hybrid/Automatic Optimizer (gpu_layers < 0):
+  // usable free = host free + GPU free.
+  if (vramTotal > 0) {
+    const total = ramFree + vramFree;
+    const mode = gpuLayers < 0 ? 'Hybrid/auto' : 'GPU offload';
+    return {
+      text: `Free ${fmtFreeBytes(total)} (RAM+VRAM)`,
+      title: `${mode}: host free ${fmtFreeBytes(ramFree)} + GPU free ${fmtFreeBytes(vramFree)}`,
+    };
+  }
+  return {
+    text: `Free RAM ${fmtFreeBytes(ramFree)}`,
+    title: 'GPU/hybrid mode: no VRAM reported — system RAM free only',
+  };
 }
 
 function modelFileName(path: string | null): string {
@@ -1025,6 +1074,53 @@ export default function ChatView() {
   const streamUnlistenRef = useRef<{ chunk?: () => void; status?: () => void; error?: () => void }>({});
   const generatingAssistantRef = useRef<{ conversationId: string; messageId: string } | null>(null);
   const [refreshBusy, setRefreshBusy] = useState(false);
+  const [memTick, setMemTick] = useState(0);
+  const systemInfo = useAppStore(s => s.systemInfo);
+  const setSystemInfo = useAppStore(s => s.setSystemInfo);
+
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const info = await invoke<SystemInfo>('get_system_info');
+        if (!cancelled) {
+          setSystemInfo(info);
+          setMemTick(t => t + 1);
+        }
+      } catch {
+        /* ignore poll errors */
+      }
+    };
+    void tick();
+    const id = window.setInterval(() => { void tick(); }, 10_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [setSystemInfo]);
+
+  // Never leave isGenerating / Thinking… behind if the chat unmounts mid-stream.
+  useEffect(() => {
+    return () => {
+      generationEpochRef.current += 1;
+      streamUnlistenRef.current.chunk?.();
+      streamUnlistenRef.current.status?.();
+      streamUnlistenRef.current.error?.();
+      streamUnlistenRef.current = {};
+      const activeGen = generatingAssistantRef.current;
+      if (activeGen) {
+        const partial = finalizeAssistantText(streamingTextRef.current);
+        const finalText = partial && partial !== 'Thinking...'
+          ? partial
+          : '[Generation interrupted.]';
+        try {
+          useAppStore.getState().replaceMessage(activeGen.conversationId, activeGen.messageId, finalText);
+        } catch { /* store may be gone */ }
+        generatingAssistantRef.current = null;
+      }
+      useAppStore.getState().setIsGenerating(false);
+    };
+  }, []);
 
   const {
     activeConversationId,
@@ -1085,6 +1181,17 @@ export default function ChatView() {
     setCurrentModel: s.setCurrentModel,
     setLocalModels: s.setLocalModels,
   })));
+
+  const memLabel = useMemo(
+    () => freeMemoryLabel(
+      systemInfo,
+      defaultParams.gpu_layers ?? 0,
+      Boolean(currentModel) && !String(currentModel).startsWith('remote:') && !String(currentModel).startsWith('enterprise:'),
+    ),
+    // memTick forces refresh when systemInfo object identity is stable
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [systemInfo, defaultParams.gpu_layers, currentModel, memTick],
+  );
 
   const activeConversation = conversations.find(c => c.id === activeConversationId);
   const chatModeOk = !activeConversation || (activeConversation.mode || 'chat') === 'chat'
@@ -1228,6 +1335,13 @@ export default function ChatView() {
       setBusyCreatingChat(false);
     }
   };
+
+  const didAutoCreate = useRef(false);
+  useEffect(() => {
+    if (didAutoCreate.current || activeConversationId || !currentModel || busyCreatingChat) return;
+    didAutoCreate.current = true;
+    void createChat();
+  }, [activeConversationId, currentModel, busyCreatingChat]);
 
   const exportChat = async (kind: ChatExportKind) => {
     setExportMenuOpen(false);
@@ -1447,6 +1561,7 @@ export default function ChatView() {
     let conversationMessages = currentMessages;
     let conversationForSend = activeConversation;
     let assistantMsgId: string | null = null;
+    let streamError: string | null = null;
 
     if (!overrideContent) setInput('');
     setGenerationError(null);
@@ -1567,7 +1682,6 @@ export default function ChatView() {
       setLiveReasoningStreaming(false);
       generatingAssistantRef.current = { conversationId, messageId: assistantMsgId };
       const generationEpoch = generationEpochRef.current;
-      let streamError: string | null = null;
       let reasoningMs: number | null = null;
 
       const pushStreamingUi = (text: string) => {
@@ -1654,6 +1768,12 @@ export default function ChatView() {
       const unlistenError = await listen<string>('generation-error', (event) => {
         if (generationEpochRef.current !== generationEpoch) return;
         streamError = humanError(event.payload);
+        // Clear Thinking… immediately — do not wait for stream_generate to return.
+        const failText = `**Generation failed:** ${streamError}`;
+        replaceMessage(conversationId, assistantMsgId!, failText);
+        setGenerationError(streamError);
+        setGenerationStatus(null);
+        setLiveReasoningStreaming(false);
       });
       streamUnlistenRef.current = {
         chunk: unlistenChunk,
@@ -1758,7 +1878,22 @@ export default function ChatView() {
       setLiveReasoningStreaming(false);
       setGenerationStatus(null);
     } finally {
+      // Hard guarantee: never leave a "Thinking..." placeholder after the turn ends.
+      if (assistantMsgId && conversationId) {
+        const latest = useAppStore.getState().messages[conversationId]?.find(m => m.id === assistantMsgId);
+        if (latest && (!latest.content || latest.content === 'Thinking...')) {
+          const fallback = streamError
+            ? `**Generation failed:** ${streamError}`
+            : '[The model returned an empty response.]';
+          replaceMessage(conversationId, assistantMsgId, fallback);
+          try {
+            await invoke('update_message', { id: assistantMsgId, content: fallback, metadata: null });
+          } catch { /* ignore */ }
+        }
+      }
       setIsGenerating(false);
+      setGenerationStatus(null);
+      setLiveReasoningStreaming(false);
     }
   };
 
@@ -1839,7 +1974,7 @@ export default function ChatView() {
     <div className="flex-1 flex flex-col h-full min-w-0">
       <div className="min-h-16 border-b border-white/70 dark:border-surface-800/80 flex flex-col xl:flex-row xl:items-center justify-between gap-2 px-4 py-3 glass-panel flex-shrink-0">
         <div className="flex items-center gap-3 min-w-0 flex-1">
-          <div className="w-10 h-10 rounded-xl bg-primary-600 flex items-center justify-center flex-shrink-0">
+          <div className="w-10 h-10 rounded-sm bg-primary-600 flex items-center justify-center flex-shrink-0">
             {activeCharacter ? <span className="text-sm font-bold text-white">{activeCharacter.name[0]}</span> : <Bot className="w-4 h-4 text-white" />}
           </div>
           <div className="min-w-0 flex-1">
@@ -1872,6 +2007,16 @@ export default function ChatView() {
           </div>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-1.5 xl:gap-2 w-full xl:w-auto xl:max-w-[min(100%,52rem)] xl:flex-shrink-0">
+          <span
+            className="inline-flex items-center gap-1.5 text-[11px] font-medium text-surface-600 dark:text-surface-300 border border-surface-200 dark:border-surface-700 px-2 py-1 rounded-sm bg-surface-50/80 dark:bg-surface-900/80 tabular-nums"
+            title={memLabel.title}
+          >
+            {memLabel.text}
+          </span>
+          <span className="hidden sm:inline-flex items-center gap-1.5 text-[11px] text-primary-300 font-medium mr-1">
+            <span className="w-1.5 h-1.5 rounded-sm bg-primary-400" />
+            Private / On-device
+          </span>
           <RefreshButton title="Refresh" onClick={refreshChatView} busy={refreshBusy} className="text-xs xl:text-sm px-2.5 xl:px-3 py-1.5 xl:py-2" />
           <button
             type="button"
@@ -2026,7 +2171,10 @@ export default function ChatView() {
           const showThinkingPlaceholder = message.role === 'assistant'
             && (!message.content || message.content === 'Thinking...')
             && isGenerating
-            && message.id === liveReasoningMsgId;
+            && (message.id === liveReasoningMsgId || generatingAssistantRef.current?.messageId === message.id);
+          const staleThinking = message.role === 'assistant'
+            && message.content === 'Thinking...'
+            && !isGenerating;
           // DeepSeek sometimes puts the real Markdown answer in reasoning_content and only a
           // short coda in content. Promote that reasoning into the answer instead of a grey dump.
           const contentTrim = (message.content || '').trim();
@@ -2037,6 +2185,8 @@ export default function ChatView() {
           const thoughtText = promoteThoughtToAnswer ? '' : rawThought;
           const answerBody = showThinkingPlaceholder
             ? (liveReasoning.trim() ? '' : (generationStatus || 'Starting…'))
+            : staleThinking
+              ? '**Generation interrupted.** Send again, or use Stop next time a reply hangs.'
             : (promoteThoughtToAnswer
               ? (contentTrim && !thoughtTrim.includes(contentTrim)
                 ? `${thoughtTrim}\n\n${contentTrim}`
@@ -2045,11 +2195,11 @@ export default function ChatView() {
 
           return (
           <div key={message.id} className={`group flex gap-3 sm:gap-4 ${message.role === 'user' ? 'flex-row-reverse' : ''}`}>
-            <div className={`w-9 h-9 rounded-xl flex-shrink-0 flex items-center justify-center ${message.role === 'user' ? 'bg-surface-200 dark:bg-surface-700' : 'bg-primary-500'}`}>
+            <div className={`w-9 h-9 rounded-sm flex-shrink-0 flex items-center justify-center ${message.role === 'user' ? 'bg-surface-200 dark:bg-surface-700' : 'bg-primary-500'}`}>
               {message.role === 'user' ? <User className="w-4 h-4 text-surface-700 dark:text-surface-200" /> : <Bot className="w-4 h-4 text-surface-950" />}
             </div>
             <div className={`flex-1 min-w-0 max-w-[min(52rem,100%)] ${message.role === 'user' ? 'text-right' : ''}`}>
-              <div className={`inline-block chat-message-surface max-w-full rounded-xl px-4 py-3 text-left overflow-hidden ${message.role === 'user' ? 'bg-primary-600 text-white' : 'bg-white dark:bg-surface-900 text-surface-900 dark:text-surface-100 border border-surface-200 dark:border-surface-800' }`}>
+              <div className={`inline-block chat-message-surface max-w-full rounded-sm px-4 py-3 text-left overflow-hidden ${message.role === 'user' ? 'bg-primary-600 text-white' : 'bg-white dark:bg-surface-900 text-surface-900 dark:text-surface-100 border border-surface-200 dark:border-surface-800' }`}>
                 {message.role === 'assistant' ? (
                   <div>
                     {thoughtText ? (
@@ -2170,7 +2320,7 @@ export default function ChatView() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={currentModel ? 'Message PocketMind Hybrid AI...' : 'Select a model before chatting...'}
+              placeholder={currentModel ? 'Ask anything…' : 'Select a model before chatting...'}
               rows={1}
               disabled={!currentModel || isGenerating}
               className="composer-textarea w-full bg-transparent border-none focus:outline-none resize-none py-1.5 px-1 text-[13px] leading-relaxed min-h-[2.5rem] max-h-[min(40vh,20rem)] text-surface-900 dark:text-surface-100 placeholder:text-surface-400 disabled:opacity-60"

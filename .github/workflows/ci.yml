@@ -19,12 +19,25 @@ jobs:
       - run: npm run test:kc-selftest
       - run: npm run test:tool-protocol
 
+  # Pure Rust lib tests — no WebKit/GTK / usearch native stack.
+  pocketcode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo test pocketcode-workspace
+        working-directory: crates/pocketcode-workspace
+        run: cargo test
+
+  # Full nexus-ai binary tests need Tauri + frontend dist.
+  # Skip Ubuntu: Tauri 1 wants webkit2gtk-4.0 (gone on 24.04) and usearch/numkong
+  # needs a newer GCC than 22.04 ships for AVX-512 FP16 flags.
   rust:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [windows-latest, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -33,6 +46,16 @@ jobs:
           node-version: '20'
           cache: npm
       - run: npm ci
+      - name: Build frontend (tauri distDir)
+        run: npm run build
+      - name: Sync Tauri bundle.resources
+        shell: bash
+        run: |
+          mkdir -p src-tauri/resources/tooling/ci-keep
+          mkdir -p src-tauri/resources/llama.cpp/ci-keep
+          printf 'ci\n' > src-tauri/resources/tooling/ci-keep/keep.txt
+          printf 'ci\n' > src-tauri/resources/llama.cpp/ci-keep/keep.txt
+          node scripts/sync-tauri-bundle-resources.mjs
       - name: cargo test
         working-directory: src-tauri
         run: cargo test knowledge_chat

@@ -233,7 +233,7 @@ export default function SocDataPackIntake() {
       upsertCollection(updated);
       setNotice(`Imported ${newResources.length} file(s) and indexed company folder (${updated.chunk_count} chunks). SOC prompts and reports will auto-retrieve from this index.`);
     } catch (err) {
-      setNotice(`Imported ${newResources.length} file(s) into metadata. Knowledge Chat indexing failed: ${humanError(err)}. Use Grounded SOC Knowledge to index manually.`);
+      setNotice(`Imported ${newResources.length} file(s) into metadata. Company-knowledge indexing failed: ${humanError(err)}. Use Evidence to index manually.`);
     }
   };
 

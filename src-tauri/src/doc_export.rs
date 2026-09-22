@@ -144,6 +144,28 @@ fn resolve_doc_export_python() -> Option<PathBuf> {
     resolve_python_executable()
 }
 
+/// Writable site-packages for exporter deps (Store installs cannot write into Program Files Python).
+fn doc_export_packages_dir() -> PathBuf {
+    crate::deployment::preferred_data_root().join("python-packages").join("doc-export")
+}
+
+fn apply_doc_export_pythonpath(cmd: &mut Command) {
+    let pkg = doc_export_packages_dir();
+    if !pkg.is_dir() {
+        return;
+    }
+    let pkg_s = pkg.to_string_lossy().to_string();
+    #[cfg(windows)]
+    const SEP: &str = ";";
+    #[cfg(not(windows))]
+    const SEP: &str = ":";
+    let merged = match std::env::var("PYTHONPATH") {
+        Ok(prev) if !prev.is_empty() => format!("{prev}{SEP}{pkg_s}"),
+        _ => pkg_s,
+    };
+    cmd.env("PYTHONPATH", merged);
+}
+
 fn extract_json_object(text: &str) -> AppResult<Value> {
     let trimmed = text.trim();
     if let Ok(v) = serde_json::from_str::<Value>(trimmed) {
@@ -376,6 +398,7 @@ pub fn run_python_exporter(spec: &Value, format: &DocFormat, output_path: &Path)
 
     let mut cmd = Command::new(&python);
     crate::process_util::no_window_std(&mut cmd);
+    apply_doc_export_pythonpath(&mut cmd);
     cmd.arg(&worker)
         .arg("--format")
         .arg(format.as_str())
@@ -587,11 +610,13 @@ pub async fn generate_and_export_document(
 pub async fn probe_doc_export() -> serde_json::Value {
     let worker = resolve_doc_export_worker();
     let python = resolve_doc_export_python();
+    let packages_dir = doc_export_packages_dir();
     let mut packages = serde_json::Map::new();
     if let Some(py) = &python {
         for pkg in ["docx", "pptx", "reportlab", "fpdf"] {
             let mut probe = Command::new(py);
             crate::process_util::no_window_std(&mut probe);
+            apply_doc_export_pythonpath(&mut probe);
             let ok = probe
                 .args(["-c", &format!("import {pkg}")])
                 .stdout(Stdio::null())
@@ -610,6 +635,7 @@ pub async fn probe_doc_export() -> serde_json::Value {
         "worker_found": worker_found,
         "worker_path": worker_path,
         "python_found": python.is_some(),
+        "packages_dir": packages_dir.to_string_lossy(),
         "packages": packages,
         "ready": worker_found
             && python.is_some()
@@ -628,26 +654,76 @@ pub async fn install_doc_export_support() -> AppResult<serde_json::Value> {
                 .to_string(),
         )
     })?;
+    let target = doc_export_packages_dir();
+    std::fs::create_dir_all(&target).map_err(|e| {
+        AppError::Unknown(format!(
+            "Could not create exporter packages folder {}: {e}",
+            target.display()
+        ))
+    })?;
+
+    // Ensure pip exists (bundled / embeddable Python often lacks it).
+    {
+        let mut ensure = Command::new(&python);
+        crate::process_util::no_window_std(&mut ensure);
+        let _ = ensure
+            .args(["-m", "ensurepip", "--upgrade"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+
     let packages = ["python-docx", "python-pptx", "reportlab"];
     let mut errors: Vec<String> = Vec::new();
     for pkg in packages {
         let mut cmd = Command::new(&python);
         crate::process_util::no_window_std(&mut cmd);
         let output = cmd
-            .args(["-m", "pip", "install", pkg])
+            .args([
+                "-m",
+                "pip",
+                "install",
+                "--upgrade",
+                "--disable-pip-version-check",
+                "--target",
+                target.to_str().unwrap_or("."),
+                pkg,
+            ])
             .output()
             .map_err(|e| AppError::Unknown(format!("Failed to run pip for {pkg}: {e}")))?;
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            errors.push(format!("{pkg}: {}", if stderr.is_empty() { "install failed" } else { stderr.as_str() }));
+            let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            let detail = if !stderr.is_empty() {
+                stderr
+            } else if !stdout.is_empty() {
+                stdout
+            } else {
+                "install failed".to_string()
+            };
+            // Truncate huge pip dumps for the UI.
+            let short = if detail.len() > 400 {
+                format!("{}…", &detail[..400])
+            } else {
+                detail
+            };
+            errors.push(format!("{pkg}: {short}"));
         }
     }
     let probe = probe_doc_export().await;
     if !errors.is_empty() {
         return Err(AppError::Unknown(format!(
-            "Some exporter packages failed: {}. Probe: {}",
+            "Some exporter packages failed (target {}): {}. Ready={}",
+            target.display(),
             errors.join(" | "),
             probe.get("ready").and_then(|v| v.as_bool()).unwrap_or(false)
+        )));
+    }
+    if !probe.get("ready").and_then(|v| v.as_bool()).unwrap_or(false) {
+        return Err(AppError::Unknown(format!(
+            "Packages installed to {} but imports still fail. Check Python {}, then retry Install.",
+            target.display(),
+            python.display()
         )));
     }
     Ok(probe)

@@ -97,6 +97,14 @@ fn is_native_macos_runtime(path: &Path) -> bool {
 pub fn candidate_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
 
+    // User data root (post-Store CUDA/Vulkan downloads land under {data}/bin/llama.cpp/).
+    let data = crate::deployment::preferred_data_root();
+    if data.is_dir() {
+        roots.push(data.clone());
+        roots.push(data.join("bin"));
+        roots.push(data.join("resources"));
+    }
+
     if let Ok(dir) = env::current_dir() {
         let mut cur = Some(dir.as_path());
         while let Some(p) = cur {

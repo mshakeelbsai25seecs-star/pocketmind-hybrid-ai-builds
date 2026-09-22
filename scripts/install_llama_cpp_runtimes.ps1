@@ -46,6 +46,7 @@ param(
   [string]$CudaVersion = "12.4",
   [switch]$SkipCuda,
   [switch]$SkipVulkan,
+  [switch]$SkipCpu,
   [string]$TempRoot = ""
 )
 
@@ -65,9 +66,26 @@ $script:TempRoot = $TempRoot
 
 function Write-Section($text) { Write-Host "`n=== $text ===" -ForegroundColor Cyan }
 
+function Get-GitHubHeaders {
+  $headers = @{
+    "User-Agent" = "PocketMind-Hybrid-AI-Installer"
+    "Accept" = "application/vnd.github+json"
+    "X-GitHub-Api-Version" = "2022-11-28"
+  }
+  $token = $env:GH_TOKEN
+  if (-not $token) { $token = $env:GITHUB_TOKEN }
+  if ($token) {
+    $headers["Authorization"] = "Bearer $token"
+    Write-Host "GitHub API: using authenticated requests (rate-limit safe)"
+  } else {
+    Write-Warning "GitHub API: unauthenticated (may hit rate limits on CI shared IPs). Set GH_TOKEN or GITHUB_TOKEN."
+  }
+  return $headers
+}
+
 function Get-ReleaseAssets {
   param([string]$Tag)
-  $headers = @{ "User-Agent" = "PocketMind Hybrid AI-Installer"; "Accept" = "application/vnd.github+json" }
+  $headers = Get-GitHubHeaders
 
   if ($Tag) {
     $url = "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/$Tag"
@@ -194,14 +212,18 @@ Write-Host ("Release: {0} ({1} assets)" -f $release.tag_name, $assets.Count)
 
 $summary = @()
 
-# CPU (always installed)
-$cpuAsset = Find-Asset -Assets $assets -MustContain @("bin-win-cpu-x64", ".zip")
-if ($cpuAsset) {
-  $ok = Install-Backend -BackendName "cpu" -PrimaryAsset $cpuAsset
-  $summary += [pscustomobject]@{ Backend = "cpu"; Installed = $ok }
+# CPU
+if (-not $SkipCpu) {
+  $cpuAsset = Find-Asset -Assets $assets -MustContain @("bin-win-cpu-x64", ".zip")
+  if ($cpuAsset) {
+    $ok = Install-Backend -BackendName "cpu" -PrimaryAsset $cpuAsset
+    $summary += [pscustomobject]@{ Backend = "cpu"; Installed = $ok }
+  } else {
+    Write-Warning "Could not find a Windows CPU x64 asset in release $($release.tag_name)."
+    $summary += [pscustomobject]@{ Backend = "cpu"; Installed = $false }
+  }
 } else {
-  Write-Warning "Could not find a Windows CPU x64 asset in release $($release.tag_name)."
-  $summary += [pscustomobject]@{ Backend = "cpu"; Installed = $false }
+  Write-Host "Skipping CPU (--SkipCpu)."
 }
 
 # Vulkan (cross-vendor GPU)

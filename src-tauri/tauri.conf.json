@@ -62,7 +62,9 @@
         "icons/icon.icns",
         "icons/icon.ico"
       ],
-      "targets": ["nsis"],
+      "targets": [
+        "nsis"
+      ],
       "windows": {
         "certificateThumbprint": null,
         "digestAlgorithm": "sha256",
@@ -77,12 +79,15 @@
         "signingIdentity": null
       },
       "resources": [
-        "resources/tooling/**",
-        "resources/llama.cpp/**",
+        "resources/tooling/MANIFEST.json",
+        "resources/tooling/ci-keep/keep.txt",
+        "resources/kc_intent_defaults.json",
         "../scripts/unlimited_ocr_worker.py",
         "../scripts/soc_pdf_ocr.py",
         "../scripts/doc_export_worker.py",
-        "../scripts/doc_export"
+        "../scripts/doc_export",
+        "resources/llama.cpp/README.md",
+        "resources/llama.cpp/ci-keep/keep.txt"
       ]
     },
     "security": {

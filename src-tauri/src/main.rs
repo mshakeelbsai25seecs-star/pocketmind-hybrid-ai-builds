@@ -21,6 +21,12 @@ mod code_workspace;
 mod cw_checkpoints;
 mod cw_symbol_index;
 mod cw_terminal;
+mod cw_pty;
+mod cw_git;
+mod cw_diagnostics;
+mod cw_debug;
+mod cw_output;
+mod image_studio;
 mod cw_plans;
 mod cw_ocr;
 mod cw_pdf_pages;
@@ -32,6 +38,7 @@ mod process_util;
 mod power_features;
 mod power_commands;
 mod unlimited_ocr;
+mod llama_runtime_install;
 mod doc_export;
 
 use tauri::{GlobalShortcutManager, Manager, WindowEvent};
@@ -168,6 +175,7 @@ fn main() {
             doc_export::generate_and_export_document,
             doc_export::probe_doc_export,
             doc_export::install_doc_export_support,
+            llama_runtime_install::install_llama_runtime_backend,
             knowledge_chat::kc_build_file_catalog,
             knowledge_chat::kc_load_selected_files,
             knowledge_chat::kc_build_repo_map,
@@ -208,6 +216,24 @@ fn main() {
             power_commands::cw_terminal_kill,
             power_commands::cw_terminal_list,
             power_commands::cw_terminal_kill_all,
+            power_commands::cw_pty_shells,
+            power_commands::cw_pty_spawn,
+            power_commands::cw_pty_write,
+            power_commands::cw_pty_resize,
+            power_commands::cw_pty_kill,
+            power_commands::cw_pty_list,
+            power_commands::cw_git_status,
+            power_commands::cw_git_diff,
+            power_commands::cw_diagnostics_run,
+            power_commands::cw_output_snapshot,
+            power_commands::cw_output_clear,
+            power_commands::cw_debug_start,
+            power_commands::cw_debug_eval,
+            power_commands::cw_debug_stop,
+            power_commands::cw_debug_current,
+            power_commands::image_studio_generate,
+            power_commands::image_studio_save_b64,
+            power_commands::image_studio_save_bytes,
             power_commands::cw_delete_file,
             power_commands::cw_checkpoint_begin,
             power_commands::cw_checkpoint_snapshot_write,

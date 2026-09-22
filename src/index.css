@@ -23,19 +23,21 @@
 
   body {
     @apply text-surface-900 dark:text-surface-100 bg-surface-50;
-    font-family: "Comic Sans MS", "Comic Sans", cursive;
+    font-family: Inter, "Segoe UI", ui-sans-serif, system-ui, -apple-system, sans-serif;
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
     overflow: hidden;
   }
 
-  /* Comic Sans app-wide; brand name uses a clean sans instead */
-  button, input, textarea, select, option, label, p, span, a, li, h1, h2, h3, h4, h5, h6,
-  code, kbd, samp, pre, .font-mono, .font-sans, .font-serif {
-    font-family: "Comic Sans MS", "Comic Sans", cursive;
+  button, input, textarea, select, option, label, p, span, a, li, h1, h2, h3, h4, h5, h6 {
+    font-family: Inter, "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  }
+
+  code, kbd, samp, pre, .font-mono {
+    font-family: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
   }
 
   .app-brand-name {
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif !important;
+    font-family: Inter, "Segoe UI", ui-sans-serif, system-ui, sans-serif !important;
   }
 
   .dark body {
@@ -67,7 +69,7 @@
   }
 
   pre {
-    @apply bg-surface-950 text-surface-50 p-4 rounded-xl overflow-x-auto my-3 max-w-full border border-surface-700;
+    @apply bg-surface-950 text-surface-50 p-4 rounded-sm overflow-x-auto my-3 max-w-full border border-surface-700;
   }
 
   code {
@@ -97,7 +99,7 @@
   }
 
   .panel-shell {
-    @apply rounded-2xl border border-surface-200/90 dark:border-surface-700 bg-white dark:bg-surface-950 shadow-sm;
+    @apply rounded-sm border border-surface-200/90 dark:border-surface-700 bg-white dark:bg-surface-950 shadow-sm;
   }
 
   .glass-panel {
@@ -106,7 +108,7 @@
   }
 
   .premium-card {
-    @apply rounded-2xl border shadow-sm transition-colors duration-200;
+    @apply rounded-sm border shadow-sm transition-colors duration-200;
     @apply bg-white dark:bg-surface-900 border-surface-200 dark:border-surface-700;
   }
 
@@ -139,7 +141,7 @@
   }
 
   .nexus-pill {
-    @apply inline-flex items-center gap-2 rounded-full px-3 py-1 text-xs font-bold tracking-wide;
+    @apply inline-flex items-center gap-2 rounded-sm px-3 py-1 text-xs font-bold tracking-wide;
     background: rgba(74, 222, 128, 0.12);
     color: rgb(74, 222, 128);
     border: 1px solid rgba(74, 222, 128, 0.28);
@@ -153,7 +155,7 @@
 
   /* Android onPrimary = black on green in dark; light uses white on green-dim */
   .btn-primary {
-    @apply px-4 py-2 rounded-xl transition-colors duration-200 font-bold shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply px-4 py-2 rounded-sm transition-colors duration-200 font-bold shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed;
     @apply bg-primary-500 text-surface-950 hover:bg-primary-600;
   }
 
@@ -166,7 +168,7 @@
   }
 
   .btn-secondary {
-    @apply px-4 py-2 rounded-xl transition-colors duration-200 font-semibold active:scale-[0.98] border bg-white dark:bg-surface-900 border-surface-300 dark:border-surface-700 text-surface-900 dark:text-surface-100 hover:bg-surface-50 dark:hover:bg-surface-800;
+    @apply px-4 py-2 rounded-sm transition-colors duration-200 font-semibold active:scale-[0.98] border bg-white dark:bg-surface-900 border-surface-300 dark:border-surface-700 text-surface-900 dark:text-surface-100 hover:bg-surface-50 dark:hover:bg-surface-800;
   }
 
   .dark .btn-secondary {
@@ -178,7 +180,7 @@
   }
 
   .input-field {
-    @apply w-full px-3 py-2 rounded-xl focus:outline-none transition-all duration-200 placeholder:text-surface-400 border;
+    @apply w-full px-3 py-2 rounded-sm focus:outline-none transition-all duration-200 placeholder:text-surface-400 border;
     background: rgba(255, 255, 255, 0.92);
     border-color: rgba(229, 229, 229, 0.95);
   }
@@ -214,7 +216,7 @@
   }
 
   .composer-shell {
-    @apply rounded-3xl border shadow-2xl transition-all;
+    @apply rounded-sm border shadow-2xl transition-all;
     background: linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(245, 245, 245, 0.90));
     border-color: rgba(229, 229, 229, 0.90);
     box-shadow: 0 22px 50px rgba(0, 0, 0, 0.06), 0 10px 26px rgba(74, 222, 128, 0.06);
@@ -331,7 +333,7 @@
     @apply pl-1;
   }
 
-  /* Knowledge Chat: readable prose — separate from flashy assistant chat markdown. */
+  /* Grounded answers: readable prose — separate from flashy assistant chat markdown. */
   .nexus-markdown-knowledge {
     @apply max-w-none text-[0.9375rem] leading-[1.65] font-normal text-surface-700 dark:text-surface-300;
     -webkit-font-smoothing: antialiased;
@@ -550,4 +552,28 @@
 .nexus-md-li {
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+
+/* Sharp edges polish: flatten heavy vibe-coded radii on common UI chrome.
+   Tiny status indicator dots may still use rounded-full. */
+button.rounded-full,
+.btn-primary,
+.btn-secondary,
+.input-field,
+.premium-card,
+.panel-shell,
+.composer-shell,
+.chat-message-surface {
+  border-radius: 2px !important;
+}
+.rounded-3xl,
+.rounded-2xl,
+.rounded-xl,
+.rounded-lg,
+.rounded-md {
+  border-radius: 2px !important;
+}
+aside :is(.rounded-3xl, .rounded-2xl, .rounded-xl, .rounded-lg, .rounded-md, .rounded-sm),
+nav :is(.rounded-3xl, .rounded-2xl, .rounded-xl, .rounded-lg, .rounded-md, .rounded-sm) {
+  border-radius: 2px !important;
 }

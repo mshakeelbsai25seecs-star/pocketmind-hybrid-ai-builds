@@ -24,7 +24,8 @@ param(
   [switch]$SkipVulkan,
   [switch]$StoreSafe,
   [switch]$SkipWebView2,
-  [switch]$SkipBuild
+  [switch]$SkipBuild,
+  [switch]$AllowNonDDrive
 )
 
 if ($StoreSafe) {
@@ -191,8 +192,16 @@ if (Test-Path -LiteralPath (Join-Path $ScriptRepoRoot "package.json")) {
   $ProjectRoot = $ScriptRepoRoot
 }
 
+$onCi = ($env:GITHUB_ACTIONS -eq "true") -or ($env:CI -eq "true")
 if (-not (Test-Path -LiteralPath "D:\")) {
-  throw "Drive D: is not available. This script keeps the heavy toolchain on D:."
+  if (-not ($AllowNonDDrive -or $onCi)) {
+    throw "Drive D: is not available. This script keeps the heavy toolchain on D: (or pass -AllowNonDDrive / run on GitHub Actions)."
+  }
+  if ($DevCacheRoot -like "D:\*") {
+    $fallbackRoot = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { Join-Path $ProjectRoot ".devcache" }
+    $DevCacheRoot = Join-Path $fallbackRoot "DevCache"
+    Write-Host "No D: drive - using DevCacheRoot=$DevCacheRoot" -ForegroundColor Yellow
+  }
 }
 
 if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot "package.json"))) {
@@ -205,7 +214,11 @@ $TargetDir   = Join-Path $DevCacheRoot "Cargo\target\nexus-ai"
 $NpmCache    = Join-Path $DevCacheRoot "npm-cache"
 $TempRoot    = Join-Path $DevCacheRoot "tmp"
 $Downloads   = Join-Path $DevCacheRoot "Downloads"
-$DataRoot    = "D:\PocketMind"
+if (Test-Path -LiteralPath "D:\") {
+  $DataRoot = "D:\PocketMind"
+} else {
+  $DataRoot = Join-Path $DevCacheRoot "PocketMind"
+}
 
 Ensure-Directory $DevCacheRoot
 Ensure-Directory $CargoHome
@@ -415,6 +428,18 @@ $env:Path = "$(Join-Path $CargoHome 'bin');$env:Path"
 
 if (-not (Get-Command link.exe -ErrorAction SilentlyContinue)) {
   throw "link.exe not found on PATH. Install VC++ Build Tools, then re-run this script."
+}
+
+$syncResources = Join-Path $ProjectRoot "scripts\sync-tauri-bundle-resources.mjs"
+if (Test-Path -LiteralPath $syncResources) {
+  Write-Step "Syncing tauri.conf.json bundle.resources before build"
+  Push-Location $ProjectRoot
+  try {
+    & node $syncResources
+    if ($LASTEXITCODE -ne 0) { throw "sync-tauri-bundle-resources.mjs failed ($LASTEXITCODE)" }
+  } finally {
+    Pop-Location
+  }
 }
 
 npm run tauri build

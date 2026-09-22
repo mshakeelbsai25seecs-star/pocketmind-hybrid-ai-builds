@@ -127,6 +127,34 @@ foreach ($backend in @("cpu", "cuda", "vulkan")) {
 }
 Set-Content -Path (Join-Path $resourceRoot "BUNDLE_MANIFEST.txt") -Value $manifest -Encoding UTF8
 
+# Preserve markers required by committed tauri.conf.json resource paths.
+$readmeSrc = Join-Path $PSScriptRoot "..\src-tauri\resources\llama.cpp\README.md"
+# README may have been wiped above; restore a short placeholder if missing.
+$readmeDst = Join-Path $resourceRoot "README.md"
+if (-not (Test-Path -LiteralPath $readmeDst)) {
+  @(
+    "Bundled llama.cpp runtimes for PocketMind Hybrid AI.",
+    "Backends are prepared by scripts/prepare-windows-bundle-runtimes.ps1."
+  ) | Set-Content -LiteralPath $readmeDst -Encoding UTF8
+}
+$ciKeepDir = Join-Path $resourceRoot "ci-keep"
+New-Item -ItemType Directory -Force -Path $ciKeepDir | Out-Null
+Set-Content -LiteralPath (Join-Path $ciKeepDir "keep.txt") -Value "ci keep for tauri resource bundling" -Encoding UTF8
+
+# Rewrite tauri.conf.json resources with explicit backend file paths (Tauri 1
+# /** globs skip gitignored binaries under resources/llama.cpp/).
+$sync = Join-Path $ProjectRoot "scripts\sync-tauri-bundle-resources.mjs"
+if (Test-Path -LiteralPath $sync) {
+  Write-Step "Syncing tauri.conf.json bundle.resources to match prepared runtimes"
+  Push-Location $ProjectRoot
+  try {
+    & node $sync
+    if ($LASTEXITCODE -ne 0) { throw "sync-tauri-bundle-resources.mjs failed ($LASTEXITCODE)" }
+  } finally {
+    Pop-Location
+  }
+}
+
 $sizeMb = [math]::Round(((Get-ChildItem -LiteralPath $resourceRoot -Recurse -File | Measure-Object -Property Length -Sum).Sum) / 1MB, 1)
 Write-Host "`nBundled runtime payload: $sizeMb MB under src-tauri\resources\llama.cpp" -ForegroundColor Green
 Write-Host "Next: npm run tauri build   (NSIS/MSI will embed these runtimes)"

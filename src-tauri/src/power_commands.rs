@@ -14,8 +14,15 @@ use crate::cw_ocr;
 use crate::cw_pdf_pages;
 use crate::cw_plans;
 use crate::cw_symbol_index;
+use crate::cw_debug;
+use crate::cw_diagnostics;
+use crate::cw_git;
+use crate::cw_output;
+use crate::cw_pty;
 use crate::cw_terminal;
+use crate::image_studio;
 use crate::commands::{self, AppState, BackupData};
+use tauri::AppHandle;
 use crate::deployment;
 use crate::error::{AppError, AppResult};
 use crate::power_features::{
@@ -469,6 +476,116 @@ pub async fn cw_terminal_list() -> AppResult<Vec<cw_terminal::TerminalSnapshot>>
 pub async fn cw_terminal_kill_all() -> AppResult<()> {
     cw_terminal::kill_all();
     Ok(())
+}
+
+#[tauri::command]
+pub fn cw_pty_shells() -> Vec<cw_pty::PtyShellInfo> {
+    cw_pty::list_shells()
+}
+
+#[tauri::command]
+pub fn cw_pty_spawn(
+    app: AppHandle,
+    shell: String,
+    cwd: Option<String>,
+    cols: Option<u16>,
+    rows: Option<u16>,
+) -> AppResult<cw_pty::PtySessionInfo> {
+    cw_pty::spawn(
+        app,
+        &shell,
+        cwd.as_deref(),
+        cols.unwrap_or(120),
+        rows.unwrap_or(32),
+    )
+}
+
+#[tauri::command]
+pub fn cw_pty_write(id: String, data: String) -> AppResult<()> {
+    cw_pty::write(id.trim(), &data)
+}
+
+#[tauri::command]
+pub fn cw_pty_resize(id: String, cols: u16, rows: u16) -> AppResult<()> {
+    cw_pty::resize(id.trim(), cols, rows)
+}
+
+#[tauri::command]
+pub fn cw_pty_kill(id: String) -> AppResult<cw_pty::PtySessionInfo> {
+    cw_pty::kill(id.trim())
+}
+
+#[tauri::command]
+pub fn cw_pty_list() -> Vec<cw_pty::PtySessionInfo> {
+    cw_pty::list()
+}
+
+#[tauri::command]
+pub fn cw_git_status(workspace_root: String) -> AppResult<cw_git::GitStatusReport> {
+    cw_git::status(Path::new(workspace_root.trim()))
+}
+
+#[tauri::command]
+pub fn cw_git_diff(workspace_root: String, path: String) -> AppResult<cw_git::GitDiffResult> {
+    cw_git::diff_file(Path::new(workspace_root.trim()), path.trim())
+}
+
+#[tauri::command]
+pub fn cw_diagnostics_run(workspace_root: String) -> AppResult<cw_diagnostics::DiagnosticsReport> {
+    cw_diagnostics::run(Path::new(workspace_root.trim()))
+}
+
+#[tauri::command]
+pub fn cw_output_snapshot(channel: Option<String>) -> Vec<cw_output::OutputLine> {
+    cw_output::snapshot(channel.as_deref())
+}
+
+#[tauri::command]
+pub fn cw_output_clear(channel: Option<String>) -> AppResult<()> {
+    cw_output::clear(channel.as_deref());
+    Ok(())
+}
+
+#[tauri::command]
+pub fn cw_debug_start(
+    app: AppHandle,
+    workspace_root: String,
+    runtime: Option<String>,
+) -> AppResult<cw_debug::DebugSessionInfo> {
+    cw_debug::start(app, workspace_root.trim(), runtime.as_deref().unwrap_or("auto"))
+}
+
+#[tauri::command]
+pub fn cw_debug_eval(expr: String) -> AppResult<()> {
+    cw_debug::eval_expr(&expr)
+}
+
+#[tauri::command]
+pub fn cw_debug_stop() -> AppResult<()> {
+    cw_debug::stop()
+}
+
+#[tauri::command]
+pub fn cw_debug_current() -> Option<cw_debug::DebugSessionInfo> {
+    cw_debug::current()
+}
+
+#[tauri::command]
+pub async fn image_studio_generate(
+    state: State<'_, AppState>,
+    request: image_studio::ImageGenRequest,
+) -> AppResult<image_studio::ImageGenResult> {
+    image_studio::generate(state, request).await
+}
+
+#[tauri::command]
+pub fn image_studio_save_b64(path: String, b64: String) -> AppResult<()> {
+    image_studio::save_b64(path, b64)
+}
+
+#[tauri::command]
+pub fn image_studio_save_bytes(path: String, bytes: Vec<u8>) -> AppResult<()> {
+    image_studio::save_bytes(path, bytes)
 }
 
 #[tauri::command]

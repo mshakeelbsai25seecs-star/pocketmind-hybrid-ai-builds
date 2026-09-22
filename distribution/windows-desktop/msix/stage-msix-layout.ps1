@@ -35,12 +35,15 @@ if (-not (Test-Path -LiteralPath $manifestSrc)) {
 }
 
 if (-not $ReleaseDir) {
+  # Wrap in @() so a single match stays an array. Otherwise PowerShell unwraps
+  # to a string and $candidates[0] is the first character ("D").
   $candidates = @(
     $(if ($env:CARGO_TARGET_DIR) { Join-Path $env:CARGO_TARGET_DIR "release" } else { $null }),
     "D:\DevCache\Cargo\target\nexus-ai\release",
     (Join-Path $ProjectRoot "src-tauri\target\release")
   ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
-  if (-not $candidates) {
+  $candidates = @($candidates)
+  if ($candidates.Count -eq 0) {
     throw "No release dir. Build with scripts\BUILD-STORE-INSTALLER.ps1 first."
   }
   $ReleaseDir = $candidates[0]
@@ -93,9 +96,17 @@ if (Test-Path -LiteralPath $releaseResources) {
 }
 
 # Prefer sharp prebuilt Store tile assets (fixes 10.1.1.11 blurry tiles).
+# Use Get-ChildItem — Copy-Item -LiteralPath with "*" does not expand wildcards
+# (Windows PowerShell 5.1), so the layout Assets folder stayed empty.
 if (Test-Path -LiteralPath $prebuiltAssets) {
-  Copy-Item -LiteralPath (Join-Path $prebuiltAssets "*") -Destination (Join-Path $layout "Assets") -Force
-  Write-Host "Copied prebuilt tile Assets from $prebuiltAssets" -ForegroundColor Cyan
+  $assetFiles = @(Get-ChildItem -LiteralPath $prebuiltAssets -File -ErrorAction Stop)
+  if ($assetFiles.Count -eq 0) {
+    throw "Prebuilt Assets folder is empty: $prebuiltAssets"
+  }
+  foreach ($f in $assetFiles) {
+    Copy-Item -LiteralPath $f.FullName -Destination (Join-Path $layout "Assets\$($f.Name)") -Force
+  }
+  Write-Host "Copied $($assetFiles.Count) prebuilt tile Assets from $prebuiltAssets" -ForegroundColor Cyan
 } else {
   Write-Warning "Missing $prebuiltAssets - falling back to src-tauri/icons"
   $required = @(
@@ -151,6 +162,6 @@ foreach ($banned in @("cuda", "vulkan")) {
 Write-Host "Done. Next:" -ForegroundColor Green
 Write-Host "  powershell -ExecutionPolicy Bypass -File .\distribution\windows-desktop\msix\PACK-MSIX.ps1"
 Write-Host "Then upload the .msix from distribution\windows-desktop\msix\out\"
-Write-Host "Version in manifest must be higher than previous Store submission (now 1.0.2.0)."
+Write-Host "Version in manifest must be higher than previous Store submission (now 1.0.3.0)."
 Write-Host "See: distribution\windows-desktop\msix\README.md"
 Write-Host "Certification checklist: distribution\windows-desktop\STORE_RESUBMIT_CERT_FIXES.md"

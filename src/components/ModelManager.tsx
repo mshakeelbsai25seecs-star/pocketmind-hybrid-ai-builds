@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/api/dialog';
-import { Download, FolderSearch, HardDrive, Link as LinkIcon, RefreshCcw, Search, Trash2, CheckCircle, AlertTriangle, FlaskConical, Globe2, KeyRound, Crown, Zap, Tags, Power, Square } from 'lucide-react';
+import { Cloud, Download, FolderSearch, HardDrive, Link as LinkIcon, RefreshCcw, Search, Trash2, CheckCircle, AlertTriangle, FlaskConical, Globe2, KeyRound, Crown, Zap, Tags, Power, Square, Upload } from 'lucide-react';
 import { useAppStore } from '../store';
 import { LocalModelRecord, OnlineChatModel, ModelCategoryId, Conversation } from '../types';
 import { MODEL_CATEGORIES, OFFLINE_CHAT_CATALOG, ONLINE_CHAT_MODELS } from '../modelCatalog';
@@ -96,6 +96,8 @@ export default function ModelManager() {
   const [apiKeyInputs, setApiKeyInputs] = useState<Record<string, string>>({});
   const [keyValidating, setKeyValidating] = useState<Record<string, boolean>>({});
   const [keyValidation, setKeyValidation] = useState<Record<string, ApiKeyValidation | null>>({});
+  const [configureId, setConfigureId] = useState<string | null>(null);
+  const [dropActive, setDropActive] = useState(false);
   const {
     localModels,
     setLocalModels,
@@ -104,6 +106,7 @@ export default function ModelManager() {
     modelsDir,
     setModelsDir,
     defaultParams,
+    setDefaultParams,
     activeCharacterId,
     setActiveConversation,
     setMessages,
@@ -180,8 +183,21 @@ export default function ModelManager() {
       setProgress(event.payload);
       setStatus(event.payload.message || event.payload.status);
     });
+    const unlistenDrop = listen<string[]>('tauri://file-drop', event => {
+      const path = (event.payload || []).find(p => p.toLowerCase().endsWith('.gguf'));
+      if (path) {
+        void invoke<LocalModelRecord>('import_local_model', { path })
+          .then(async model => {
+            await refreshModels();
+            setCurrentModel(model.path);
+            setStatus(`Imported ${model.name}.`);
+          })
+          .catch(err => setError(String(err)));
+      }
+    });
     return () => {
       unlisten.then(fn => fn()).catch(() => undefined);
+      unlistenDrop.then(fn => fn()).catch(() => undefined);
     };
   }, []);
 
@@ -233,15 +249,15 @@ export default function ModelManager() {
     state.removeConversationLocal(activeId);
   };
 
-  /** Set the shared answer model for Chat and Knowledge Chat without leaving Models. */
+  /** Set the shared answer model for Chat, PocketCode, and Fortinet Copilot. */
   const activateAnswerModel = (modelPath: string, modelName: string) => {
     const previousModel = useAppStore.getState().currentModel;
     setCurrentModel(modelPath);
     if (previousModel === modelPath) {
-      announce(`${modelName} is already the active model for Chat and Knowledge Chat.`);
+      announce(`${modelName} is already the active model.`);
       return;
     }
-    announce(`${modelName} is now the active model for Chat and Knowledge Chat.`);
+    announce(`${modelName} is now the active model.`);
   };
 
   const startFreshChatForModel = async (modelPath: string, modelName: string) => {
@@ -308,18 +324,27 @@ export default function ModelManager() {
     }
   };
 
-  const importModel = async () => {
+  const importFromPath = async (path: string, startChat = false) => {
+    if (!path.toLowerCase().endsWith('.gguf')) {
+      announce('Import a .gguf file.', true);
+      return;
+    }
     setError('');
     try {
-      const selected = await open({ multiple: false, filters: [{ name: 'GGUF model', extensions: ['gguf'] }] });
-      if (typeof selected !== 'string') return;
-      const model = await invoke<LocalModelRecord>('import_local_model', { path: selected });
+      const model = await invoke<LocalModelRecord>('import_local_model', { path });
       await refreshModels();
-      await startFreshChatForModel(model.path, model.name);
-      announce(`Imported ${model.name}. A fresh chat has been created for this model.`);
+      if (startChat) await startFreshChatForModel(model.path, model.name);
+      else activateAnswerModel(model.path, model.name);
+      announce(`Imported ${model.name}.`);
     } catch (err) {
       announce(String(err), true);
     }
+  };
+
+  const importModel = async () => {
+    const selected = await open({ multiple: false, filters: [{ name: 'GGUF model', extensions: ['gguf'] }] });
+    if (typeof selected !== 'string') return;
+    await importFromPath(selected, true);
   };
 
   /** Copy a projector next to the GGUF so offline vision / VL pairing works. */
@@ -460,8 +485,8 @@ export default function ModelManager() {
     setUnloadBusy(true);
     setError('');
     try {
-      // Keep Knowledge Chat embed/rerank warm — releasing them forces a multi-minute
-      // cold start on the next question with no quality benefit.
+      // Keep SOC retrieval embed/rerank warm — releasing them forces a multi-minute
+      // cold start on the next grounded question with no quality benefit.
       const result = await invoke<{ chat_unloaded: boolean; knowledge_engines_released: boolean; message: string }>(
         'unload_chat_model',
         { releaseKnowledgeEngines: false },
@@ -591,7 +616,7 @@ export default function ModelManager() {
         <div className="flex items-center justify-between gap-4">
           <div>
             <h1 className="text-2xl font-bold mb-1">Model Manager</h1>
-            <p className="text-surface-500">Manage local GGUF models and online providers. The active answer model is shared by Chat and Knowledge Chat so you can compare offline vs large online models on the same pipeline.</p>
+            <p className="text-surface-500">Choose where PocketMind gets its intelligence. Local models run on your device. Cloud and organization servers are optional.</p>
           </div>
           <button onClick={refreshModels} className="btn-secondary flex items-center gap-2">
             <RefreshCcw className="w-4 h-4" /> Refresh
@@ -624,18 +649,66 @@ export default function ModelManager() {
             <div>
               <p className="text-sm uppercase tracking-wider text-surface-500 font-semibold">Active answer model</p>
               <p className="font-semibold text-lg break-all">{answerModelLabel(currentModel, localModels)}</p>
-              <p className="text-sm text-surface-500 mt-1">{currentModel ? currentModel : 'Choose a local GGUF or an online model below. The same selection drives Chat and Knowledge Chat.'}</p>
+              <p className="text-sm text-surface-500 mt-1">{currentModel ? currentModel : 'Choose a local GGUF or an online model below. The same selection drives Chat, PocketCode, and Fortinet Copilot.'}</p>
             </div>
             <div className="flex flex-wrap gap-2">
-              <button onClick={unloadCurrentModel} disabled={unloadBusy} className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2" title="Free RAM/VRAM by unloading the local chat model and Knowledge Chat search engines">
+              <button onClick={unloadCurrentModel} disabled={unloadBusy} className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2" title="Free RAM/VRAM by unloading the local chat model">
                 <Power className="w-4 h-4" /> {unloadBusy ? 'Unloading...' : 'Unload from memory'}
               </button>
               <button onClick={testCurrentModel} disabled={!currentModel || healthBusy} className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"><FlaskConical className="w-4 h-4" /> {healthBusy ? 'Checking...' : 'Run Health Check'}</button>
-              <button onClick={() => useAppStore.getState().setActiveView('knowledge-chat')} disabled={!currentModel} className="btn-secondary disabled:opacity-50 disabled:cursor-not-allowed">Open Knowledge Chat</button>
               <button onClick={() => useAppStore.getState().setActiveView('chat')} disabled={!currentModel} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">Open Chat</button>
             </div>
           </div>
         </div>
+
+        <StoreModelHero
+          localActive={!!currentModel && !currentModel.startsWith('remote:') && !currentModel.startsWith('enterprise:')}
+          contextSize={defaultParams.context_size}
+          gpuLayers={defaultParams.gpu_layers}
+          threads={defaultParams.threads}
+          onContext={n => setDefaultParams({ context_size: n })}
+          onGpu={n => setDefaultParams({ gpu_layers: n })}
+          onThreads={n => setDefaultParams({ threads: n })}
+          dropActive={dropActive}
+          setDropActive={setDropActive}
+          onBrowse={() => void importModel()}
+          onDropPath={path => void importFromPath(path)}
+          configuredProviders={configuredProviders}
+          configureId={configureId}
+          setConfigureId={setConfigureId}
+          onConfigureOrg={() => setActiveView('enterprise-server')}
+          onConfigureProvider={id => {
+            setConfigureId(id);
+            setActiveTab(id === 'groq' ? 'online-free' : 'online-premium');
+          }}
+        />
+        {configureId && (
+          <div className="glass-panel rounded-xl p-4 border border-primary-500/30 space-y-3">
+            <p className="font-semibold text-sm">Configure {CHAT_API_PROVIDERS.find(p => p.id === configureId)?.name || configureId}</p>
+            <p className="text-xs text-surface-500">Keys stay encrypted on this device. Get a key from the provider site, then save it here.</p>
+            <div className="flex flex-wrap gap-2">
+              <input
+                type="password"
+                className="input-field flex-1 min-w-[16rem]"
+                placeholder={`${configureId} API key`}
+                value={apiKeyInputs[configureId] || ''}
+                onChange={e => setApiKeyInputs(prev => ({ ...prev, [configureId]: e.target.value }))}
+              />
+              <button type="button" className="btn-primary text-sm" onClick={() => void saveProviderKey(configureId)}>Save key</button>
+              <button type="button" className="btn-secondary text-sm" onClick={() => void testProviderKey(configureId)}>Test</button>
+              <a
+                className="btn-secondary text-sm"
+                href={CHAT_API_PROVIDERS.find(p => p.id === configureId)?.url || '#'}
+                onClick={onOpenExternal(CHAT_API_PROVIDERS.find(p => p.id === configureId)?.url || '')}
+              >
+                Get key
+              </a>
+            </div>
+            {keyValidation[configureId] && (
+              <p className={`text-xs ${keyValidation[configureId]?.ok ? 'text-primary-400' : 'text-red-400'}`}>{keyValidation[configureId]?.message}</p>
+            )}
+          </div>
+        )}
 
         {healthResult && (
           <div className="glass-panel rounded-xl p-4 border border-surface-200 dark:border-surface-800 text-sm">
@@ -1039,6 +1112,143 @@ function InfoTile({ label, value }: { label: string; value: string }) {
     <div className="rounded-lg bg-surface-100 dark:bg-surface-900 p-3">
       <p className="text-xs text-surface-500 mb-1">{label}</p>
       <p className="font-semibold truncate" title={value}>{value}</p>
+    </div>
+  );
+}
+
+const STORE_CLOUD = [
+  { id: 'openai', name: 'OpenAI', desc: 'Connect to OpenAI compatible models.' },
+  { id: 'anthropic', name: 'Anthropic', desc: 'Connect to Anthropic compatible models.' },
+  { id: 'gemini', name: 'Gemini', desc: 'Connect to Gemini models.' },
+  { id: 'groq', name: 'Groq', desc: 'Connect to Groq cloud models.' },
+] as const;
+
+function StoreModelHero({
+  localActive,
+  contextSize,
+  gpuLayers,
+  threads,
+  onContext,
+  onGpu,
+  onThreads,
+  dropActive,
+  setDropActive,
+  onBrowse,
+  onDropPath,
+  configuredProviders,
+  configureId,
+  setConfigureId,
+  onConfigureOrg,
+  onConfigureProvider,
+}: {
+  localActive: boolean;
+  contextSize: number;
+  gpuLayers: number;
+  threads: number;
+  onContext: (n: number) => void;
+  onGpu: (n: number) => void;
+  onThreads: (n: number) => void;
+  dropActive: boolean;
+  setDropActive: (v: boolean) => void;
+  onBrowse: () => void;
+  onDropPath: (path: string) => void;
+  configuredProviders: string[];
+  configureId: string | null;
+  setConfigureId: (id: string | null) => void;
+  onConfigureOrg: () => void;
+  onConfigureProvider: (id: string) => void;
+}) {
+  const acceptDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDropActive(false);
+    const file = e.dataTransfer.files?.[0];
+    const listed = (e.dataTransfer.getData('text/plain') || '').trim();
+    const name = file?.name || listed;
+    const path = (file as File & { path?: string })?.path || listed;
+    if (path && path.toLowerCase().endsWith('.gguf')) {
+      onDropPath(path);
+      return;
+    }
+    if (name && name.toLowerCase().endsWith('.gguf')) {
+      onBrowse();
+    }
+  };
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-surface-500">Local</p>
+        <div className="mt-2 grid lg:grid-cols-[1.1fr_0.9fr_1fr] gap-3">
+          <div className={`rounded-2xl border p-4 ${localActive ? 'border-primary-500/70' : 'border-surface-200 dark:border-surface-800'}`}>
+            <div className="flex items-start gap-3">
+              <HardDrive className="w-5 h-5 text-primary-400 mt-0.5" />
+              <div>
+                <p className="font-semibold">Local GGUF {localActive ? '(Selected)' : ''}</p>
+                <p className="text-xs text-surface-500 mt-1">Run models locally for maximum privacy and control.</p>
+                <p className={`text-xs font-semibold mt-3 ${localActive ? 'text-primary-400' : 'text-surface-500'}`}>{localActive ? 'Active' : 'Import or select a GGUF below'}</p>
+              </div>
+            </div>
+          </div>
+          <div className="rounded-2xl border border-surface-200 dark:border-surface-800 p-4 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 items-center text-sm">
+            <span className="text-surface-500">Context length</span>
+            <select className="input-field text-sm py-1.5" value={contextSize} onChange={e => onContext(Number(e.target.value))}>
+              {[2048, 4096, 8192, 16384, 32768].map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <span className="text-surface-500">GPU layers</span>
+            <select className="input-field text-sm py-1.5" value={gpuLayers} onChange={e => onGpu(Number(e.target.value))}>
+              <option value={-1}>Auto (32)</option>
+              <option value={0}>CPU (0)</option>
+              <option value={16}>16</option>
+              <option value={32}>32</option>
+              <option value={64}>64</option>
+              <option value={99}>99</option>
+            </select>
+            <span className="text-surface-500">Threads</span>
+            <select className="input-field text-sm py-1.5" value={threads} onChange={e => onThreads(Number(e.target.value))}>
+              <option value={0}>Auto</option>
+              {[2, 4, 8, 12, 16].map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </div>
+          <div
+            className={`rounded-2xl border border-dashed p-4 text-center ${dropActive ? 'border-primary-400 bg-primary-500/5' : 'border-surface-300 dark:border-surface-700'}`}
+            onDragOver={e => { e.preventDefault(); setDropActive(true); }}
+            onDragLeave={() => setDropActive(false)}
+            onDrop={acceptDrop}
+          >
+            <p className="font-semibold text-sm">Model import</p>
+            <p className="text-xs text-surface-500 mt-1">Import a GGUF model file to use locally.</p>
+            <Upload className="w-6 h-6 mx-auto mt-4 text-surface-400" />
+            <p className="text-xs text-surface-500 mt-2">Drag and drop a .gguf file here or browse</p>
+            <button type="button" className="btn-secondary text-xs mt-3" onClick={onBrowse}>Browse</button>
+          </div>
+        </div>
+      </div>
+      <div>
+        <p className="text-[11px] font-bold uppercase tracking-[0.18em] text-surface-500">Optional cloud</p>
+        <div className="mt-2 grid sm:grid-cols-2 xl:grid-cols-5 gap-3">
+          {STORE_CLOUD.map(p => (
+            <div key={p.id} className="rounded-2xl border border-surface-200 dark:border-surface-800 p-4 space-y-3">
+              <Cloud className="w-5 h-5 text-primary-400" />
+              <p className="font-semibold">{p.name}</p>
+              <p className="text-xs text-surface-500 min-h-[2.5rem]">{p.desc}</p>
+              <p className="text-[10px] text-surface-500">{configuredProviders.includes(p.id) ? 'Key saved' : 'Key needed'}</p>
+              <button type="button" className="btn-secondary text-xs w-full" onClick={() => onConfigureProvider(p.id)}>Configure</button>
+            </div>
+          ))}
+          <div className="rounded-2xl border border-surface-200 dark:border-surface-800 p-4 space-y-3">
+            <Cloud className="w-5 h-5 text-primary-400" />
+            <p className="font-semibold">Organization Server</p>
+            <p className="text-xs text-surface-500 min-h-[2.5rem]">Connect to your organization server.</p>
+            <button type="button" className="btn-secondary text-xs w-full" onClick={onConfigureOrg}>Configure</button>
+          </div>
+        </div>
+        {configureId && (
+          <p className="text-xs text-primary-300 mt-2">
+            Scroll to Online providers below and paste your {configureId} key, or use Control Center → API Key Vault.
+          </p>
+        )}
+      </div>
     </div>
   );
 }
