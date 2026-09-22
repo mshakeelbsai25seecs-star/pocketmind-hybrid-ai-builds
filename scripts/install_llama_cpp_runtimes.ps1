@@ -341,6 +341,26 @@ function Install-Backend {
   $dest = Join-Path $Target $BackendName
   New-Item -ItemType Directory -Force -Path $dest | Out-Null
 
+  # Stop any running llama-server that may lock DLLs in this backend folder
+  # (common when reinstalling CUDA while chat/embeddings still hold ggml-*.dll).
+  foreach ($procName in @("llama-server", "llama-server-cpu", "llama-server-cuda", "llama-server-vulkan", "llama-server-metal")) {
+    Get-Process -Name $procName -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+  }
+  Start-Sleep -Milliseconds 800
+  Get-ChildItem -LiteralPath $dest -File -ErrorAction SilentlyContinue |
+    Where-Object { $_.Extension -in ".dll", ".exe" } |
+    ForEach-Object {
+      try { $_.Attributes = "Normal" } catch {}
+      $bak = $_.FullName + ".oldpm"
+      try {
+        if (Test-Path -LiteralPath $bak) { Remove-Item -LiteralPath $bak -Force -ErrorAction SilentlyContinue }
+        Move-Item -LiteralPath $_.FullName -Destination $bak -Force -ErrorAction Stop
+        Remove-Item -LiteralPath $bak -Force -ErrorAction SilentlyContinue
+      } catch {
+        try { Remove-Item -LiteralPath $_.FullName -Force -ErrorAction Stop } catch {}
+      }
+    }
+
   $tmp = Join-Path $script:TempRoot ("nexus_llama_" + $BackendName + "_" + [System.Guid]::NewGuid().ToString("N"))
   New-Item -ItemType Directory -Force -Path $tmp | Out-Null
   try {
@@ -370,7 +390,28 @@ function Install-Backend {
         Write-Warning "No .exe/.dll found in $zip"
       }
       foreach ($file in $files) {
-        Copy-Item -Path $file.FullName -Destination (Join-Path $dest $file.Name) -Force
+        $targetFile = Join-Path $dest $file.Name
+        $copied = $false
+        for ($attempt = 1; $attempt -le 4 -and -not $copied; $attempt++) {
+          try {
+            Copy-Item -Path $file.FullName -Destination $targetFile -Force -ErrorAction Stop
+            $copied = $true
+          } catch {
+            if ($attempt -ge 4) { throw }
+            Get-Process -ErrorAction SilentlyContinue |
+              Where-Object { $_.ProcessName -like 'llama-server*' } |
+              Stop-Process -Force -ErrorAction SilentlyContinue
+            Start-Sleep -Milliseconds (400 * $attempt)
+            try {
+              if (Test-Path -LiteralPath $targetFile) {
+                $bak = $targetFile + ".oldpm"
+                if (Test-Path -LiteralPath $bak) { Remove-Item -LiteralPath $bak -Force -ErrorAction SilentlyContinue }
+                Move-Item -LiteralPath $targetFile -Destination $bak -Force -ErrorAction SilentlyContinue
+                Remove-Item -LiteralPath $bak -Force -ErrorAction SilentlyContinue
+              }
+            } catch {}
+          }
+        }
       }
     }
 

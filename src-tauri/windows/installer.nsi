@@ -499,20 +499,40 @@ SectionEnd
   ; Tauri only stops the main GUI exe, so an upgrade/reinstall fails with
   ; "Error opening file for writing: ...\ggml-base.dll" when those sidecars
   ; are still running. Force-stop them (and the main app tree) before File copy.
+  ;
+  ; IMPORTANT: ${MAINBINARYNAME} contains spaces ("PocketMind Hybrid AI").
+  ; /IM must be quoted or taskkill only sees the first token and never kills the GUI.
   DetailPrint "Stopping PocketMind / llama.cpp processes that may lock runtime DLLs..."
-  nsExec::ExecToLog 'taskkill /F /T /IM llama-server.exe'
+  nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /T /IM "llama-server.exe"'
   Pop $0
-  nsExec::ExecToLog 'taskkill /F /T /IM llama-server-cpu.exe'
+  nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /T /IM "llama-server-cpu.exe"'
   Pop $0
-  nsExec::ExecToLog 'taskkill /F /T /IM llama-server-cuda.exe'
+  nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /T /IM "llama-server-cuda.exe"'
   Pop $0
-  nsExec::ExecToLog 'taskkill /F /T /IM llama-server-vulkan.exe'
+  nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /T /IM "llama-server-vulkan.exe"'
+  Pop $0
+  nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /T /IM "llama-server-metal.exe"'
   Pop $0
   ; Tree-kill the GUI so any child llama-server spawned under it dies too.
   nsExec::ExecToLog '"$SYSDIR\taskkill.exe" /F /T /IM "${MAINBINARYNAME}.exe"'
   Pop $0
   ; Brief pause so Windows releases DLL handles before overwrite.
-  Sleep 1500
+  Sleep 2000
+!macroend
+
+; Move/delete previous llama.cpp PE files under $INSTDIR so NSIS File can write
+; even if a stale handle or AV briefly held ggml-*.dll after taskkill.
+!macro UnlockLlamaCppResources
+  DetailPrint "Unlocking previous llama.cpp runtime files under $INSTDIR\resources\llama.cpp..."
+  !insertmacro KillPocketMindRuntimes
+  ; Rename/delete prior PE files so NSIS File can overwrite ggml-*.dll.
+  ; Two separate for /r loops keep quoting simple for nsExec.
+  nsExec::ExecToLog '"$SYSDIR\cmd.exe" /C if exist "$INSTDIR\resources\llama.cpp" for /r "$INSTDIR\resources\llama.cpp" %F in (*.dll) do @(attrib -R -S -H "%F" & move /Y "%F" "%F.oldpm" & del /F /Q "%F.oldpm" & del /F /Q "%F")'
+  Pop $0
+  nsExec::ExecToLog '"$SYSDIR\cmd.exe" /C if exist "$INSTDIR\resources\llama.cpp" for /r "$INSTDIR\resources\llama.cpp" %F in (*.exe) do @(attrib -R -S -H "%F" & move /Y "%F" "%F.oldpm" & del /F /Q "%F.oldpm" & del /F /Q "%F")'
+  Pop $0
+  Sleep 1000
+  !insertmacro KillPocketMindRuntimes
 !macroend
 
 !macro CheckIfAppIsRunning
@@ -561,6 +581,8 @@ Section Install
   SetOutPath $INSTDIR
 
   !insertmacro CheckIfAppIsRunning
+  ; Rename/delete prior llama.cpp PE files so File cannot hit "Error opening file for writing".
+  !insertmacro UnlockLlamaCppResources
 
   ; Copy main executable
   File "${MAINBINARYSRCPATH}"
