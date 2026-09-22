@@ -80,10 +80,13 @@ function ToolResultCard({ tool, result }: { tool?: string; result: string }) {
 export default function AgentTranscript({
   steps,
   answer,
+  forceCollapsed = false,
 }: {
   steps: AgentStep[];
   /** Preferred final reply (message body). Used when longer than the done step text. */
   answer?: string | null;
+  /** When true (e.g. file-write approval), keep the tool dump collapsed. */
+  forceCollapsed?: boolean;
 }) {
   const [toolsOpen, setToolsOpen] = useState(false);
 
@@ -97,10 +100,11 @@ export default function AgentTranscript({
     .test(answerText || doneStep?.content || '');
   const finished = Boolean(doneStep) || (Boolean(answerText) && !looksFailed);
 
-  // Cursor behavior: once the answer lands, collapse the tool dump so it cannot bury the reply.
+  // Keep tool traces collapsed by default; collapse again when the answer lands
+  // or when the parent asks (approval gate).
   useEffect(() => {
-    if (finished) setToolsOpen(false);
-  }, [finished, answerText]);
+    if (finished || forceCollapsed) setToolsOpen(false);
+  }, [finished, answerText, forceCollapsed, toolsAndErrors.length]);
 
   if (steps.length === 0 && !(answer || '').trim()) return null;
 
@@ -114,9 +118,14 @@ export default function AgentTranscript({
   const liveLabel = lastTool
     ? toolStatusLabel(lastTool.tool)
     : (toolsAndErrors[toolsAndErrors.length - 1]?.kind === 'error' ? 'Hit an issue' : 'Working…');
-  const toolsLabel = finished
-    ? `Used ${toolsAndErrors.length} tool${toolsAndErrors.length === 1 ? '' : 's'}`
-    : liveLabel;
+  const count = toolsAndErrors.length;
+  const toolsLabel = toolsOpen
+    ? `Hide tool activity (${count})`
+    : finished
+      ? `Show tool activity (${count})`
+      : `${liveLabel} · ${count} step${count === 1 ? '' : 's'} (expand)`;
+
+  const expanded = toolsOpen && !forceCollapsed;
 
   return (
     <div className="space-y-2.5">
@@ -125,15 +134,16 @@ export default function AgentTranscript({
           <button
             type="button"
             onClick={() => setToolsOpen(v => !v)}
-            className="group/tools inline-flex items-center gap-1 bg-transparent border-0 p-0 m-0 cursor-pointer text-[12.5px] leading-snug text-surface-500 dark:text-surface-400 hover:text-surface-700 dark:hover:text-surface-200"
+            aria-expanded={expanded}
+            className="w-full flex items-center gap-1.5 rounded-sm border border-surface-200/80 dark:border-surface-700/80 bg-surface-50/80 dark:bg-surface-900/60 px-2 py-1.5 text-left text-[12px] leading-snug text-surface-600 dark:text-surface-300 hover:bg-surface-100 dark:hover:bg-surface-800"
           >
-            <span>{toolsLabel}</span>
-            <ChevronDown
-              className={`w-3.5 h-3.5 opacity-60 transition-transform ${toolsOpen ? '' : '-rotate-90'}`}
-            />
+            {expanded
+              ? <ChevronDown className="w-3.5 h-3.5 shrink-0 opacity-70" />
+              : <ChevronRight className="w-3.5 h-3.5 shrink-0 opacity-70" />}
+            <span className="min-w-0 truncate font-medium">{toolsLabel}</span>
           </button>
-          {toolsOpen && (
-            <div className="mt-2 space-y-2 border-l border-surface-200 dark:border-surface-800 pl-2.5">
+          {expanded && (
+            <div className="mt-2 max-h-56 overflow-y-auto space-y-2 border-l border-surface-200 dark:border-surface-800 pl-2.5 pr-1">
               {toolsAndErrors.map((step, idx) => {
                 const key = `${step.step}-${idx}`;
                 if (step.kind === 'tool') {

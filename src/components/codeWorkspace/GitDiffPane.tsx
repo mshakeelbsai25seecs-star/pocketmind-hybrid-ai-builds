@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import type { GitDiffResult } from '../../codeWorkspace/ideApi';
 
 function parseUnified(unified: string): Array<{ type: 'hunk' | 'meta' | 'add' | 'del' | 'ctx'; text: string; ln?: number }> {
@@ -29,6 +29,14 @@ function parseUnified(unified: string): Array<{ type: 'hunk' | 'meta' | 'add' | 
   return rows;
 }
 
+function DiffScrollShell({ children }: { children: ReactNode }) {
+  return (
+    <div className="h-full min-h-0 overflow-auto font-mono text-[12px] leading-[1.55] bg-[#0d1117]">
+      {children}
+    </div>
+  );
+}
+
 export default function GitDiffPane({
   diff,
   loading,
@@ -39,36 +47,54 @@ export default function GitDiffPane({
   const rows = useMemo(() => (diff?.unified ? parseUnified(diff.unified) : []), [diff?.unified]);
 
   if (loading) {
-    return <p className="p-4 text-xs text-surface-400">Loading git diff…</p>;
+    return (
+      <DiffScrollShell>
+        <p className="p-4 text-xs text-surface-400">Loading git diff…</p>
+      </DiffScrollShell>
+    );
   }
   if (!diff) {
-    return <p className="p-4 text-xs text-surface-400">Select a file to see its git diff against HEAD.</p>;
+    return (
+      <DiffScrollShell>
+        <p className="p-4 text-xs text-surface-400">Select a file to see its git diff against HEAD.</p>
+      </DiffScrollShell>
+    );
   }
   if (diff.error) {
     return (
-      <div className="p-4 text-sm text-amber-200 space-y-1">
-        <p>{diff.error}</p>
-        {diff.modified ? (
-          <pre className="mt-3 text-[12px] text-surface-300 whitespace-pre-wrap font-mono">{diff.modified.slice(0, 8000)}</pre>
-        ) : null}
-      </div>
+      <DiffScrollShell>
+        <div className="p-4 text-sm text-amber-200 space-y-1">
+          <p>{diff.error}</p>
+          {diff.modified ? (
+            <pre className="mt-3 text-[12px] text-surface-300 whitespace-pre-wrap font-mono">{diff.modified}</pre>
+          ) : null}
+        </div>
+      </DiffScrollShell>
     );
   }
   if (diff.binary) {
-    return <p className="p-4 text-sm text-surface-400">{diff.unified || 'Binary file — no text diff.'}</p>;
+    return (
+      <DiffScrollShell>
+        <p className="p-4 text-sm text-surface-400">{diff.unified || 'Binary file — no text diff.'}</p>
+      </DiffScrollShell>
+    );
   }
   if (!diff.unified.trim() && diff.original === diff.modified) {
-    return <p className="p-4 text-xs text-surface-400">No uncommitted changes vs HEAD.</p>;
+    return (
+      <DiffScrollShell>
+        <p className="p-4 text-xs text-surface-400">No uncommitted changes vs HEAD.</p>
+      </DiffScrollShell>
+    );
   }
 
   return (
-    <div className="h-full min-h-0 overflow-auto font-mono text-[12px] leading-[1.55] bg-[#0d1117]">
+    <DiffScrollShell>
       {diff.too_large && (
-        <div className="px-3 py-1.5 text-[11px] bg-amber-950/50 text-amber-200 border-b border-white/10">
+        <div className="sticky top-0 z-10 px-3 py-1.5 text-[11px] bg-amber-950/90 text-amber-200 border-b border-white/10">
           Large diff truncated for the editor. Full file is still on disk.
         </div>
       )}
-      <div className="px-3 py-1.5 text-[11px] text-surface-400 border-b border-white/10">
+      <div className="sticky top-0 z-10 px-3 py-1.5 text-[11px] text-surface-400 border-b border-white/10 bg-[#0d1117]/95">
         {diff.untracked ? 'Untracked file' : '1 file changed'}
         {diff.too_large ? ' · truncated' : ''}
       </div>
@@ -96,6 +122,6 @@ export default function GitDiffPane({
           <span className="whitespace-pre">{row.text || ' '}</span>
         </div>
       ))}
-    </div>
+    </DiffScrollShell>
   );
 }

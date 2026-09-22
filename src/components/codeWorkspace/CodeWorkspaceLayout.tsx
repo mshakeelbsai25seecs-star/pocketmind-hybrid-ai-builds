@@ -1363,13 +1363,47 @@ export default function CodeWorkspaceLayout() {
           )}
 
           {status && (
-            <div className={`mx-2 mt-1.5 mb-1 rounded-md border px-2 py-1 text-[11px] flex-shrink-0 ${
-              session.waitingFor === 'delete' || session.waitingFor === 'sandbox' || session.waitingFor === 'mcp'
-                ? 'border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 text-amber-900 dark:text-amber-100'
+            <div className={`mx-2 mt-1.5 mb-1 rounded-md border px-2 py-1.5 text-[11px] flex-shrink-0 space-y-1.5 ${
+              session.waitingFor === 'edit'
+                || session.waitingFor === 'delete'
+                || session.waitingFor === 'sandbox'
+                || session.waitingFor === 'mcp'
+                ? 'border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-amber-900 dark:text-amber-100'
                 : 'border-surface-200 dark:border-surface-700 bg-surface-50 dark:bg-surface-900 text-surface-600 dark:text-surface-300'
             }`}
             >
-              {status}
+              <p className="leading-snug break-all">{status}</p>
+              {session.waitingFor === 'edit' && session.pendingPatch && (
+                <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                  <button
+                    type="button"
+                    className="px-2.5 py-1 rounded-sm bg-primary-500 text-surface-950 font-semibold text-[11px] hover:bg-primary-400"
+                    onClick={() => agentSession.resolveEdit('accepted')}
+                  >
+                    Allow
+                  </button>
+                  <button
+                    type="button"
+                    className="px-2.5 py-1 rounded-sm border border-amber-700/40 dark:border-amber-300/30 font-semibold text-[11px] hover:bg-amber-100/60 dark:hover:bg-amber-900/40"
+                    onClick={() => agentSession.resolveEdit('rejected')}
+                  >
+                    Deny
+                  </button>
+                  <button
+                    type="button"
+                    className="px-2 py-1 text-[10px] underline text-amber-800 dark:text-amber-200"
+                    onClick={() => agentSession.resolveEdit('accepted', true)}
+                  >
+                    Always allow this session
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {session.waitingFor === 'edit' && session.pendingPatch && !status && (
+            <div className="mx-2 mt-1.5 mb-1 flex-shrink-0">
+              <FileWriteApproval />
             </div>
           )}
 
@@ -1391,7 +1425,7 @@ export default function CodeWorkspaceLayout() {
           )}
 
           <div ref={chatScrollRef} className="flex-1 min-h-0 overflow-y-auto px-2.5 space-y-4 pb-3">
-            <FileWriteApproval />
+            {/* FileWriteApproval also lives in the sticky status bar above when waitingFor=edit. */}
             <McpToolsPanel />
             {reviewPlan && (agentMode === 'plan' || reviewPlan.status === 'draft' || reviewPlan.status === 'approved') && (
               <PlanReviewPanel
@@ -1457,7 +1491,11 @@ export default function CodeWorkspaceLayout() {
                     return (
                       <div key={m.id} className="space-y-2 px-0.5">
                         <p className="text-[10px] font-semibold uppercase tracking-wide text-surface-400">Assistant</p>
-                        <AgentTranscript steps={steps} answer={summary} />
+                        <AgentTranscript
+                          steps={steps}
+                          answer={summary}
+                          forceCollapsed={session.waitingFor === 'edit'}
+                        />
                       </div>
                     );
                   })
@@ -1476,7 +1514,11 @@ export default function CodeWorkspaceLayout() {
                   </div>
                 )}
                 <p className="text-[10px] font-semibold uppercase tracking-wide text-surface-400 px-0.5">Assistant</p>
-                <AgentTranscript steps={session.steps} answer={session.lastSummary} />
+                <AgentTranscript
+                  steps={session.steps}
+                  answer={session.lastSummary}
+                  forceCollapsed={session.waitingFor === 'edit'}
+                />
                 {session.checkpointRunId
                   && session.steps.some(s => s.kind === 'tool' && (s.tool === 'apply_edit' || s.tool === 'delete_file'))
                   && (
