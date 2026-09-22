@@ -51,7 +51,16 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-$ProgressPreference = "SilentlyContinue"  # faster Invoke-WebRequest downloads
+$ProgressPreference = "SilentlyContinue"
+
+# Windows PowerShell / older .NET often default to TLS 1.0/1.1 and fail GitHub
+# downloads with "underlying connection was closed" on Invoke-WebRequest.
+try {
+  [Net.ServicePointManager]::SecurityProtocol =
+    [Net.SecurityProtocolType]::Tls12 -bor [Net.SecurityProtocolType]::Tls11 -bor [Net.SecurityProtocolType]::Tls
+} catch {
+  # Ignore on hosts that already negotiate TLS correctly.
+}
 
 $Target = Join-Path $ProjectPath "bin\llama.cpp"
 New-Item -ItemType Directory -Force -Path $Target | Out-Null
@@ -66,14 +75,19 @@ $script:TempRoot = $TempRoot
 
 function Write-Section($text) { Write-Host "`n=== $text ===" -ForegroundColor Cyan }
 
+function Get-GitHubToken {
+  $token = $env:GH_TOKEN
+  if (-not $token) { $token = $env:GITHUB_TOKEN }
+  return $token
+}
+
 function Get-GitHubHeaders {
   $headers = @{
     "User-Agent" = "PocketMind-Hybrid-AI-Installer"
     "Accept" = "application/vnd.github+json"
     "X-GitHub-Api-Version" = "2022-11-28"
   }
-  $token = $env:GH_TOKEN
-  if (-not $token) { $token = $env:GITHUB_TOKEN }
+  $token = Get-GitHubToken
   if ($token) {
     $headers["Authorization"] = "Bearer $token"
     Write-Host "GitHub API: using authenticated requests (rate-limit safe)"
@@ -83,21 +97,145 @@ function Get-GitHubHeaders {
   return $headers
 }
 
+function Get-CurlExe {
+  $cmd = Get-Command curl.exe -ErrorAction SilentlyContinue
+  if ($cmd) { return $cmd.Source }
+  $candidates = @(
+    "$env:SystemRoot\System32\curl.exe",
+    "$env:SystemRoot\SysWOW64\curl.exe"
+  )
+  foreach ($c in $candidates) {
+    if (Test-Path -LiteralPath $c) { return $c }
+  }
+  return $null
+}
+
+function Invoke-GitHubApiJson {
+  param(
+    [Parameter(Mandatory = $true)][string]$Url,
+    [int]$MaxAttempts = 5
+  )
+  $headers = Get-GitHubHeaders
+  $curl = Get-CurlExe
+  $lastError = $null
+
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+    try {
+      if ($curl) {
+        $curlArgs = @(
+          "-fsSL", "--tlsv1.2",
+          "--retry", "3", "--retry-delay", "2",
+          "--connect-timeout", "30",
+          "-A", "PocketMind-Hybrid-AI-Installer",
+          "-H", "Accept: application/vnd.github+json",
+          "-H", "X-GitHub-Api-Version: 2022-11-28"
+        )
+        $token = Get-GitHubToken
+        if ($token) {
+          $curlArgs += @("-H", "Authorization: Bearer $token")
+        }
+        $curlArgs += $Url
+        $raw = & $curl @curlArgs 2>&1
+        if ($LASTEXITCODE -ne 0) {
+          throw "curl API exit $LASTEXITCODE : $raw"
+        }
+        if ($raw -is [System.Array]) { $raw = ($raw | Out-String) }
+        return ($raw | ConvertFrom-Json)
+      }
+
+      return Invoke-RestMethod -Uri $Url -Headers $headers
+    } catch {
+      $lastError = $_
+      Write-Warning ("GitHub API attempt {0}/{1} failed: {2}" -f $attempt, $MaxAttempts, $_.Exception.Message)
+      if ($attempt -lt $MaxAttempts) { Start-Sleep -Seconds ([Math]::Min(20, 2 * $attempt)) }
+    }
+  }
+
+  throw "GitHub API request failed after $MaxAttempts attempts for $Url. Last error: $lastError"
+}
+
+function Download-FileWithRetry {
+  param(
+    [Parameter(Mandatory = $true)][string]$Url,
+    [Parameter(Mandatory = $true)][string]$OutFile,
+    [long]$ExpectedSize = 0,
+    [int]$MaxAttempts = 6
+  )
+
+  $curl = Get-CurlExe
+  $destDir = Split-Path -Parent $OutFile
+  if ($destDir) { New-Item -ItemType Directory -Force -Path $destDir | Out-Null }
+
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+    if (Test-Path -LiteralPath $OutFile) {
+      Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
+    }
+
+    Write-Host ("  Download attempt {0}/{1}" -f $attempt, $MaxAttempts)
+    try {
+      if ($curl) {
+        # Prefer curl.exe: more reliable TLS/redirects than Invoke-WebRequest on
+        # Windows PowerShell 5.1 (avoids "connection was closed on a send").
+        $curlArgs = @(
+          "-fL", "--tlsv1.2",
+          "--retry", "5", "--retry-delay", "3",
+          "--connect-timeout", "30",
+          "-A", "PocketMind-Hybrid-AI-Installer",
+          "-o", $OutFile
+        )
+        $token = Get-GitHubToken
+        if ($token) {
+          $curlArgs = @("-H", "Authorization: Bearer $token") + $curlArgs
+        }
+        $curlArgs += $Url
+        & $curl @curlArgs
+        if ($LASTEXITCODE -ne 0) {
+          throw "curl exited with code $LASTEXITCODE"
+        }
+      } else {
+        Write-Warning "curl.exe not found; falling back to Invoke-WebRequest (TLS 1.2)."
+        Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing
+      }
+
+      if (-not (Test-Path -LiteralPath $OutFile)) {
+        throw "Download finished but file missing: $OutFile"
+      }
+      $len = (Get-Item -LiteralPath $OutFile).Length
+      if ($len -le 0) {
+        throw "Downloaded file is empty: $OutFile"
+      }
+      if ($ExpectedSize -gt 0 -and $len -lt [Math]::Max(1024, [long]($ExpectedSize * 0.5))) {
+        throw ("Downloaded size {0} looks truncated (expected ~{1})" -f $len, $ExpectedSize)
+      }
+      Write-Host ("  Saved {0:N1} MB -> {1}" -f ($len / 1MB), $OutFile)
+      return
+    } catch {
+      Write-Warning ("  Download failed: {0}" -f $_.Exception.Message)
+      if (Test-Path -LiteralPath $OutFile) {
+        Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
+      }
+      if ($attempt -ge $MaxAttempts) {
+        throw "Failed to download $Url after $MaxAttempts attempts. Last error: $($_.Exception.Message)"
+      }
+      Start-Sleep -Seconds ([Math]::Min(30, 3 * $attempt))
+    }
+  }
+}
+
 function Get-ReleaseAssets {
   param([string]$Tag)
-  $headers = Get-GitHubHeaders
 
   if ($Tag) {
     $url = "https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/$Tag"
     Write-Host "Querying release metadata: $url"
-    return Invoke-RestMethod -Uri $url -Headers $headers
+    return Invoke-GitHubApiJson -Url $url
   }
 
   # IMPORTANT: /releases/latest is currently a stub tag (e.g. v0.2.0) with no
   # Windows binaries. Prefer the newest b##### release that ships win-cpu-x64.
   $listUrl = "https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=20"
   Write-Host "Querying recent releases: $listUrl"
-  $releases = Invoke-RestMethod -Uri $listUrl -Headers $headers
+  $releases = Invoke-GitHubApiJson -Url $listUrl
   foreach ($release in $releases) {
     $tagName = [string]$release.tag_name
     $assets = @($release.assets)
@@ -149,13 +287,13 @@ function Install-Backend {
 
     $primaryZip = Join-Path $tmp $PrimaryAsset.name
     Write-Host ("Downloading {0} ({1:N1} MB)..." -f $PrimaryAsset.name, ($PrimaryAsset.size / 1MB))
-    Invoke-WebRequest -Uri $PrimaryAsset.browser_download_url -OutFile $primaryZip -UseBasicParsing
+    Download-FileWithRetry -Url $PrimaryAsset.browser_download_url -OutFile $primaryZip -ExpectedSize ([long]$PrimaryAsset.size)
     $zips += $primaryZip
 
     if ($CudartAsset) {
       $cudartZip = Join-Path $tmp $CudartAsset.name
       Write-Host ("Downloading {0} ({1:N1} MB) [CUDA runtime DLLs]..." -f $CudartAsset.name, ($CudartAsset.size / 1MB))
-      Invoke-WebRequest -Uri $CudartAsset.browser_download_url -OutFile $cudartZip -UseBasicParsing
+      Download-FileWithRetry -Url $CudartAsset.browser_download_url -OutFile $cudartZip -ExpectedSize ([long]$CudartAsset.size)
       $zips += $cudartZip
     }
 
