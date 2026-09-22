@@ -33,6 +33,8 @@ The NSIS installer (~2 GB) includes **all llama.cpp runtimes** (`cpu`, `vulkan`,
 
 For portable tester zips, the folder still ships `bin\llama.cpp\` beside the `.exe` — both layouts work.
 
+**If setup fails with “Error opening file for writing … ggml-*.dll”:** an old `llama-server.exe` (or PocketMind) is still running and locking those DLLs. Close PocketMind, or run `scripts\PREPARE-REINSTALL.cmd`, then Retry / re-run setup. Newer setup builds stop those processes automatically before copying files.
+
 ## Optional: faster GPU
 
 Open **Runtime**, click **Scan engine**, and keep **Automatic**.

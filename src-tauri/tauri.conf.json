@@ -69,7 +69,11 @@
         "certificateThumbprint": null,
         "digestAlgorithm": "sha256",
         "timestampUrl": "",
-        "wix": null
+        "wix": null,
+        "nsis": {
+          "template": "windows/installer.nsi",
+          "installMode": "currentUser"
+        }
       },
       "macOS": {
         "entitlements": null,
