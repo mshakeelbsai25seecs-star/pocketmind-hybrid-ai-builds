@@ -48,7 +48,6 @@ export default function Sidebar() {
   const setActiveConversation = useAppStore(s => s.setActiveConversation);
   const setActiveCharacter = useAppStore(s => s.setActiveCharacter);
   const setMessages = useAppStore(s => s.setMessages);
-  const setupCompleted = useAppStore(s => s.setupCompleted);
   const currentModel = useAppStore(s => s.currentModel);
   const bumpWorkspaceEpoch = useAppStore(s => s.bumpWorkspaceEpoch);
 
@@ -501,16 +500,6 @@ export default function Sidebar() {
               : 'Switch to Chats to see conversation history.'}
           </div>
         )}
-
-        <div className="p-4 border-t border-white/10 flex-shrink-0">
-          <div className="flex items-center gap-2 text-xs">
-            <div className="w-2 h-2 rounded-full bg-primary-400" />
-            <div>
-              <p className="text-primary-300 font-medium">Private / On-device</p>
-              <p className="text-surface-500 truncate">{setupCompleted ? 'All data stays on this device.' : 'Setup incomplete'} · {currentModel?.startsWith('enterprise:') ? 'org server' : currentModel?.startsWith('remote:') ? 'online' : 'local'}</p>
-            </div>
-          </div>
-        </div>
       </aside>
     </>
   );

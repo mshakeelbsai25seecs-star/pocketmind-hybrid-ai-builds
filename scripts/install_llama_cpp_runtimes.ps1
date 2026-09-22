@@ -154,17 +154,40 @@ function Invoke-GitHubApiJson {
   throw "GitHub API request failed after $MaxAttempts attempts for $Url. Last error: $lastError"
 }
 
+function Write-PmProgress {
+  param(
+    [string]$Phase,
+    [string]$Message,
+    [int]$Percent = -1,
+    [string]$File = "",
+    [long]$Downloaded = -1,
+    [long]$Total = -1
+  )
+  $payload = [ordered]@{
+    phase = $Phase
+    message = $Message
+  }
+  if ($Percent -ge 0) { $payload.percent = [Math]::Min(100, [Math]::Max(0, $Percent)) }
+  if ($File) { $payload.file = $File }
+  if ($Downloaded -ge 0) { $payload.downloaded = $Downloaded }
+  if ($Total -ge 0) { $payload.total = $Total }
+  $json = ($payload | ConvertTo-Json -Compress)
+  Write-Host ("##PM_PROGRESS## {0}" -f $json)
+}
+
 function Download-FileWithRetry {
   param(
     [Parameter(Mandatory = $true)][string]$Url,
     [Parameter(Mandatory = $true)][string]$OutFile,
     [long]$ExpectedSize = 0,
-    [int]$MaxAttempts = 6
+    [int]$MaxAttempts = 6,
+    [string]$ProgressLabel = ""
   )
 
   $curl = Get-CurlExe
   $destDir = Split-Path -Parent $OutFile
   if ($destDir) { New-Item -ItemType Directory -Force -Path $destDir | Out-Null }
+  $label = if ($ProgressLabel) { $ProgressLabel } else { Split-Path -Leaf $OutFile }
 
   for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
     if (Test-Path -LiteralPath $OutFile) {
@@ -172,25 +195,61 @@ function Download-FileWithRetry {
     }
 
     Write-Host ("  Download attempt {0}/{1}" -f $attempt, $MaxAttempts)
+    Write-PmProgress -Phase "download" -Message ("Downloading {0} (attempt {1}/{2})..." -f $label, $attempt, $MaxAttempts) -Percent 0 -File $label -Downloaded 0 -Total $ExpectedSize
     try {
       if ($curl) {
         # Prefer curl.exe: more reliable TLS/redirects than Invoke-WebRequest on
         # Windows PowerShell 5.1 (avoids "connection was closed on a send").
-        $curlArgs = @(
+        # Launch as a Process and poll partial file size for UI progress.
+        $argList = New-Object System.Collections.Generic.List[string]
+        $token = Get-GitHubToken
+        if ($token) {
+          $argList.Add("-H")
+          $argList.Add("Authorization: Bearer $token")
+        }
+        foreach ($a in @(
           "-fL", "--tlsv1.2",
           "--retry", "5", "--retry-delay", "3",
           "--connect-timeout", "30",
           "-A", "PocketMind-Hybrid-AI-Installer",
-          "-o", $OutFile
-        )
-        $token = Get-GitHubToken
-        if ($token) {
-          $curlArgs = @("-H", "Authorization: Bearer $token") + $curlArgs
+          "-o", $OutFile,
+          $Url
+        )) { $argList.Add($a) }
+
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = $curl
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+        $psi.RedirectStandardError = $true
+        $psi.RedirectStandardOutput = $true
+        # Quote args that contain spaces (e.g. Authorization header).
+        $psi.Arguments = (($argList | ForEach-Object {
+          if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
+        }) -join ' ')
+
+        $proc = New-Object System.Diagnostics.Process
+        $proc.StartInfo = $psi
+        [void]$proc.Start()
+        while (-not $proc.HasExited) {
+          Start-Sleep -Milliseconds 700
+          $partial = 0L
+          if (Test-Path -LiteralPath $OutFile) {
+            try { $partial = [long](Get-Item -LiteralPath $OutFile).Length } catch { $partial = 0L }
+          }
+          $pct = 0
+          if ($ExpectedSize -gt 0 -and $partial -gt 0) {
+            $pct = [Math]::Min(99, [int](($partial * 100.0) / $ExpectedSize))
+          }
+          $mb = if ($partial -gt 0) { "{0:N1}" -f ($partial / 1MB) } else { "0.0" }
+          $totalMb = if ($ExpectedSize -gt 0) { "{0:N1}" -f ($ExpectedSize / 1MB) } else { "?" }
+          Write-PmProgress -Phase "download" -Message ("Downloading {0}: {1} / {2} MB" -f $label, $mb, $totalMb) `
+            -Percent $pct -File $label -Downloaded $partial -Total $ExpectedSize
         }
-        $curlArgs += $Url
-        & $curl @curlArgs
-        if ($LASTEXITCODE -ne 0) {
-          throw "curl exited with code $LASTEXITCODE"
+        $proc.WaitForExit() | Out-Null
+        if ($proc.ExitCode -ne 0) {
+          $errTail = ""
+          try { $errTail = $proc.StandardError.ReadToEnd() } catch { }
+          throw ("curl exited with code {0}: {1}" -f $proc.ExitCode, $errTail)
         }
       } else {
         Write-Warning "curl.exe not found; falling back to Invoke-WebRequest (TLS 1.2)."
@@ -208,6 +267,7 @@ function Download-FileWithRetry {
         throw ("Downloaded size {0} looks truncated (expected ~{1})" -f $len, $ExpectedSize)
       }
       Write-Host ("  Saved {0:N1} MB -> {1}" -f ($len / 1MB), $OutFile)
+      Write-PmProgress -Phase "download" -Message ("Downloaded {0} ({1:N1} MB)" -f $label, ($len / 1MB)) -Percent 100 -File $label -Downloaded $len -Total $(if ($ExpectedSize -gt 0) { $ExpectedSize } else { $len })
       return
     } catch {
       Write-Warning ("  Download failed: {0}" -f $_.Exception.Message)
@@ -277,6 +337,7 @@ function Install-Backend {
   )
 
   Write-Section "Installing $BackendName runtime"
+  Write-PmProgress -Phase "install" -Message ("Installing {0} runtime..." -f $BackendName) -Percent 5
   $dest = Join-Path $Target $BackendName
   New-Item -ItemType Directory -Force -Path $dest | Out-Null
 
@@ -287,16 +348,17 @@ function Install-Backend {
 
     $primaryZip = Join-Path $tmp $PrimaryAsset.name
     Write-Host ("Downloading {0} ({1:N1} MB)..." -f $PrimaryAsset.name, ($PrimaryAsset.size / 1MB))
-    Download-FileWithRetry -Url $PrimaryAsset.browser_download_url -OutFile $primaryZip -ExpectedSize ([long]$PrimaryAsset.size)
+    Download-FileWithRetry -Url $PrimaryAsset.browser_download_url -OutFile $primaryZip -ExpectedSize ([long]$PrimaryAsset.size) -ProgressLabel $PrimaryAsset.name
     $zips += $primaryZip
 
     if ($CudartAsset) {
       $cudartZip = Join-Path $tmp $CudartAsset.name
       Write-Host ("Downloading {0} ({1:N1} MB) [CUDA runtime DLLs]..." -f $CudartAsset.name, ($CudartAsset.size / 1MB))
-      Download-FileWithRetry -Url $CudartAsset.browser_download_url -OutFile $cudartZip -ExpectedSize ([long]$CudartAsset.size)
+      Download-FileWithRetry -Url $CudartAsset.browser_download_url -OutFile $cudartZip -ExpectedSize ([long]$CudartAsset.size) -ProgressLabel $CudartAsset.name
       $zips += $cudartZip
     }
 
+    Write-PmProgress -Phase "extract" -Message ("Extracting {0} archives..." -f $BackendName) -Percent 85
     foreach ($zip in $zips) {
       $extractDir = Join-Path $tmp ("x_" + [System.IO.Path]::GetFileNameWithoutExtension($zip))
       Expand-Archive -Path $zip -DestinationPath $extractDir -Force
@@ -334,6 +396,7 @@ function Install-Backend {
     } else {
       Write-Warning ("$BackendName runtime staged but --help did not exit cleanly. It may still work, or may need GPU drivers present at runtime. DLLs: $dllCount")
     }
+    Write-PmProgress -Phase "complete" -Message ("{0} runtime ready ({1} DLLs)" -f $BackendName, $dllCount) -Percent 100
     return $true
   }
   finally {
@@ -343,10 +406,12 @@ function Install-Backend {
 
 Write-Section "PocketMind Hybrid AI llama.cpp runtime installer"
 Write-Host "Target: $Target"
+Write-PmProgress -Phase "resolve" -Message "Resolving llama.cpp release metadata..." -Percent 2
 
 $release = Get-ReleaseAssets -Tag $Tag
 $assets = $release.assets
 Write-Host ("Release: {0} ({1} assets)" -f $release.tag_name, $assets.Count)
+Write-PmProgress -Phase "resolve" -Message ("Using release {0}" -f $release.tag_name) -Percent 8
 
 $summary = @()
 

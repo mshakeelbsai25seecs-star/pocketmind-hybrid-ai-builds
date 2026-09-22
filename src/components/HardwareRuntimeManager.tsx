@@ -1,9 +1,20 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
+import { listen } from '@tauri-apps/api/event';
 import { Cpu, CheckCircle2, Download, Monitor, Zap } from 'lucide-react';
 import { useAppStore } from '../store';
 import { formatInvokeError } from '../lib/formatInvokeError';
 import type { GpuRuntimeReport, RuntimeDiagnostics, SystemInfo } from '../types';
+
+type CudaInstallProgress = {
+  backend?: string;
+  phase?: string;
+  message?: string;
+  percent?: number | null;
+  file?: string | null;
+  downloaded?: number | null;
+  total?: number | null;
+};
 
 function fmtBytes(bytes?: number | null) {
   if (!bytes || bytes <= 0) return '—';
@@ -33,6 +44,7 @@ export default function HardwareRuntimeManager() {
   const [busy, setBusy] = useState(false);
   const [cudaBusy, setCudaBusy] = useState(false);
   const [message, setMessage] = useState('');
+  const [cudaProgress, setCudaProgress] = useState<CudaInstallProgress | null>(null);
 
   const isRemote = store.currentModel?.startsWith('remote:') || store.currentModel?.startsWith('enterprise:') || false;
   const selectedModelPath = !isRemote ? store.currentModel : null;
@@ -61,6 +73,21 @@ export default function HardwareRuntimeManager() {
   useEffect(() => {
     void refresh();
   }, [store.currentModel]);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<CudaInstallProgress>('llama-runtime-install-progress', event => {
+      const payload = event.payload;
+      if (payload?.backend && payload.backend !== 'cuda') return;
+      setCudaProgress(payload);
+      if (payload?.message) setMessage(payload.message);
+    }).then(fn => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
 
   const info = store.systemInfo;
   const ramGb = info ? Math.round(info.memory.total_bytes / 1_073_741_824) : null;
@@ -111,6 +138,7 @@ export default function HardwareRuntimeManager() {
 
   const installCudaRuntime = async () => {
     setCudaBusy(true);
+    setCudaProgress({ phase: 'start', message: 'Preparing CUDA download…', percent: 1 });
     setMessage('Downloading NVIDIA CUDA llama.cpp runtime (large download, often 500+ MB)…');
     try {
       const result = await invoke<{
@@ -120,10 +148,16 @@ export default function HardwareRuntimeManager() {
         server_path?: string;
       }>('install_llama_runtime_backend', { backend: 'cuda' });
       setMessage(result.message + (result.server_path ? ` → ${result.server_path}` : ''));
+      setCudaProgress({ phase: 'complete', message: result.message, percent: 100 });
       selectCuda();
       await refresh();
     } catch (err) {
       setMessage(formatInvokeError(err));
+      setCudaProgress(prev => ({
+        phase: 'error',
+        message: formatInvokeError(err),
+        percent: prev?.percent ?? null,
+      }));
     } finally {
       setCudaBusy(false);
     }
@@ -196,6 +230,40 @@ export default function HardwareRuntimeManager() {
             <Download className="w-4 h-4" />
             {cudaBusy ? 'Downloading CUDA…' : 'Download / install CUDA llama.cpp'}
           </button>
+          {(cudaBusy || cudaProgress) && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3 text-xs text-primary-200">
+                <span className="font-medium truncate">{cudaProgress?.message || message || 'Preparing…'}</span>
+                {typeof cudaProgress?.percent === 'number' && (
+                  <span className="tabular-nums shrink-0">{cudaProgress.percent}%</span>
+                )}
+              </div>
+              <div className="h-2 rounded-sm bg-surface-800 overflow-hidden">
+                <div
+                  className={`h-full bg-primary-500 transition-[width] duration-300 ${cudaBusy && cudaProgress?.percent == null ? 'animate-pulse w-1/3' : ''}`}
+                  style={{
+                    width:
+                      typeof cudaProgress?.percent === 'number'
+                        ? `${Math.max(0, Math.min(100, cudaProgress.percent))}%`
+                        : cudaBusy
+                          ? undefined
+                          : '0%',
+                  }}
+                />
+              </div>
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-surface-500">
+                {cudaProgress?.phase && <span>Phase: {cudaProgress.phase}</span>}
+                {cudaProgress?.file && (
+                  <span className="truncate max-w-[16rem]" title={cudaProgress.file}>{cudaProgress.file}</span>
+                )}
+                {cudaProgress?.downloaded != null && cudaProgress?.total != null && cudaProgress.total > 0 && (
+                  <span className="tabular-nums">
+                    {fmtBytes(cudaProgress.downloaded)} / {fmtBytes(cudaProgress.total)}
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

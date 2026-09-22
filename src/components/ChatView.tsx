@@ -4,7 +4,7 @@ import { open } from '@tauri-apps/api/dialog';
 import { listen } from '@tauri-apps/api/event';
 import {
   Send, Square, Bot, User, Copy, Check, Trash2,
-  Paperclip, Sparkles, AlertCircle, Download, MessageSquare,
+  Paperclip, Sparkles, AlertCircle, Download, MessageSquare, Plus,
   SlidersHorizontal, ClipboardCopy, RotateCcw, FileText, X,
   UploadCloud, Info, Power, ChevronDown, Flag
 } from 'lucide-react';
@@ -14,7 +14,7 @@ import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { useAppStore } from '../store';
 import { useShallow } from 'zustand/react/shallow';
-import { AttachmentContext, Conversation, LocalModelRecord, Message, SystemInfo } from '../types';
+import { AttachmentContext, Conversation, LocalModelRecord, Message, SystemInfo, GenerationParams } from '../types';
 import {
   mergeGenerationParams,
   PendingChatOptions,
@@ -1018,6 +1018,66 @@ function deriveChatTitle(prompt: string): string {
   return words.length > 54 ? `${words.slice(0, 54).trim()}…` : words;
 }
 
+function cleanGeneratedChatTitle(raw: string, fallback: string): string {
+  let title = (raw || '')
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/^["'`]+|["'`]+$/g, '')
+    .replace(/^(title|chat title|name)\s*[:\-]\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  // Keep a short display title; strip trailing punctuation noise.
+  title = title.split(/[\n.!?]/)[0]?.trim() || title;
+  title = title.replace(/^["']+|["']+$/g, '').trim();
+  if (!title || /^new chat$/i.test(title) || title.length < 2) return fallback;
+  if (title.length > 54) title = `${title.slice(0, 54).trim()}…`;
+  return title;
+}
+
+async function generateAiChatTitle(
+  userPrompt: string,
+  assistantReply: string,
+  modelPath: string,
+  defaultParams: GenerationParams,
+): Promise<string | null> {
+  if (!modelPath?.trim()) return null;
+  const fallback = deriveChatTitle(userPrompt);
+  try {
+    const { backend, modelPath: resolved } = pickChatBackend(modelPath);
+    const result = await invoke<{ text?: string }>('generate_response', {
+      request: {
+        prompt:
+          `User message:\n${userPrompt.slice(0, 600)}\n\nAssistant reply (excerpt):\n${assistantReply.slice(0, 600)}\n\nTitle:`,
+        system_prompt:
+          'Create a short chat title (3-7 words) that summarizes the conversation topic. Reply with the title only — no quotes, no punctuation at the end, no explanation.',
+        model_path: resolved || modelPath,
+        backend,
+        params: {
+          ...defaultParams,
+          temperature: 0.2,
+          max_tokens: 24,
+          top_p: 0.8,
+        },
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Create a short chat title (3-7 words) that summarizes the conversation topic. Reply with the title only — no quotes, no punctuation at the end, no explanation.',
+          },
+          {
+            role: 'user',
+            content:
+              `User message:\n${userPrompt.slice(0, 600)}\n\nAssistant reply (excerpt):\n${assistantReply.slice(0, 600)}\n\nTitle:`,
+          },
+        ],
+        images: [],
+      },
+    });
+    return cleanGeneratedChatTitle(result?.text || '', fallback);
+  } catch {
+    return null;
+  }
+}
+
 function sanitizeHistoryForModel(content: string, role: string): string {
   let cleaned = normalizeAssistantMarkdown(content || '')
     .replace(/_Attachments used:[^\n]+_/gi, '')
@@ -1619,7 +1679,12 @@ export default function ChatView() {
         created_at: Date.now()
       });
 
-      if (conversationMessages.length === 0 && ['New Chat', 'Untitled chat', ''].includes((conversationForSend?.title || 'New Chat').trim())) {
+      const needsAiTitle =
+        conversationMessages.length === 0
+        && ['New Chat', 'Untitled chat', ''].includes((conversationForSend?.title || 'New Chat').trim());
+
+      if (needsAiTitle) {
+        // Provisional title from the first message; upgraded to an AI title after the reply.
         const title = deriveChatTitle(content);
         try {
           await invoke('update_conversation_title', { id: conversationId, title });
@@ -1628,6 +1693,8 @@ export default function ChatView() {
           // Title generation is convenience-only; never block chat generation.
         }
       }
+
+      const shouldAiTitle = needsAiTitle;
 
       assistantMsgId = await invoke<string>('add_message', {
         conversationId,
@@ -1864,6 +1931,18 @@ export default function ChatView() {
           },
         }));
       }
+      if (shouldAiTitle && finalText && !/^(\*\*Generation failed:|\[The model returned)/i.test(finalText)) {
+        void (async () => {
+          try {
+            const aiTitle = await generateAiChatTitle(content, finalText, currentModel, defaultParams);
+            if (!aiTitle) return;
+            await invoke('update_conversation_title', { id: conversationId, title: aiTitle });
+            renameConversationLocal(conversationId, aiTitle);
+          } catch {
+            // AI title is best-effort only.
+          }
+        })();
+      }
       setLiveReasoningMsgId(null);
       setGenerationStatus(null);
     } catch (err) {
@@ -2017,34 +2096,33 @@ export default function ChatView() {
             <span className="w-1.5 h-1.5 rounded-sm bg-primary-400" />
             Private / On-device
           </span>
-          <RefreshButton title="Refresh" onClick={refreshChatView} busy={refreshBusy} className="text-xs xl:text-sm px-2.5 xl:px-3 py-1.5 xl:py-2" />
+          <RefreshButton title="Refresh" onClick={refreshChatView} busy={refreshBusy} iconOnly className="p-2" />
           <button
             type="button"
             onClick={() => void createChat()}
             disabled={!currentModel || busyCreatingChat}
-            className="btn-secondary text-xs xl:text-sm px-2.5 xl:px-4 py-1.5 xl:py-2 flex items-center gap-1.5 flex-shrink-0 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed"
+            className="btn-secondary p-2 flex items-center justify-center flex-shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
             title={!currentModel ? 'Select a model first' : 'Start a new chat'}
+            aria-label="New chat"
           >
-            <MessageSquare className="w-4 h-4 flex-shrink-0" />
-            <span className="hidden sm:inline">New Chat</span>
+            <Plus className="w-4 h-4" />
           </button>
           <button
             onClick={() => setShowTuning(v => !v)}
-            className="btn-secondary text-xs xl:text-sm px-2.5 xl:px-4 py-1.5 xl:py-2 flex items-center gap-1.5 flex-shrink-0 whitespace-nowrap"
+            className="btn-secondary p-2 flex items-center justify-center flex-shrink-0"
             title="Generation tuning"
+            aria-label="Tuning"
           >
-            <SlidersHorizontal className="w-4 h-4 flex-shrink-0" />
-            <span className="hidden sm:inline">Tuning</span>
+            <SlidersHorizontal className="w-4 h-4" />
           </button>
           <div className="relative flex-shrink-0">
             <button
               onClick={() => setExportMenuOpen(v => !v)}
-              className="btn-secondary text-xs xl:text-sm px-2.5 xl:px-4 py-1.5 xl:py-2 flex items-center gap-1.5 whitespace-nowrap"
+              className="btn-secondary p-2 flex items-center justify-center"
               title="Export chat"
+              aria-label="Export chat"
             >
-              <Download className="w-4 h-4 flex-shrink-0" />
-              <span className="hidden lg:inline">Export as…</span>
-              <span className="lg:hidden">Export</span>
+              <Download className="w-4 h-4" />
             </button>
             {exportMenuOpen && (
               <div className="absolute right-0 top-full mt-1 z-40 w-48 rounded-xl border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 shadow-md p-1">
@@ -2073,11 +2151,11 @@ export default function ChatView() {
           {!isGenerating && (
             <button
               onClick={() => void unloadChatModel()}
-              className="btn-secondary text-xs xl:text-sm px-2.5 xl:px-4 py-1.5 xl:py-2 flex items-center gap-1.5 flex-shrink-0 whitespace-nowrap"
+              className="btn-secondary p-2 flex items-center justify-center flex-shrink-0"
               title="Free RAM/VRAM by unloading the local chat model"
+              aria-label="Unload model"
             >
-              <Power className="w-4 h-4 flex-shrink-0" />
-              <span className="hidden sm:inline">Unload</span>
+              <Power className="w-4 h-4" />
             </button>
           )}
           {isGenerating ? (

@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
+import { listen } from '@tauri-apps/api/event';
 import { Activity, Bot, CheckCircle, Code2, Cpu, Download, FileText, HardDrive, MessageSquare, ShieldCheck } from 'lucide-react';
 import { useAppStore } from '../store';
 import { Conversation, LocalModelRecord, Message, SystemInfo } from '../types';
@@ -15,6 +16,16 @@ function fmtBytes(bytes?: number | null) {
   while (value >= 1024 && i < units.length - 1) { value /= 1024; i++; }
   return `${value.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
 }
+
+type CudaInstallProgress = {
+  backend?: string;
+  phase?: string;
+  message?: string;
+  percent?: number | null;
+  file?: string | null;
+  downloaded?: number | null;
+  total?: number | null;
+};
 
 export default function HomeDashboard() {
   const info = useAppStore(s => s.systemInfo);
@@ -33,6 +44,22 @@ export default function HomeDashboard() {
   const [refreshBusy, setRefreshBusy] = useState(false);
   const [cudaBusy, setCudaBusy] = useState(false);
   const [cudaMsg, setCudaMsg] = useState<string | null>(null);
+  const [cudaProgress, setCudaProgress] = useState<CudaInstallProgress | null>(null);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<CudaInstallProgress>('llama-runtime-install-progress', event => {
+      const payload = event.payload;
+      if (payload?.backend && payload.backend !== 'cuda') return;
+      setCudaProgress(payload);
+      if (payload?.message) setCudaMsg(payload.message);
+    }).then(fn => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, []);
 
   const refreshDashboard = async () => {
     setRefreshBusy(true);
@@ -52,18 +79,25 @@ export default function HomeDashboard() {
 
   const installCudaRuntime = async () => {
     setCudaBusy(true);
+    setCudaProgress({ phase: 'start', message: 'Preparing CUDA download…', percent: 1 });
     setCudaMsg('Downloading NVIDIA CUDA llama.cpp runtime…');
     try {
       const result = await invoke<{ message: string; server_path?: string }>('install_llama_runtime_backend', {
         backend: 'cuda',
       });
       setCudaMsg(result.message + (result.server_path ? ` → ${result.server_path}` : ''));
+      setCudaProgress({ phase: 'complete', message: result.message, percent: 100 });
       useAppStore.getState().setDefaultParams({
         gpu_layers: -1,
       });
       await refreshDashboard();
     } catch (err) {
       setCudaMsg(formatInvokeError(err));
+      setCudaProgress(prev => ({
+        phase: 'error',
+        message: formatInvokeError(err),
+        percent: prev?.percent ?? null,
+      }));
     } finally {
       setCudaBusy(false);
     }
@@ -71,6 +105,11 @@ export default function HomeDashboard() {
 
   const selectedModel = currentModel?.split(/[\\/]/).pop() || 'No model selected';
   const selectedCharacter = characters.find(c => c.id === activeCharacterId)?.name || 'Default assistant';
+  const cudaPercent = typeof cudaProgress?.percent === 'number' ? Math.max(0, Math.min(100, cudaProgress.percent)) : null;
+  const cudaBytesLabel =
+    cudaProgress?.downloaded != null && cudaProgress?.total != null && cudaProgress.total > 0
+      ? `${fmtBytes(cudaProgress.downloaded)} / ${fmtBytes(cudaProgress.total)}`
+      : null;
 
   const createChat = async () => {
     const id = await invoke<string>('create_conversation', {
@@ -119,7 +158,25 @@ export default function HomeDashboard() {
                   {cudaBusy ? 'Installing CUDA…' : 'Install CUDA runtime'}
                 </button>
               </div>
-              {cudaMsg && <p className="text-sm text-primary-600 dark:text-primary-300 break-words">{cudaMsg}</p>}
+              {(cudaBusy || cudaProgress || cudaMsg) && (
+                <div className="rounded-sm border border-primary-500/30 bg-primary-950/20 p-3 space-y-2 max-w-xl">
+                  <div className="flex items-center justify-between gap-3 text-xs text-primary-200">
+                    <span className="font-medium truncate">{cudaMsg || 'Preparing CUDA download…'}</span>
+                    {cudaPercent != null && <span className="tabular-nums shrink-0">{cudaPercent}%</span>}
+                  </div>
+                  <div className="h-2 rounded-sm bg-surface-800 overflow-hidden">
+                    <div
+                      className={`h-full bg-primary-500 transition-[width] duration-300 ${cudaBusy && cudaPercent == null ? 'animate-pulse w-1/3' : ''}`}
+                      style={{ width: cudaPercent != null ? `${cudaPercent}%` : cudaBusy ? undefined : '0%' }}
+                    />
+                  </div>
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-surface-400">
+                    {cudaProgress?.phase && <span>Phase: {cudaProgress.phase}</span>}
+                    {cudaProgress?.file && <span className="truncate max-w-[16rem]" title={cudaProgress.file}>{cudaProgress.file}</span>}
+                    {cudaBytesLabel && <span className="tabular-nums">{cudaBytesLabel}</span>}
+                  </div>
+                </div>
+              )}
               {!currentModel && <p className="text-sm text-amber-500">Select a model before chatting.</p>}
             </div>
             <div className="flex flex-col gap-3 min-w-[min(320px,100%)]">
