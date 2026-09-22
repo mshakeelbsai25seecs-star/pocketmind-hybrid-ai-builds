@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   Install PocketMind Hybrid AI desktop toolchain on D: and build the Windows .exe.
@@ -492,7 +492,7 @@ if ($LASTEXITCODE -ne 0) {
 Write-Step "Verifying frontend markers in dist/ (stale-build guard)"
 $jsFiles = @(Get-ChildItem -Path (Join-Path $ProjectRoot "dist\assets") -Filter "*.js" -File -ErrorAction SilentlyContinue)
 if ($jsFiles.Count -eq 0) {
-  throw "No dist/assets/*.js after tauri build — frontend was not produced."
+  throw "No dist/assets/*.js after tauri build -- frontend was not produced."
 }
 $jsBlob = ($jsFiles | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -ErrorAction SilentlyContinue }) -join "`n"
 $requiredMarkers = @(
@@ -507,7 +507,7 @@ foreach ($marker in $requiredMarkers) {
   }
   Write-Host "  OK marker: $marker"
 }
-# Footer block was removed from Sidebar — if this exact product footer copy is still present as a
+# Footer block was removed from Sidebar -- if this exact product footer copy is still present as a
 # sidebar string it may be OK elsewhere, but the combination of SHA + CUDA progress is enough.
 
 $buildInfo = @{

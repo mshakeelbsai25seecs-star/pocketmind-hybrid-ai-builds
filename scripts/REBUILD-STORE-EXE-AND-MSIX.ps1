@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   Foolproof rebuild: reset to origin/main, build Store-safe EXE, then MSIX from THAT build.
@@ -10,7 +10,7 @@
   - stale dist/ + DevCache CARGO_TARGET_DIR reuse without re-embedding web assets
 
   This script hard-resets to origin/main, prints HEAD, cleans frontend/output artifacts,
-  builds Store EXE via BUILD-STORE-INSTALLER.ps1 (which forces fresh Vite + SHA stamp),
+  builds Store EXE via BUILD-STORE-INSTALLER.ps1 (which forces a fresh Vite + SHA stamp),
   then stages+packs MSIX from the same release tree, and prints SHA256 of outputs.
 
 .EXAMPLE
@@ -59,7 +59,7 @@ Write-Host "  HEAD: $head"
 Write-Host "  short: $headShort"
 
 if ($ExpectedMainPrefix -and ($headShort -notlike "$ExpectedMainPrefix*") -and ($head -notlike "$ExpectedMainPrefix*")) {
-  Write-Host "  NOTE: HEAD does not start with expected prefix '$ExpectedMainPrefix' (repo may have moved forward — that is OK if SHA is newer than PR #9)." -ForegroundColor Yellow
+  Write-Host "  NOTE: HEAD does not start with expected prefix '$ExpectedMainPrefix' (repo may have moved forward -- that is OK if SHA is newer than PR #9)." -ForegroundColor Yellow
 }
 
 # Minimum feature commits that must be ancestors of HEAD
@@ -73,7 +73,7 @@ foreach ($tip in $requiredTips) {
   if ($LASTEXITCODE -ne 0) {
     throw "HEAD does not contain required commit $($tip.Sha) ($($tip.Name)). Fix your remotes/clone."
   }
-  Write-Host "  OK ancestor: $($tip.Sha) — $($tip.Name)"
+  Write-Host "  OK ancestor: $($tip.Sha) -- $($tip.Name)"
 }
 
 Write-Host "`n==> Cleaning stale frontend/output artifacts" -ForegroundColor Cyan
@@ -113,14 +113,14 @@ if ($AllowNonDDrive -or $env:GITHUB_ACTIONS -eq "true" -or $env:CI -eq "true") {
   $storeArgs.AllowNonDDrive = $true
 }
 
-Write-Host "`n==> Building Store-safe setup.exe (forces fresh Vite + SHA stamp)" -ForegroundColor Cyan
+Write-Host "`n==> Building Store-safe setup.exe (forcing a fresh Vite + SHA stamp)" -ForegroundColor Cyan
 & (Join-Path $ProjectRoot "scripts\BUILD-STORE-INSTALLER.ps1") @storeArgs
 if ($LASTEXITCODE -ne 0) { throw "BUILD-STORE-INSTALLER.ps1 failed ($LASTEXITCODE)" }
 
 # Confirm dist stamp matches HEAD
 $distInfo = Join-Path $ProjectRoot "dist\build-info.json"
 if (-not (Test-Path -LiteralPath $distInfo)) {
-  throw "Missing $distInfo after build — build-desktop-windows.ps1 did not stamp the frontend."
+  throw "Missing $distInfo after build -- build-desktop-windows.ps1 did not stamp the frontend."
 }
 $info = Get-Content -LiteralPath $distInfo -Raw | ConvertFrom-Json
 if ($info.gitSha -ne $head) {
@@ -148,7 +148,7 @@ $msix = Get-ChildItem -Path (Join-Path $ProjectRoot "distribution\windows-deskto
 
 Write-Host "`n========== REBUILD SUMMARY ==========" -ForegroundColor Green
 Write-Host "HEAD:        $head"
-Write-Host "Confirm UI:  Settings → Advanced → Build: $headShort (must match)"
+Write-Host "Confirm UI:  Settings -> Advanced -> Build: $headShort (must match)"
 Write-Host ""
 if (Test-Path -LiteralPath $exe) {
   Write-Host "EXE:         $exe"
@@ -173,5 +173,5 @@ Install/run ONLY these fresh paths (do not reuse an old payload EXE):
   2) Or run:  $exe
   3) Store:   $($msix.FullName)
 
-After launch: Settings → Advanced must show Build: $headShort
+After launch: Settings -> Advanced must show Build: $headShort
 "@
