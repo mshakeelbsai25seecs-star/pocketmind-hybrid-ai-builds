@@ -281,7 +281,7 @@ export default function Sidebar() {
     return (
       <button
         onClick={() => setSidebarOpen(true)}
-        className="fixed left-4 top-4 z-50 p-3 rounded-xl bg-white dark:bg-surface-900 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors shadow-sm border border-surface-200 dark:border-surface-700 text-surface-800 dark:text-surface-100"
+        className="fixed left-4 top-4 z-50 p-3 rounded-sm bg-white dark:bg-surface-900 hover:bg-surface-100 dark:hover:bg-surface-800 transition-colors shadow-sm border border-surface-200 dark:border-surface-700 text-surface-800 dark:text-surface-100"
         title="Open navigation"
       >
         <PanelLeftOpen className="w-5 h-5" />
@@ -303,7 +303,7 @@ export default function Sidebar() {
             <img
               src="/pocketmind-logo-mark.png"
               alt="PocketMind Hybrid AI"
-              className="w-10 h-10 rounded-xl shrink-0 object-cover bg-black"
+              className="w-10 h-10 rounded-sm shrink-0 object-cover bg-black"
               draggable={false}
             />
             <div className="min-w-0">
@@ -313,7 +313,7 @@ export default function Sidebar() {
           </div>
           <button
             onClick={() => setSidebarOpen(false)}
-            className="p-2 rounded-xl hover:bg-surface-200 dark:hover:bg-white/5 transition-colors"
+            className="p-2 rounded-sm hover:bg-surface-200 dark:hover:bg-white/5 transition-colors"
             title="Collapse navigation"
           >
             <PanelLeftClose className="w-5 h-5" />
@@ -325,7 +325,7 @@ export default function Sidebar() {
             <button
               type="button"
               onClick={() => void handleNewChat()}
-              className="w-full mb-3 flex items-center gap-2 px-3 py-2.5 rounded-xl bg-primary-500 text-surface-950 font-semibold text-sm hover:bg-primary-400"
+              className="w-full mb-3 flex items-center gap-2 px-3 py-2.5 rounded-sm bg-primary-500 text-surface-950 font-semibold text-sm hover:bg-primary-400"
             >
               <Plus className="w-4 h-4" /> New Chat
             </button>
@@ -350,7 +350,7 @@ export default function Sidebar() {
                     type="button"
                     disabled={profileBusy}
                     onClick={() => void handleCreateProfile()}
-                    className="p-2 rounded-lg hover:bg-surface-100 dark:hover:bg-surface-800"
+                    className="p-2 rounded-sm hover:bg-surface-100 dark:hover:bg-surface-800"
                     title="Create profile"
                   >
                     <Plus className="w-4 h-4" />
@@ -363,7 +363,7 @@ export default function Sidebar() {
                 <button
                   key={item.id}
                   onClick={() => navigateToView(item.id)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors duration-150 ${
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-sm transition-colors duration-150 ${
                     activeView === item.id
                       ? 'bg-primary-100 dark:bg-primary-950/40 text-primary-700 dark:text-primary-200'
                       : 'hover:bg-surface-100 dark:hover:bg-surface-800 text-surface-600 dark:text-surface-400 hover:text-surface-950 dark:hover:text-white'
@@ -377,7 +377,7 @@ export default function Sidebar() {
               <div className="pt-1">
                 <button
                   onClick={() => setToolsOpen(open => !open)}
-                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-colors duration-150 ${
+                  className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-sm transition-colors duration-150 ${
                     toolsActive
                       ? 'bg-primary-100 dark:bg-primary-950/40 text-primary-700 dark:text-primary-200'
                       : 'hover:bg-surface-100 dark:hover:bg-surface-800 text-surface-600 dark:text-surface-400 hover:text-surface-950 dark:hover:text-white'
@@ -400,7 +400,7 @@ export default function Sidebar() {
                           setToolsOpen(true);
                           if (window.innerWidth < 768) setSidebarOpen(false);
                         }}
-                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors duration-150 ${
+                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-sm transition-colors duration-150 ${
                           activeView === item.id
                             ? 'bg-primary-100 dark:bg-primary-950/40 text-primary-700 dark:text-primary-200'
                             : 'hover:bg-surface-100 dark:hover:bg-surface-800 text-surface-600 dark:text-surface-400 hover:text-surface-950 dark:hover:text-white'
@@ -425,7 +425,7 @@ export default function Sidebar() {
               </span>
               <button
                 onClick={() => void handleNewChat()}
-                className="p-1.5 rounded-lg hover:bg-surface-200 dark:hover:bg-surface-800 transition-colors"
+                className="p-1.5 rounded-sm hover:bg-surface-200 dark:hover:bg-surface-800 transition-colors"
                 title="New chat"
               >
                 <Plus className="w-4 h-4" />
@@ -441,7 +441,7 @@ export default function Sidebar() {
 
             <div className="flex-1 min-h-0 overflow-y-auto pr-1 space-y-1 sidebar-chat-scroll">
               {filteredConversations.length === 0 && (
-                <div className="rounded-2xl border border-dashed border-surface-300 dark:border-surface-700 p-4 text-sm text-surface-500 text-center">
+                <div className="rounded-sm border border-dashed border-surface-300 dark:border-surface-700 p-4 text-sm text-surface-500 text-center">
                   No chats yet. Start a new conversation.
                 </div>
               )}
@@ -454,7 +454,7 @@ export default function Sidebar() {
                     <button
                       onClick={() => void handleSelectConversation(conv.id)}
                       disabled={busyChatId === conv.id}
-                      className={`w-full text-left px-3 py-2.5 pr-10 rounded-xl text-sm transition-colors ${
+                      className={`w-full text-left px-3 py-2.5 pr-10 rounded-sm text-sm transition-colors ${
                         active
                           ? 'bg-surface-100 dark:bg-surface-800 text-surface-950 dark:text-surface-50 font-semibold'
                           : 'hover:bg-surface-100 dark:hover:bg-surface-800/70 text-surface-600 dark:text-surface-400 hover:text-surface-950 dark:hover:text-white'
@@ -470,21 +470,21 @@ export default function Sidebar() {
                         e.stopPropagation();
                         setOpenMenuId(openMenuId === conv.id ? null : conv.id);
                       }}
-                      className={`absolute right-2 top-2 p-1.5 rounded-lg transition-colors ${openMenuId === conv.id ? 'bg-surface-300 dark:bg-surface-700' : 'opacity-100 md:opacity-0 md:group-hover/chat:opacity-100 hover:bg-surface-300 dark:hover:bg-surface-700'}`}
+                      className={`absolute right-2 top-2 p-1.5 rounded-sm transition-colors ${openMenuId === conv.id ? 'bg-surface-300 dark:bg-surface-700' : 'opacity-100 md:opacity-0 md:group-hover/chat:opacity-100 hover:bg-surface-300 dark:hover:bg-surface-700'}`}
                       title="Chat options"
                     >
                       <MoreVertical className="w-4 h-4" />
                     </button>
 
                     {openMenuId === conv.id && (
-                      <div className="absolute right-2 top-10 z-50 w-44 rounded-xl border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 shadow-md p-1">
-                        <button onClick={() => void handleRename(conv)} className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm hover:bg-surface-100 dark:hover:bg-surface-800">
+                      <div className="absolute right-2 top-10 z-50 w-44 rounded-sm border border-surface-200 dark:border-surface-700 bg-white dark:bg-surface-900 shadow-md p-1">
+                        <button onClick={() => void handleRename(conv)} className="w-full flex items-center gap-2 px-3 py-2 rounded-sm text-sm hover:bg-surface-100 dark:hover:bg-surface-800">
                           <Edit3 className="w-4 h-4" /> Rename
                         </button>
-                        <button onClick={() => void handleCopyChat(conv)} className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm hover:bg-surface-100 dark:hover:bg-surface-800">
+                        <button onClick={() => void handleCopyChat(conv)} className="w-full flex items-center gap-2 px-3 py-2 rounded-sm text-sm hover:bg-surface-100 dark:hover:bg-surface-800">
                           <Copy className="w-4 h-4" /> Copy chat
                         </button>
-                        <button onClick={() => void handleDelete(conv)} className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30">
+                        <button onClick={() => void handleDelete(conv)} className="w-full flex items-center gap-2 px-3 py-2 rounded-sm text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30">
                           <Trash2 className="w-4 h-4" /> Delete
                         </button>
                       </div>

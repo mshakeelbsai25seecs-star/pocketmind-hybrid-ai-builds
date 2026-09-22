@@ -5,6 +5,7 @@ import { useAppStore } from '../store';
 import { Conversation, LocalModelRecord, Message, SystemInfo } from '../types';
 import RefreshButton from './RefreshButton';
 import { filterChatSelectableLocalModels } from '../localModels';
+import { formatInvokeError } from '../lib/formatInvokeError';
 
 function fmtBytes(bytes?: number | null) {
   if (!bytes || bytes <= 0) return 'Unknown';
@@ -30,6 +31,8 @@ export default function HomeDashboard() {
   const setLocalModels = useAppStore(s => s.setLocalModels);
   const setCharacters = useAppStore(s => s.setCharacters);
   const [refreshBusy, setRefreshBusy] = useState(false);
+  const [cudaBusy, setCudaBusy] = useState(false);
+  const [cudaMsg, setCudaMsg] = useState<string | null>(null);
 
   const refreshDashboard = async () => {
     setRefreshBusy(true);
@@ -44,6 +47,25 @@ export default function HomeDashboard() {
       setCharacters(chars);
     } finally {
       setRefreshBusy(false);
+    }
+  };
+
+  const installCudaRuntime = async () => {
+    setCudaBusy(true);
+    setCudaMsg('Downloading NVIDIA CUDA llama.cpp runtime…');
+    try {
+      const result = await invoke<{ message: string; server_path?: string }>('install_llama_runtime_backend', {
+        backend: 'cuda',
+      });
+      setCudaMsg(result.message + (result.server_path ? ` → ${result.server_path}` : ''));
+      useAppStore.getState().setDefaultParams({
+        gpu_layers: -1,
+      });
+      await refreshDashboard();
+    } catch (err) {
+      setCudaMsg(formatInvokeError(err));
+    } finally {
+      setCudaBusy(false);
     }
   };
 
@@ -86,7 +108,18 @@ export default function HomeDashboard() {
                 <button onClick={createChat} disabled={!currentModel} className="btn-primary disabled:opacity-50 disabled:cursor-not-allowed">New Chat</button>
                 <button onClick={() => setActiveView('models')} className="btn-secondary">Select Model</button>
                 <button onClick={() => setActiveView('enterprise-server')} className="btn-secondary">Org Server</button>
+                <button
+                  type="button"
+                  onClick={() => void installCudaRuntime()}
+                  disabled={cudaBusy}
+                  className="btn-secondary inline-flex items-center gap-2"
+                  title="Optional post-install CUDA llama.cpp download (Store packages stay CPU-only)"
+                >
+                  <Download className="w-4 h-4" />
+                  {cudaBusy ? 'Installing CUDA…' : 'Install CUDA runtime'}
+                </button>
               </div>
+              {cudaMsg && <p className="text-sm text-primary-600 dark:text-primary-300 break-words">{cudaMsg}</p>}
               {!currentModel && <p className="text-sm text-amber-500">Select a model before chatting.</p>}
             </div>
             <div className="flex flex-col gap-3 min-w-[min(320px,100%)]">
@@ -101,7 +134,7 @@ export default function HomeDashboard() {
               <Stat label="Local models" value={`${localModels.length}`} icon={Download} />
               <Stat label="Character" value={selectedCharacter} icon={Bot} />
               <Stat label="Memory free" value={fmtBytes(info?.memory.available_bytes)} icon={Activity} />
-              <Stat label="CPU" value={info ? `${info.cpu.cores_physical} cores / ${info.cpu.cores_logical} threads` : 'Unknown'} icon={Cpu} />
+              <Stat label="CPU" value={info?.cpu ? `${info.cpu.cores_physical} cores / ${info.cpu.cores_logical} threads` : 'Unknown'} icon={Cpu} />
               </div>
             </div>
           </div>
@@ -110,7 +143,7 @@ export default function HomeDashboard() {
         <section className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
           {cards.map(card => (
             <button key={card.title} onClick={() => setActiveView(card.view)} className="group text-left premium-card p-5">
-              <div className="h-10 w-10 rounded-xl bg-primary-100 dark:bg-primary-950/40 flex items-center justify-center mb-3">
+              <div className="h-10 w-10 rounded-sm bg-primary-100 dark:bg-primary-950/40 flex items-center justify-center mb-3">
                 <card.icon className="w-5 h-5 text-primary-600 dark:text-primary-300" />
               </div>
               <h3 className="font-bold text-lg mb-1">{card.title}</h3>
@@ -146,7 +179,7 @@ export default function HomeDashboard() {
 
 function Stat({ label, value, icon: Icon }: { label: string; value: string; icon: any }) {
   return (
-    <div className="rounded-xl border border-surface-200 dark:border-surface-800 bg-surface-50 dark:bg-surface-900 p-4 min-w-0">
+    <div className="rounded-sm border border-surface-200 dark:border-surface-800 bg-surface-50 dark:bg-surface-900 p-4 min-w-0">
       <Icon className="w-4 h-4 text-primary-500 mb-2" />
       <p className="text-xs uppercase tracking-wider text-surface-500 font-semibold">{label}</p>
       <p className="font-bold truncate" title={value}>{value}</p>
@@ -156,7 +189,7 @@ function Stat({ label, value, icon: Icon }: { label: string; value: string; icon
 
 function ChecklistItem({ done, text }: { done: boolean; text: string }) {
   return (
-    <div className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${done ? 'border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/20 text-green-800 dark:text-green-200' : 'border-surface-200 dark:border-surface-800 text-surface-500'}`}>
+    <div className={`flex items-center gap-2 rounded-sm border px-3 py-2 text-sm ${done ? 'border-green-200 dark:border-green-900 bg-green-50 dark:bg-green-950/20 text-green-800 dark:text-green-200' : 'border-surface-200 dark:border-surface-800 text-surface-500'}`}>
       <CheckCircle className={`w-4 h-4 shrink-0 ${done ? 'text-green-500' : 'text-surface-400'}`} />
       {text}
     </div>

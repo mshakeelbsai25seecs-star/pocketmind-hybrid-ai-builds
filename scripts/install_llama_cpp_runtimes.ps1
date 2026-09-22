@@ -46,6 +46,7 @@ param(
   [string]$CudaVersion = "12.4",
   [switch]$SkipCuda,
   [switch]$SkipVulkan,
+  [switch]$SkipCpu,
   [string]$TempRoot = ""
 )
 
@@ -211,14 +212,18 @@ Write-Host ("Release: {0} ({1} assets)" -f $release.tag_name, $assets.Count)
 
 $summary = @()
 
-# CPU (always installed)
-$cpuAsset = Find-Asset -Assets $assets -MustContain @("bin-win-cpu-x64", ".zip")
-if ($cpuAsset) {
-  $ok = Install-Backend -BackendName "cpu" -PrimaryAsset $cpuAsset
-  $summary += [pscustomobject]@{ Backend = "cpu"; Installed = $ok }
+# CPU
+if (-not $SkipCpu) {
+  $cpuAsset = Find-Asset -Assets $assets -MustContain @("bin-win-cpu-x64", ".zip")
+  if ($cpuAsset) {
+    $ok = Install-Backend -BackendName "cpu" -PrimaryAsset $cpuAsset
+    $summary += [pscustomobject]@{ Backend = "cpu"; Installed = $ok }
+  } else {
+    Write-Warning "Could not find a Windows CPU x64 asset in release $($release.tag_name)."
+    $summary += [pscustomobject]@{ Backend = "cpu"; Installed = $false }
+  }
 } else {
-  Write-Warning "Could not find a Windows CPU x64 asset in release $($release.tag_name)."
-  $summary += [pscustomobject]@{ Backend = "cpu"; Installed = $false }
+  Write-Host "Skipping CPU (--SkipCpu)."
 }
 
 # Vulkan (cross-vendor GPU)

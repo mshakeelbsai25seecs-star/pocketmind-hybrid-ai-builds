@@ -38,6 +38,7 @@ mod process_util;
 mod power_features;
 mod power_commands;
 mod unlimited_ocr;
+mod llama_runtime_install;
 mod doc_export;
 
 use tauri::{GlobalShortcutManager, Manager, WindowEvent};
@@ -174,6 +175,7 @@ fn main() {
             doc_export::generate_and_export_document,
             doc_export::probe_doc_export,
             doc_export::install_doc_export_support,
+            llama_runtime_install::install_llama_runtime_backend,
             knowledge_chat::kc_build_file_catalog,
             knowledge_chat::kc_load_selected_files,
             knowledge_chat::kc_build_repo_map,

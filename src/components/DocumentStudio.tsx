@@ -12,6 +12,7 @@ import {
   type DocExportProbe,
   type DocSpecResult,
 } from '../docStudio';
+import { formatInvokeError } from '../lib/formatInvokeError';
 import ReportAiContentModal, { type ReportAiContentTarget } from './ReportAiContentModal';
 
 const FORMATS: { id: DocFormatId; label: string }[] = [
@@ -53,7 +54,13 @@ export default function DocumentStudio() {
       try {
         setProbe(await probeDocExport());
       } catch {
-        /* optional */
+        // Tauri/browser probe failure: still surface Install so users are not stuck silent.
+        setProbe({
+          ready: false,
+          python_found: false,
+          worker_found: false,
+          packages: {},
+        });
       }
     })();
   }, []);
@@ -67,7 +74,7 @@ export default function DocumentStudio() {
       setProbe(next);
       setMsg(next.ready ? 'Document export support installed.' : 'Install finished — recheck exporter status above.');
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(formatInvokeError(e));
       setMsg(null);
       try {
         setProbe(await probeDocExport());
@@ -105,7 +112,7 @@ export default function DocumentStudio() {
       setSpecResult(result);
       setMsg(result.message);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(formatInvokeError(e));
     } finally {
       setBusy(false);
     }
@@ -134,7 +141,7 @@ export default function DocumentStudio() {
       setMsg(exported.message + (exported.path ? ` → ${exported.path}` : ''));
       setRecent(prev => [exported.path, ...prev.filter(p => p !== exported.path)].slice(0, 8));
     } catch (e) {
-      setErr(e instanceof Error ? e.message : String(e));
+      setErr(formatInvokeError(e));
     } finally {
       setBusy(false);
     }
@@ -142,8 +149,8 @@ export default function DocumentStudio() {
 
   return (
     <div className="h-full overflow-y-auto p-6 sm:p-8 space-y-6 bg-gradient-to-br from-surface-50 via-white to-primary-50/30 dark:from-surface-950 dark:via-surface-950 dark:to-primary-950/20">
-      <section className="rounded-3xl border border-surface-200 dark:border-surface-800 bg-white/80 dark:bg-surface-900/80 backdrop-blur p-6 sm:p-8 shadow-soft">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 text-sm font-semibold mb-4">
+      <section className="rounded-sm border border-surface-200 dark:border-surface-800 bg-white/80 dark:bg-surface-900/80 backdrop-blur p-6 sm:p-8 shadow-soft">
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-sm bg-primary-100 dark:bg-primary-900/30 text-primary-700 dark:text-primary-300 text-sm font-semibold mb-4">
           <FileText className="w-4 h-4" /> Document Studio
         </div>
         <h1 className="text-3xl font-black tracking-tight">Create DOCX, PPTX, and PDF offline</h1>
@@ -154,14 +161,14 @@ export default function DocumentStudio() {
       </section>
 
       {probe && !probe.ready && (
-        <div className="rounded-2xl border border-amber-300/60 bg-amber-50 dark:bg-amber-950/30 p-4 text-sm flex gap-3">
+        <div className="rounded-sm border border-amber-300/60 bg-amber-50 dark:bg-amber-950/30 p-4 text-sm flex gap-3">
           <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0" />
           <div className="flex-1">
             <p className="font-medium">Exporter packages incomplete</p>
             <p className="text-xs text-surface-600 dark:text-surface-400 mt-1">
-              Install with: pip install python-docx python-pptx reportlab
-              {!probe.python_found ? ' (Python not found on PATH)' : ''}
-              {!probe.worker_found ? ' · exporter script missing' : ''}
+              Install into PocketMind&apos;s local Python packages (python-docx, python-pptx, reportlab).
+              {!probe.python_found ? ' Python was not found — install Python 3 or run Repair tooling in Diagnostics.' : ''}
+              {!probe.worker_found ? ' · exporter script missing from the install' : ''}
             </p>
             <button
               type="button"
@@ -176,11 +183,11 @@ export default function DocumentStudio() {
         </div>
       )}
 
-      <section className="rounded-3xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 p-6 space-y-4 shadow-soft">
+      <section className="rounded-sm border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 p-6 space-y-4 shadow-soft">
         <label className="block text-sm">
           <span className="text-xs text-surface-500">Brief / outline</span>
           <textarea
-            className="mt-1 w-full input min-h-[8rem]"
+            className="mt-1 w-full input-field min-h-[8rem]"
             value={brief}
             onChange={e => setBrief(e.target.value)}
             placeholder="Describe the document you want…"
@@ -192,7 +199,7 @@ export default function DocumentStudio() {
               key={f.id}
               type="button"
               onClick={() => setFormat(f.id)}
-              className={`px-3 py-1.5 rounded-xl text-sm border transition-colors ${
+              className={`px-3 py-1.5 rounded-sm text-sm border transition-colors ${
                 format === f.id
                   ? 'bg-primary-600 text-white border-primary-600'
                   : 'border-surface-200 dark:border-surface-700 hover:bg-surface-100 dark:hover:bg-surface-800'
@@ -217,7 +224,7 @@ export default function DocumentStudio() {
       </section>
 
       {specResult && (
-        <section className="rounded-3xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 p-6 shadow-soft">
+        <section className="rounded-sm border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 p-6 shadow-soft">
           <div className="flex items-center justify-between gap-3 mb-3">
             <h2 className="text-lg font-bold">Preview</h2>
             <button
@@ -239,7 +246,7 @@ export default function DocumentStudio() {
       )}
 
       {recent.length > 0 && (
-        <section className="rounded-3xl border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 p-6 shadow-soft">
+        <section className="rounded-sm border border-surface-200 dark:border-surface-800 bg-white dark:bg-surface-900 p-6 shadow-soft">
           <h2 className="text-lg font-bold mb-3">Recent exports</h2>
           <ul className="space-y-2 text-xs text-surface-600 dark:text-surface-400 break-all">
             {recent.map(p => <li key={p}>{p}</li>)}

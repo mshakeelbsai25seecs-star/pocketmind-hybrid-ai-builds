@@ -390,3 +390,14 @@ export const useAppStore = create<AppState>()(
     }
   )
 );
+
+/** Browser verify hook (`?verify=1`) — not used in production UI. */
+if (typeof window !== 'undefined') {
+  try {
+    if (new URLSearchParams(window.location.search).has('verify')) {
+      (window as unknown as { __PM_STORE__?: typeof useAppStore }).__PM_STORE__ = useAppStore;
+    }
+  } catch {
+    /* ignore */
+  }
+}

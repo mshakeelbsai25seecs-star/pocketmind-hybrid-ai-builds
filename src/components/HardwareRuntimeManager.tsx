@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
-import { Cpu, CheckCircle2, Monitor, Zap } from 'lucide-react';
+import { Cpu, CheckCircle2, Download, Monitor, Zap } from 'lucide-react';
 import { useAppStore } from '../store';
+import { formatInvokeError } from '../lib/formatInvokeError';
 import type { GpuRuntimeReport, RuntimeDiagnostics, SystemInfo } from '../types';
 
 function fmtBytes(bytes?: number | null) {
@@ -30,6 +31,7 @@ export default function HardwareRuntimeManager() {
   const [report, setReport] = useState<GpuRuntimeReport | null>(null);
   const [diag, setDiag] = useState<RuntimeDiagnostics | null>(null);
   const [busy, setBusy] = useState(false);
+  const [cudaBusy, setCudaBusy] = useState(false);
   const [message, setMessage] = useState('');
 
   const isRemote = store.currentModel?.startsWith('remote:') || store.currentModel?.startsWith('enterprise:') || false;
@@ -50,7 +52,7 @@ export default function HardwareRuntimeManager() {
       setReport(next);
       setDiag(d);
     } catch (err) {
-      setMessage(String(err));
+      setMessage(formatInvokeError(err));
     } finally {
       setBusy(false);
     }
@@ -107,6 +109,26 @@ export default function HardwareRuntimeManager() {
     setMessage(vulkanOk ? 'Vulkan runtime preferred for GPU acceleration.' : 'Vulkan was not detected on this machine.');
   };
 
+  const installCudaRuntime = async () => {
+    setCudaBusy(true);
+    setMessage('Downloading NVIDIA CUDA llama.cpp runtime (large download, often 500+ MB)…');
+    try {
+      const result = await invoke<{
+        ok: boolean;
+        message: string;
+        install_dir: string;
+        server_path?: string;
+      }>('install_llama_runtime_backend', { backend: 'cuda' });
+      setMessage(result.message + (result.server_path ? ` → ${result.server_path}` : ''));
+      selectCuda();
+      await refresh();
+    } catch (err) {
+      setMessage(formatInvokeError(err));
+    } finally {
+      setCudaBusy(false);
+    }
+  };
+
   const llamaReady = Boolean(diag?.llama_server_found || report?.runtime_found);
   const checks = useMemo(() => ([
     { label: 'Backend', ok: llamaReady },
@@ -139,7 +161,7 @@ export default function HardwareRuntimeManager() {
           <RuntimeCard
             title="NVIDIA CUDA"
             icon={<span className="text-primary-400 font-black text-lg">NVIDIA</span>}
-            body="High performance acceleration on NVIDIA GPUs."
+            body="High performance acceleration on NVIDIA GPUs. Store builds ship CPU-only — download CUDA here after install."
             available={cudaOk}
             selected={!cpuSafe && cudaOk && !automatic}
             actionLabel={cudaOk ? (automatic ? 'Ready to Use' : 'Use CUDA') : 'Not detected'}
@@ -156,8 +178,28 @@ export default function HardwareRuntimeManager() {
           />
         </div>
 
+        <div className="rounded-sm border border-primary-500/40 bg-[#0c0c0c] p-4 space-y-3">
+          <h2 className="font-semibold flex items-center gap-2">
+            <Download className="w-4 h-4 text-primary-400" /> Download CUDA runtime (optional)
+          </h2>
+          <p className="text-xs text-surface-400 leading-relaxed">
+            Microsoft Store packages stay CPU-only (policy 10.2.4.2). After install, download the official ggml-org CUDA
+            llama.cpp folder into your PocketMind data directory so GPU offload works. Requires an NVIDIA GPU + driver.
+            Large download (~500 MB+).
+          </p>
+          <button
+            type="button"
+            className="btn-primary text-sm inline-flex items-center gap-2"
+            disabled={cudaBusy || busy}
+            onClick={() => void installCudaRuntime()}
+          >
+            <Download className="w-4 h-4" />
+            {cudaBusy ? 'Downloading CUDA…' : 'Download / install CUDA llama.cpp'}
+          </button>
+        </div>
+
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-          <div className="rounded-2xl border border-white/10 bg-[#0c0c0c] p-4">
+          <div className="rounded-sm border border-white/10 bg-[#0c0c0c] p-4">
             <div className="flex items-center gap-2 mb-3">
               <Monitor className="w-4 h-4 text-primary-400" />
               <h2 className="font-semibold">Hardware Summary</h2>
@@ -173,7 +215,7 @@ export default function HardwareRuntimeManager() {
             </p>
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-[#0c0c0c] p-4 space-y-3">
+          <div className="rounded-sm border border-white/10 bg-[#0c0c0c] p-4 space-y-3">
             <h2 className="font-semibold flex items-center gap-2">
               <Zap className="w-4 h-4 text-primary-400" /> Runtime Selection
             </h2>
@@ -194,7 +236,7 @@ export default function HardwareRuntimeManager() {
           </div>
         </div>
 
-        <div className="rounded-2xl border border-white/10 bg-[#0c0c0c] p-4">
+        <div className="rounded-sm border border-white/10 bg-[#0c0c0c] p-4">
           <h2 className="font-semibold mb-3">Local Runtime (llama.cpp)</h2>
           <div className="flex flex-wrap gap-4">
             {checks.map(c => (
@@ -240,7 +282,7 @@ function RuntimeCard({
   onAction: () => void;
 }) {
   return (
-    <div className={`rounded-2xl border p-4 bg-[#0c0c0c] ${selected ? 'border-primary-500' : 'border-white/10'}`}>
+    <div className={`rounded-sm border p-4 bg-[#0c0c0c] ${selected ? 'border-primary-500' : 'border-white/10'}`}>
       <div className="flex items-start justify-between gap-2">
         {icon}
         <ReadyPill ok={available} label="Available" />
