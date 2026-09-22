@@ -123,12 +123,25 @@ jobs:
           }
           "MSIX_PATH=$($msix.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "MSIX_NAME=$($msix.Name)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $nsisDir = Join-Path $env:RUNNER_TEMP 'DevCache\Cargo\target\nexus-ai\release\bundle\nsis'
+          $setup = Get-ChildItem -LiteralPath $nsisDir -Filter '*setup.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $setup) { throw "NSIS setup.exe missing under $nsisDir" }
+          Write-Host ("Setup: {0} ({1:N1} MB)" -f $setup.FullName, ($setup.Length / 1MB))
+          "SETUP_PATH=$($setup.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "SETUP_NAME=$($setup.Name)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Upload MSIX artifact
         uses: actions/upload-artifact@v4
         with:
           name: PocketMind-Store-MSIX-1.0.3.0
           path: distribution/windows-desktop/msix/out/*.msix
+          if-no-files-found: error
+
+      - name: Upload NSIS setup artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketMind-Windows-Setup-CPU-1.0.3.0
+          path: ${{ runner.temp }}/DevCache/Cargo/target/nexus-ai/release/bundle/nsis/*setup.exe
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -138,15 +151,22 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $msix = $env:MSIX_PATH
+          $setup = $env:SETUP_PATH
           $tag = 'store-msix-1.0.3.0'
           $title = 'PocketMind AI Store MSIX 1.0.3.0'
-          $notes = "CPU-only Microsoft Store MSIX (policy 10.2.4.2). Identity PocketMind.PocketMindAI / publisher CN=78BD2D1C-2460-451B-91FD-410288D37531. Upload this file in Partner Center Packages. Do not Authenticode-sign; Microsoft re-signs Store MSIX. GitHub Release download URLs redirect (HTTP 302) — fine for humans, not for Partner Center Package URL fields."
+          $notes = @"
+          CPU-only Microsoft Store package (policy 10.2.4.2). Identity PocketMind.PocketMindAI / publisher CN=78BD2D1C-2460-451B-91FD-410288D37531.
+
+          **Windows test install (recommended):** download the *setup.exe* and run it. CPU-only llama.cpp is embedded; unsigned (SmartScreen may prompt).
+
+          **Partner Center / Store:** upload the .msix file only. Do not Authenticode-sign; Microsoft re-signs Store MSIX. GitHub Release URLs redirect (HTTP 302) — fine for humans, not for Partner Center Package URL fields.
+          "@
           $exists = $false
           gh release view $tag 2>$null | Out-Null
           if ($LASTEXITCODE -eq 0) { $exists = $true }
           if (-not $exists) {
-            gh release create $tag $msix --title $title --notes $notes
+            gh release create $tag $msix $setup --title $title --notes $notes
           } else {
-            gh release upload $tag $msix --clobber
+            gh release upload $tag $msix $setup --clobber
           }
-          gh release view $tag --json url,assets --jq '{url:.url, assets:[.assets[].browserDownloadUrl]}'
+          gh release view $tag --json url,assets --jq '{url:.url, assets:[.assets[]|{name:.name, size:.size, url:.url}]}'
