@@ -442,10 +442,83 @@ if (Test-Path -LiteralPath $syncResources) {
   }
 }
 
+# --- Force fresh frontend embed (prevents stale UI in reused CARGO_TARGET_DIR) ---
+Write-Step "Forcing fresh Vite dist + git SHA stamp"
+$gitSha = "unknown"
+try {
+  Push-Location $ProjectRoot
+  $gitSha = (& git rev-parse HEAD 2>$null | Out-String).Trim()
+  if (-not $gitSha) { $gitSha = "unknown" }
+} catch {
+  $gitSha = "unknown"
+} finally {
+  Pop-Location
+}
+Write-Host "  Git HEAD: $gitSha"
+$env:VITE_POCKETMIND_GIT_SHA = $gitSha
+
+$distDir = Join-Path $ProjectRoot "dist"
+if (Test-Path -LiteralPath $distDir) {
+  Write-Host "  Removing stale dist/"
+  Remove-Item -LiteralPath $distDir -Recurse -Force
+}
+
+# Touch build.rs so cargo re-runs tauri-build and re-embeds ../dist even when Rust sources are unchanged.
+$buildRs = Join-Path $ProjectRoot "src-tauri\build.rs"
+if (Test-Path -LiteralPath $buildRs) {
+  (Get-Item -LiteralPath $buildRs).LastWriteTime = Get-Date
+}
+
+# Delete previous release exe / NSIS so we cannot accidentally ship yesterday's binary.
+$staleBins = @(
+  (Join-Path $TargetDir "release\PocketMind Hybrid AI.exe"),
+  (Join-Path $TargetDir "release\app.manifest")
+)
+Get-ChildItem -Path (Join-Path $TargetDir "release\bundle\nsis") -Filter "*setup.exe" -ErrorAction SilentlyContinue |
+  ForEach-Object { $staleBins += $_.FullName }
+foreach ($bin in $staleBins) {
+  if ($bin -and (Test-Path -LiteralPath $bin)) {
+    Write-Host "  Removing stale output: $bin"
+    Remove-Item -LiteralPath $bin -Force -ErrorAction SilentlyContinue
+  }
+}
+
 npm run tauri build
 if ($LASTEXITCODE -ne 0) {
   throw "tauri build failed with exit code $LASTEXITCODE"
 }
+
+# Prove the just-built web assets contain current-main markers (minified-safe string literals).
+Write-Step "Verifying frontend markers in dist/ (stale-build guard)"
+$jsFiles = @(Get-ChildItem -Path (Join-Path $ProjectRoot "dist\assets") -Filter "*.js" -File -ErrorAction SilentlyContinue)
+if ($jsFiles.Count -eq 0) {
+  throw "No dist/assets/*.js after tauri build — frontend was not produced."
+}
+$jsBlob = ($jsFiles | ForEach-Object { Get-Content -LiteralPath $_.FullName -Raw -ErrorAction SilentlyContinue }) -join "`n"
+$requiredMarkers = @(
+  "llama-runtime-install-progress",
+  "Install CUDA runtime",
+  $gitSha
+)
+foreach ($marker in $requiredMarkers) {
+  if ([string]::IsNullOrWhiteSpace($marker)) { continue }
+  if ($jsBlob -notlike "*$marker*") {
+    throw "Fresh-build guard failed: dist JS is missing expected marker '$marker'. You are not building the sources you think (wrong branch/SHA or stale tree)."
+  }
+  Write-Host "  OK marker: $marker"
+}
+# Footer block was removed from Sidebar — if this exact product footer copy is still present as a
+# sidebar string it may be OK elsewhere, but the combination of SHA + CUDA progress is enough.
+
+$buildInfo = @{
+  gitSha = $gitSha
+  builtAtUtc = [DateTime]::UtcNow.ToString("o")
+  projectRoot = $ProjectRoot
+  cargoTargetDir = $TargetDir
+} | ConvertTo-Json
+$buildInfoPath = Join-Path $ProjectRoot "dist\build-info.json"
+Set-Content -LiteralPath $buildInfoPath -Value $buildInfo -Encoding UTF8
+Write-Host "  Wrote $buildInfoPath"
 
 # --- Locate and stage outputs ---
 Write-Step "Locating build outputs"
@@ -471,7 +544,13 @@ if (Test-Path -LiteralPath $stageScript) {
 
 $payloadDir = Join-Path $ProjectRoot "distribution\windows-desktop\payload"
 Write-Host "`nDone." -ForegroundColor Green
+Write-Host "  Git HEAD:  $gitSha"
 Write-Host "  Main exe:  $builtExe"
+if (Test-Path -LiteralPath $buildInfoPath) {
+  $exeDir = Split-Path -Parent $builtExe
+  Copy-Item -LiteralPath $buildInfoPath -Destination (Join-Path $exeDir "build-info.json") -Force
+  Write-Host "  Build info: $(Join-Path $exeDir 'build-info.json')"
+}
 if (Test-Path -LiteralPath $payloadDir) {
   Write-Host "  Staged:    $payloadDir"
 }

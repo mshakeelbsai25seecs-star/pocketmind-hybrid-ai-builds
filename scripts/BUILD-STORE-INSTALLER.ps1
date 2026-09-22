@@ -44,6 +44,10 @@ Set-Location $ProjectRoot
 Write-Host "PocketMind STORE-SAFE installer build (CPU only)" -ForegroundColor Green
 Write-Host "  Project: $ProjectRoot"
 Write-Host "  Policy:  exclude CUDA/Vulkan DLLs for Microsoft Store 10.2.4.2"
+try {
+  $headNow = (& git -C $ProjectRoot rev-parse HEAD 2>$null | Out-String).Trim()
+  if ($headNow) { Write-Host "  Git HEAD: $headNow" }
+} catch {}
 
 $builder = Join-Path $ProjectRoot "scripts\build-desktop-windows.ps1"
 if (-not (Test-Path -LiteralPath $builder)) {

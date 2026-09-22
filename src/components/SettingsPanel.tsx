@@ -91,6 +91,7 @@ export default function SettingsPanel() {
       const report = [
         'PocketMind Hybrid AI Debug Report',
         `App version: ${diag.app_version}`,
+        `Build SHA: ${import.meta.env.VITE_POCKETMIND_GIT_SHA || 'dev'}`,
         `Current dir: ${diag.current_dir}`,
         `Executable dir: ${diag.executable_dir}`,
         `llama-server found: ${diag.llama_server_found}`,
@@ -324,6 +325,9 @@ export default function SettingsPanel() {
               <h3 className="font-semibold flex items-center gap-2 mb-4"><AlertTriangle className="w-5 h-5 text-yellow-500" />Diagnostics</h3>
               <div className="space-y-2 text-sm text-surface-500">
                 <p>App Version: {appVersion}</p>
+                <p className="text-xs text-surface-500 font-mono break-all" title="Git commit embedded at build time">
+                  Build: {import.meta.env.VITE_POCKETMIND_GIT_SHA || 'dev'}
+                </p>
                 <p>Database: SQLite (encrypted at rest)</p>
                 <p>Telemetry: Disabled (privacy-first)</p>
                 <button type="button" onClick={() => void generateDebugReport()} disabled={advancedBusy} className="btn-secondary text-sm mt-2 disabled:opacity-50">Generate Debug Report</button>
