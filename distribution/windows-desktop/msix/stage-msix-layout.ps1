@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   Stage a Store-safe (CPU-only) release folder into an MSIX loose layout.
@@ -8,6 +8,10 @@
   and sharp tile Assets into distribution/windows-desktop/msix/layout.
   Prefers prebuilt Assets under distribution/windows-desktop/msix/Assets
   (required after Store policy 10.1.1.11 tile rejection).
+
+  Leftover cuda/vulkan folders under CARGO_TARGET_DIR release resources (from a
+  prior fat build) are stripped before staging. The refuse check still runs so
+  any remaining banned backends abort the package.
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\distribution\windows-desktop\msix\stage-msix-layout.ps1
@@ -19,6 +23,38 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+function Remove-BannedLlamaBackends {
+  param(
+    [Parameter(Mandatory = $true)][string]$ResourceRoot,
+    [string[]]$Banned = @("cuda", "vulkan")
+  )
+  if (-not (Test-Path -LiteralPath $ResourceRoot)) { return }
+  foreach ($name in $Banned) {
+    $path = Join-Path $ResourceRoot $name
+    if (Test-Path -LiteralPath $path) {
+      Write-Host "Stripping banned Store backend from resources: $path" -ForegroundColor Yellow
+      Remove-Item -LiteralPath $path -Recurse -Force
+    }
+  }
+}
+
+function Assert-NoBannedLlamaBackends {
+  param(
+    [Parameter(Mandatory = $true)][string]$Root,
+    [string]$Label = "tree",
+    [string[]]$Banned = @("cuda", "vulkan")
+  )
+  if (-not (Test-Path -LiteralPath $Root)) { return }
+  foreach ($name in $Banned) {
+    $hits = @(Get-ChildItem -LiteralPath $Root -Directory -Recurse -ErrorAction SilentlyContinue |
+      Where-Object { $_.Name -ieq $name })
+    if ($hits.Count -gt 0) {
+      $listed = ($hits | ForEach-Object { $_.FullName }) -join "; "
+      throw "Refusing to stage MSIX with $name under $Label. Still present: $listed. Use Store-safe CPU-only build."
+    }
+  }
+}
 
 if (-not $ProjectRoot) {
   $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..\..\..")).Path
@@ -54,16 +90,19 @@ if (-not (Test-Path -LiteralPath $mainExe)) {
   throw "Missing $mainExe"
 }
 
-foreach ($resourceRoot in @(
-    (Join-Path $ProjectRoot "src-tauri\resources\llama.cpp"),
-    (Join-Path $ReleaseDir "resources\llama.cpp")
-  )) {
-  if (-not (Test-Path -LiteralPath $resourceRoot)) { continue }
-  foreach ($banned in @("cuda", "vulkan")) {
-    if (Test-Path -LiteralPath (Join-Path $resourceRoot $banned)) {
-      throw "Refusing to stage MSIX with $banned under $resourceRoot. Use Store-safe CPU-only build."
-    }
-  }
+$resourceRoots = @(
+  (Join-Path $ProjectRoot "src-tauri\resources\llama.cpp"),
+  (Join-Path $ReleaseDir "resources\llama.cpp")
+)
+
+# Prior fat builds can leave cuda/vulkan under CARGO_TARGET_DIR release resources
+# even after a Store-safe NSIS build. Strip them before the safety refuse check.
+foreach ($resourceRoot in $resourceRoots) {
+  Remove-BannedLlamaBackends -ResourceRoot $resourceRoot
+}
+
+foreach ($resourceRoot in $resourceRoots) {
+  Assert-NoBannedLlamaBackends -Root $resourceRoot -Label $resourceRoot
 }
 
 Write-Host "Staging MSIX layout" -ForegroundColor Green
@@ -96,7 +135,7 @@ if (Test-Path -LiteralPath $releaseResources) {
 }
 
 # Prefer sharp prebuilt Store tile assets (fixes 10.1.1.11 blurry tiles).
-# Use Get-ChildItem — Copy-Item -LiteralPath with "*" does not expand wildcards
+# Use Get-ChildItem -- Copy-Item -LiteralPath with "*" does not expand wildcards
 # (Windows PowerShell 5.1), so the layout Assets folder stayed empty.
 if (Test-Path -LiteralPath $prebuiltAssets) {
   $assetFiles = @(Get-ChildItem -LiteralPath $prebuiltAssets -File -ErrorAction Stop)
@@ -158,6 +197,8 @@ foreach ($banned in @("cuda", "vulkan")) {
       Remove-Item -LiteralPath $_.FullName -Recurse -Force
     }
 }
+
+Assert-NoBannedLlamaBackends -Root $layout -Label "MSIX layout"
 
 Write-Host "Done. Next:" -ForegroundColor Green
 Write-Host "  powershell -ExecutionPolicy Bypass -File .\distribution\windows-desktop\msix\PACK-MSIX.ps1"

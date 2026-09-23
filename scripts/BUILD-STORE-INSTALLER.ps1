@@ -70,12 +70,26 @@ if ($LASTEXITCODE -ne 0) {
   throw "build-desktop-windows.ps1 failed with exit code $LASTEXITCODE"
 }
 
+# Strip leftover cuda/vulkan under CARGO_TARGET_DIR release resources (prior fat builds).
+$releaseLlama = Join-Path $DevCacheRoot "Cargo\target\nexus-ai\release\resources\llama.cpp"
+foreach ($banned in @("cuda", "vulkan")) {
+  $path = Join-Path $releaseLlama $banned
+  if (Test-Path -LiteralPath $path) {
+    Write-Host "Removing leftover $banned from release resources: $path" -ForegroundColor Yellow
+    Remove-Item -LiteralPath $path -Recurse -Force
+  }
+}
+
 # Hard verify: resources must not contain cuda/vulkan before we trust the artifact.
 $resourceRoot = Join-Path $ProjectRoot "src-tauri\resources\llama.cpp"
 foreach ($banned in @("cuda", "vulkan")) {
   $path = Join-Path $resourceRoot $banned
   if (Test-Path -LiteralPath $path) {
     throw "Store-safe build still has $path - aborting. Re-run prepare with -SkipCuda -SkipVulkan."
+  }
+  $releasePath = Join-Path $releaseLlama $banned
+  if (Test-Path -LiteralPath $releasePath) {
+    throw "Store-safe build still has $releasePath - aborting."
   }
 }
 $cpuServer = Join-Path $resourceRoot "cpu\llama-server.exe"

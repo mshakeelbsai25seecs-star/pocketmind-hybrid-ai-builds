@@ -13,9 +13,15 @@
   builds Store EXE via BUILD-STORE-INSTALLER.ps1 (which forces a fresh Vite + SHA stamp),
   then stages+packs MSIX from the same release tree, and prints SHA256 of outputs.
 
+  Use -MsixOnly when the Store-safe EXE/release tree already exists and you only need
+  to strip leftover cuda/vulkan under CARGO_TARGET_DIR and pack MSIX (no cargo rebuild).
+
 .EXAMPLE
   cd D:\nexus-ai-deep-fixed
   powershell -ExecutionPolicy Bypass -File .\scripts\REBUILD-STORE-EXE-AND-MSIX.ps1
+
+.EXAMPLE
+  powershell -ExecutionPolicy Bypass -File .\scripts\REBUILD-STORE-EXE-AND-MSIX.ps1 -MsixOnly
 #>
 [CmdletBinding()]
 param(
@@ -23,10 +29,26 @@ param(
   [string]$DevCacheRoot = "D:\DevCache",
   [switch]$SkipLlamaDownload,
   [switch]$AllowNonDDrive,
-  [string]$ExpectedMainPrefix = "dd4221c"
+  [string]$ExpectedMainPrefix = "52a8a62",
+  [switch]$MsixOnly
 )
 
 $ErrorActionPreference = "Stop"
+
+function Remove-BannedLlamaBackends {
+  param(
+    [Parameter(Mandatory = $true)][string]$ResourceRoot,
+    [string[]]$Banned = @("cuda", "vulkan")
+  )
+  if (-not (Test-Path -LiteralPath $ResourceRoot)) { return }
+  foreach ($name in $Banned) {
+    $path = Join-Path $ResourceRoot $name
+    if (Test-Path -LiteralPath $path) {
+      Write-Host "  Stripping banned Store backend: $path" -ForegroundColor Yellow
+      Remove-Item -LiteralPath $path -Recurse -Force
+    }
+  }
+}
 
 if (-not $ProjectRoot) {
   $scriptRepo = Split-Path -Parent $PSScriptRoot
@@ -42,7 +64,11 @@ if (-not (Test-Path -LiteralPath (Join-Path $ProjectRoot "package.json"))) {
   throw "package.json not found under $ProjectRoot. Run from the repo (e.g. cd D:\nexus-ai-deep-fixed)."
 }
 
-Write-Host "PocketMind STORE rebuild (EXE + MSIX) from origin/main" -ForegroundColor Green
+if ($MsixOnly) {
+  Write-Host "PocketMind STORE MSIX-only pack (reuse existing release EXE)" -ForegroundColor Green
+} else {
+  Write-Host "PocketMind STORE rebuild (EXE + MSIX) from origin/main" -ForegroundColor Green
+}
 Write-Host "  ProjectRoot: $ProjectRoot"
 
 Write-Host "`n==> Syncing git to origin/main (hard reset)" -ForegroundColor Cyan
@@ -59,7 +85,7 @@ Write-Host "  HEAD: $head"
 Write-Host "  short: $headShort"
 
 if ($ExpectedMainPrefix -and ($headShort -notlike "$ExpectedMainPrefix*") -and ($head -notlike "$ExpectedMainPrefix*")) {
-  Write-Host "  NOTE: HEAD does not start with expected prefix '$ExpectedMainPrefix' (repo may have moved forward -- that is OK if SHA is newer than PR #9)." -ForegroundColor Yellow
+  Write-Host "  NOTE: HEAD does not start with expected prefix '$ExpectedMainPrefix' (repo may have moved forward -- that is OK if SHA is newer)." -ForegroundColor Yellow
 }
 
 # Minimum feature commits that must be ancestors of HEAD
@@ -76,60 +102,86 @@ foreach ($tip in $requiredTips) {
   Write-Host "  OK ancestor: $($tip.Sha) -- $($tip.Name)"
 }
 
-Write-Host "`n==> Cleaning stale frontend/output artifacts" -ForegroundColor Cyan
-$toRemove = @(
-  (Join-Path $ProjectRoot "dist"),
-  (Join-Path $ProjectRoot "distribution\windows-desktop\msix\layout"),
-  (Join-Path $DevCacheRoot "Cargo\target\nexus-ai\release\PocketMind Hybrid AI.exe")
-)
-foreach ($p in $toRemove) {
-  if (Test-Path -LiteralPath $p) {
-    Write-Host "  Removing $p"
-    Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue
+$releaseDir = Join-Path $DevCacheRoot "Cargo\target\nexus-ai\release"
+$exe = Join-Path $releaseDir "PocketMind Hybrid AI.exe"
+
+if (-not $MsixOnly) {
+  Write-Host "`n==> Cleaning stale frontend/output artifacts" -ForegroundColor Cyan
+  $toRemove = @(
+    (Join-Path $ProjectRoot "dist"),
+    (Join-Path $ProjectRoot "distribution\windows-desktop\msix\layout"),
+    $exe
+  )
+  foreach ($p in $toRemove) {
+    if (Test-Path -LiteralPath $p) {
+      Write-Host "  Removing $p"
+      Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction SilentlyContinue
+    }
   }
-}
-Get-ChildItem -Path (Join-Path $DevCacheRoot "Cargo\target\nexus-ai\release\bundle\nsis") -Filter "*setup.exe" -ErrorAction SilentlyContinue |
-  ForEach-Object {
-    Write-Host "  Removing $($_.FullName)"
-    Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+  Get-ChildItem -Path (Join-Path $DevCacheRoot "Cargo\target\nexus-ai\release\bundle\nsis") -Filter "*setup.exe" -ErrorAction SilentlyContinue |
+    ForEach-Object {
+      Write-Host "  Removing $($_.FullName)"
+      Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+    }
+  Get-ChildItem -Path (Join-Path $ProjectRoot "distribution\windows-desktop\payload") -Filter "*setup.exe" -ErrorAction SilentlyContinue |
+    ForEach-Object {
+      Write-Host "  Removing stale payload setup: $($_.FullName)"
+      Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+    }
+  Get-ChildItem -Path (Join-Path $ProjectRoot "distribution\windows-desktop\msix\out") -Filter "*.msix" -ErrorAction SilentlyContinue |
+    ForEach-Object {
+      Write-Host "  Removing old MSIX: $($_.FullName)"
+      Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+    }
+
+  $storeArgs = @{
+    ProjectRoot = $ProjectRoot
+    DevCacheRoot = $DevCacheRoot
   }
-Get-ChildItem -Path (Join-Path $ProjectRoot "distribution\windows-desktop\payload") -Filter "*setup.exe" -ErrorAction SilentlyContinue |
-  ForEach-Object {
-    Write-Host "  Removing stale payload setup: $($_.FullName)"
-    Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
-  }
-Get-ChildItem -Path (Join-Path $ProjectRoot "distribution\windows-desktop\msix\out") -Filter "*.msix" -ErrorAction SilentlyContinue |
-  ForEach-Object {
-    Write-Host "  Removing old MSIX: $($_.FullName)"
-    Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+  if ($SkipLlamaDownload) { $storeArgs.SkipLlamaDownload = $true }
+  if ($AllowNonDDrive -or $env:GITHUB_ACTIONS -eq "true" -or $env:CI -eq "true") {
+    $storeArgs.AllowNonDDrive = $true
   }
 
-$storeArgs = @{
-  ProjectRoot = $ProjectRoot
-  DevCacheRoot = $DevCacheRoot
-}
-if ($SkipLlamaDownload) { $storeArgs.SkipLlamaDownload = $true }
-if ($AllowNonDDrive -or $env:GITHUB_ACTIONS -eq "true" -or $env:CI -eq "true") {
-  $storeArgs.AllowNonDDrive = $true
+  Write-Host "`n==> Building Store-safe setup.exe (forcing a fresh Vite + SHA stamp)" -ForegroundColor Cyan
+  & (Join-Path $ProjectRoot "scripts\BUILD-STORE-INSTALLER.ps1") @storeArgs
+  if ($LASTEXITCODE -ne 0) { throw "BUILD-STORE-INSTALLER.ps1 failed ($LASTEXITCODE)" }
+
+  # Confirm dist stamp matches HEAD
+  $distInfo = Join-Path $ProjectRoot "dist\build-info.json"
+  if (-not (Test-Path -LiteralPath $distInfo)) {
+    throw "Missing $distInfo after build -- build-desktop-windows.ps1 did not stamp the frontend."
+  }
+  $info = Get-Content -LiteralPath $distInfo -Raw | ConvertFrom-Json
+  if ($info.gitSha -ne $head) {
+    throw "dist/build-info.json gitSha=$($info.gitSha) does not match HEAD=$head"
+  }
+  Write-Host "  Verified dist/build-info.json gitSha == HEAD" -ForegroundColor Green
+} else {
+  Write-Host "`n==> MSIX-only: reusing existing release EXE (no cargo rebuild)" -ForegroundColor Cyan
+  if (-not (Test-Path -LiteralPath $exe)) {
+    throw "Missing $exe. Run full REBUILD-STORE-EXE-AND-MSIX.ps1 (without -MsixOnly) first."
+  }
+  Write-Host "  Found: $exe"
+  Write-Host "  time:  $((Get-Item -LiteralPath $exe).LastWriteTime)"
+  # Clear prior MSIX layout/out so we pack fresh
+  $layoutPath = Join-Path $ProjectRoot "distribution\windows-desktop\msix\layout"
+  if (Test-Path -LiteralPath $layoutPath) {
+    Remove-Item -LiteralPath $layoutPath -Recurse -Force -ErrorAction SilentlyContinue
+  }
+  Get-ChildItem -Path (Join-Path $ProjectRoot "distribution\windows-desktop\msix\out") -Filter "*.msix" -ErrorAction SilentlyContinue |
+    ForEach-Object {
+      Write-Host "  Removing old MSIX: $($_.FullName)"
+      Remove-Item -LiteralPath $_.FullName -Force -ErrorAction SilentlyContinue
+    }
 }
 
-Write-Host "`n==> Building Store-safe setup.exe (forcing a fresh Vite + SHA stamp)" -ForegroundColor Cyan
-& (Join-Path $ProjectRoot "scripts\BUILD-STORE-INSTALLER.ps1") @storeArgs
-if ($LASTEXITCODE -ne 0) { throw "BUILD-STORE-INSTALLER.ps1 failed ($LASTEXITCODE)" }
-
-# Confirm dist stamp matches HEAD
-$distInfo = Join-Path $ProjectRoot "dist\build-info.json"
-if (-not (Test-Path -LiteralPath $distInfo)) {
-  throw "Missing $distInfo after build -- build-desktop-windows.ps1 did not stamp the frontend."
-}
-$info = Get-Content -LiteralPath $distInfo -Raw | ConvertFrom-Json
-if ($info.gitSha -ne $head) {
-  throw "dist/build-info.json gitSha=$($info.gitSha) does not match HEAD=$head"
-}
-Write-Host "  Verified dist/build-info.json gitSha == HEAD" -ForegroundColor Green
+Write-Host "`n==> Stripping leftover cuda/vulkan under release + src-tauri resources" -ForegroundColor Cyan
+Remove-BannedLlamaBackends -ResourceRoot (Join-Path $ProjectRoot "src-tauri\resources\llama.cpp")
+Remove-BannedLlamaBackends -ResourceRoot (Join-Path $releaseDir "resources\llama.cpp")
 
 Write-Host "`n==> Staging + packing MSIX from this same release" -ForegroundColor Cyan
-& (Join-Path $ProjectRoot "distribution\windows-desktop\msix\stage-msix-layout.ps1") -ProjectRoot $ProjectRoot
+& (Join-Path $ProjectRoot "distribution\windows-desktop\msix\stage-msix-layout.ps1") -ProjectRoot $ProjectRoot -ReleaseDir $releaseDir
 if ($LASTEXITCODE -ne 0) { throw "stage-msix-layout.ps1 failed ($LASTEXITCODE)" }
 & (Join-Path $ProjectRoot "distribution\windows-desktop\msix\PACK-MSIX.ps1") -ProjectRoot $ProjectRoot
 if ($LASTEXITCODE -ne 0) { throw "PACK-MSIX.ps1 failed ($LASTEXITCODE)" }
@@ -139,7 +191,6 @@ function Get-Sha256([string]$Path) {
   return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash
 }
 
-$exe = Join-Path $DevCacheRoot "Cargo\target\nexus-ai\release\PocketMind Hybrid AI.exe"
 $nsisDir = Join-Path $DevCacheRoot "Cargo\target\nexus-ai\release\bundle\nsis"
 $setup = Get-ChildItem -LiteralPath $nsisDir -Filter "*setup.exe" -ErrorAction SilentlyContinue |
   Sort-Object LastWriteTime -Descending | Select-Object -First 1
