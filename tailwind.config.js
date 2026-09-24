@@ -8,19 +8,19 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Lighter green accent (shifted up from classic Conductor #22c55e)
+        // Accent driven by CSS vars (Settings -> Appearance). Defaults match #4ADE80.
         primary: {
-          50: '#f3fef6',
-          100: '#e8fceb',
-          200: '#d1fadf',
-          300: '#a7f3c0',
-          400: '#86efac',
-          500: '#4ade80',
-          600: '#22c55e',
-          700: '#16a34a',
-          800: '#15803d',
-          900: '#166534',
-          950: '#14532d',
+          50: 'rgb(var(--color-primary-50) / <alpha-value>)',
+          100: 'rgb(var(--color-primary-100) / <alpha-value>)',
+          200: 'rgb(var(--color-primary-200) / <alpha-value>)',
+          300: 'rgb(var(--color-primary-300) / <alpha-value>)',
+          400: 'rgb(var(--color-primary-400) / <alpha-value>)',
+          500: 'rgb(var(--color-primary-500) / <alpha-value>)',
+          600: 'rgb(var(--color-primary-600) / <alpha-value>)',
+          700: 'rgb(var(--color-primary-700) / <alpha-value>)',
+          800: 'rgb(var(--color-primary-800) / <alpha-value>)',
+          900: 'rgb(var(--color-primary-900) / <alpha-value>)',
+          950: 'rgb(var(--color-primary-950) / <alpha-value>)',
         },
         // True-black / zinc neutrals (matches Android PmBlack / PmPanel / PmLight*)
         surface: {

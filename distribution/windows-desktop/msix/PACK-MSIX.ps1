@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   Pack the staged MSIX layout into an .msix using MakeAppx.exe (Windows SDK).
@@ -90,7 +90,7 @@ if (-not $makeAppx) {
 $outDir = Join-Path $msixRoot "out"
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 if (-not $OutFile) {
-  $ver = "1.0.3.0"
+  $ver = "1.0.4.0"
   $manifestText = Get-Content -LiteralPath $appxManifest -Raw
   if ($manifestText -match 'Version="([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)"') {
     $ver = $Matches[1]

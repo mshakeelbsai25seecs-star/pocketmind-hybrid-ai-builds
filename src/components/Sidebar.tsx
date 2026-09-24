@@ -296,27 +296,32 @@ export default function Sidebar() {
         aria-label="Close navigation overlay"
       />
 
-      <aside className="fixed left-0 top-0 h-full w-[min(20rem,calc(100vw-1rem))] md:w-72 bg-white dark:bg-black border-r border-surface-200 dark:border-white/5 flex flex-col z-40 shadow-sm">
-        <div className="px-4 pt-4 pb-3 flex items-center justify-between flex-shrink-0 bg-white dark:bg-black">
-          <div className="flex items-center gap-3 min-w-0">
+      <aside className="fixed left-0 top-0 h-full w-[min(21rem,calc(100vw-1rem))] md:w-80 bg-white dark:bg-black border-r border-surface-200 dark:border-white/5 flex flex-col z-40 shadow-sm">
+        <div className="px-4 pt-4 pb-3 flex-shrink-0 bg-white dark:bg-black">
+          <div className="flex items-start gap-3">
             <img
               src="/pocketmind-logo-mark.png"
               alt="PocketMind Hybrid AI"
-              className="w-10 h-10 rounded-sm shrink-0 object-cover bg-black"
+              className="w-10 h-10 rounded-sm shrink-0 object-cover bg-black mt-0.5"
               draggable={false}
             />
-            <div className="min-w-0">
-              <span className="app-brand-name font-black text-xl tracking-tight block truncate text-white">PocketMind Hybrid AI</span>
-              <span className="text-[11px] text-surface-500 block truncate">Private / on-device</span>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-start justify-between gap-2">
+                <span className="app-brand-name font-black text-[15px] leading-snug tracking-tight text-surface-900 dark:text-white">
+                  <span className="block">PocketMind</span>
+                  <span className="block">Hybrid AI</span>
+                </span>
+                <button
+                  onClick={() => setSidebarOpen(false)}
+                  className="p-1.5 rounded-sm shrink-0 hover:bg-surface-200 dark:hover:bg-white/5 transition-colors text-surface-700 dark:text-surface-200"
+                  title="Collapse navigation"
+                >
+                  <PanelLeftClose className="w-5 h-5" />
+                </button>
+              </div>
+              <span className="text-[11px] text-surface-600 dark:text-surface-400 block mt-0.5">Private / on-device</span>
             </div>
           </div>
-          <button
-            onClick={() => setSidebarOpen(false)}
-            className="p-2 rounded-sm hover:bg-surface-200 dark:hover:bg-white/5 transition-colors"
-            title="Collapse navigation"
-          >
-            <PanelLeftClose className="w-5 h-5" />
-          </button>
         </div>
 
         <div className="flex-shrink-0 bg-white dark:bg-black">

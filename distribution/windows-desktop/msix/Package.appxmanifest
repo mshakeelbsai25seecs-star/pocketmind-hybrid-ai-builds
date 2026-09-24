@@ -16,7 +16,7 @@
   <Identity
     Name="PocketMind.PocketMindAI"
     Publisher="CN=78BD2D1C-2460-451B-91FD-410288D37531"
-    Version="1.0.3.0"
+    Version="1.0.4.0"
     ProcessorArchitecture="x64" />
 
   <Properties>

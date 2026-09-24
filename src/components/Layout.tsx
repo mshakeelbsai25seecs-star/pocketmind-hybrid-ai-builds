@@ -61,7 +61,7 @@ export default function Layout() {
   return (
     <div className="relative flex h-screen w-screen overflow-hidden app-gradient-bg text-surface-950 dark:text-surface-50">
       <Sidebar />
-      <main className={`relative z-10 min-w-0 flex-1 flex flex-col transition-[margin] duration-300 ${sidebarOpen ? 'md:ml-72' : 'ml-0'}`}>
+      <main className={`relative z-10 min-w-0 flex-1 flex flex-col transition-[margin] duration-300 ${sidebarOpen ? 'md:ml-80' : 'ml-0'}`}>
         {activeView === 'home' && <HomeDashboard />}
         {activeView === 'setup' && <SetupWizard />}
         {activeView === 'chat' && <ChatView />}

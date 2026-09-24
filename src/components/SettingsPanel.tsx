@@ -7,6 +7,7 @@ import McpSettingsPanel from './McpSettingsPanel';
 import RefreshButton from './RefreshButton';
 import { Key, Shield, Cpu, Palette, Globe, Database, ExternalLink, Trash2, CheckCircle, AlertTriangle, Loader2, Flag, Mail } from 'lucide-react';
 import { useAppStore } from '../store';
+import { applyAccentColor, applyThemeClass } from '../themeBootstrap';
 import { CHAT_API_PROVIDERS } from '../apiProviders';
 import { validateApiKey, type ApiKeyValidation } from '../apiKeyValidation';
 import { onOpenExternal, openExternal } from '../openExternal';
@@ -162,7 +163,15 @@ export default function SettingsPanel() {
 
         <div className="flex flex-wrap gap-1 p-1 bg-surface-100 dark:bg-surface-900 rounded-lg w-fit">
           {(['general', 'providers', 'mcp', 'deployment', 'security', 'audit', 'advanced'] as const).map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)} className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${activeTab === tab ? 'bg-white dark:bg-surface-800 shadow-sm' : 'text-surface-500 hover:text-surface-700 dark:hover:text-surface-300'}`}>
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
+                activeTab === tab
+                  ? 'bg-white dark:bg-surface-800 shadow-sm text-surface-900 dark:text-surface-50'
+                  : 'text-surface-800 dark:text-surface-300 hover:text-surface-950 dark:hover:text-surface-100 hover:bg-surface-200/80 dark:hover:bg-surface-800/80'
+              }`}
+            >
               {tab === 'mcp' ? 'MCP' : tab.charAt(0).toUpperCase() + tab.slice(1)}
             </button>
           ))}
@@ -177,7 +186,15 @@ export default function SettingsPanel() {
                   <label className="block text-sm font-medium mb-2">Theme</label>
                   <div className="flex gap-2">
                     {(['light', 'dark', 'system'] as const).map(t => (
-                      <button key={t} onClick={() => setTheme(t)} className={`flex-1 py-2 rounded-lg border text-sm capitalize transition-all ${theme === t ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'border-surface-200 dark:border-surface-700 hover:bg-surface-50 dark:hover:bg-surface-800'}`}>
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => {
+                          applyThemeClass(t);
+                          setTheme(t);
+                        }}
+                        className={`flex-1 py-2 rounded-lg border text-sm capitalize transition-all ${theme === t ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20 text-primary-700 dark:text-primary-300' : 'border-surface-200 dark:border-surface-700 text-surface-800 dark:text-surface-200 hover:bg-surface-50 dark:hover:bg-surface-800'}`}
+                      >
                         {t}
                       </button>
                     ))}
@@ -187,7 +204,17 @@ export default function SettingsPanel() {
                   <label className="block text-sm font-medium mb-2">Accent Color</label>
                   <div className="flex gap-2">
                     {['#4ade80', '#86efac', '#22c55e', '#a3a3a3', '#f5f5f5', '#0a0a0a'].map(color => (
-                      <button key={color} onClick={() => setAccentColor(color)} className={`w-8 h-8 rounded-full transition-all ${accentColor === color ? 'ring-2 ring-offset-2 ring-surface-400 scale-110' : ''}`} style={{ backgroundColor: color }} />
+                      <button
+                        key={color}
+                        type="button"
+                        onClick={() => {
+                          applyAccentColor(color);
+                          setAccentColor(color);
+                        }}
+                        className={`w-8 h-8 rounded-full transition-all ${accentColor === color ? 'ring-2 ring-offset-2 ring-offset-surface-50 dark:ring-offset-surface-950 ring-surface-400 scale-110' : ''}`}
+                        style={{ backgroundColor: color }}
+                        aria-label={`Accent ${color}`}
+                      />
                     ))}
                   </div>
                 </div>

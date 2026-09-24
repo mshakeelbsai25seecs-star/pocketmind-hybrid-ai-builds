@@ -10,10 +10,12 @@ import {
 import { loadProductConfig } from './productConfig';
 import { useKnowledgeChatStore } from './knowledgeChat/store';
 import Layout from './components/Layout';
+import { applyAccentColor, applyThemeClass } from './themeBootstrap';
 import { SystemInfo, ModelRecommendation, Conversation, Character, Message, LocalModelRecord } from './types';
 
 function App() {
   const theme = useAppStore(s => s.theme);
+  const accentColor = useAppStore(s => s.accentColor);
   const performanceMode = useAppStore(s => s.performanceMode);
   const setSystemInfo = useAppStore(s => s.setSystemInfo);
   const setRecommendations = useAppStore(s => s.setRecommendations);
@@ -73,15 +75,22 @@ function App() {
   }, [setProductConfig]);
 
   useEffect(() => {
-    const root = window.document.documentElement;
-    root.dataset.perf = performanceMode;
-    const dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-    root.classList.toggle('dark', dark);
-    root.style.colorScheme = dark ? 'dark' : 'light';
-    // Conductor true-black / off-white (not slate-blue #020617)
-    root.style.backgroundColor = dark ? '#000000' : '#fafafa';
-    document.body.style.backgroundColor = dark ? '#000000' : '#fafafa';
+    window.document.documentElement.dataset.perf = performanceMode;
+    applyThemeClass(theme);
+    if (theme !== 'system') return;
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const onChange = () => applyThemeClass('system');
+    if (typeof mq.addEventListener === 'function') mq.addEventListener('change', onChange);
+    else mq.addListener(onChange);
+    return () => {
+      if (typeof mq.removeEventListener === 'function') mq.removeEventListener('change', onChange);
+      else mq.removeListener(onChange);
+    };
   }, [theme, performanceMode]);
+
+  useEffect(() => {
+    applyAccentColor(accentColor);
+  }, [accentColor]);
 
   useEffect(() => {
     let cancelled = false;

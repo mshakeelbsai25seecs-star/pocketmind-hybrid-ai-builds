@@ -4,8 +4,19 @@
 
 @layer base {
   :root {
-    /* Light green accent #4ADE80 */
+    /* Light green accent #4ADE80 (overridden live by applyAccentColor) */
     --color-primary: 74 222 128;
+    --color-primary-50: 243 254 246;
+    --color-primary-100: 232 252 235;
+    --color-primary-200: 209 250 223;
+    --color-primary-300: 167 243 192;
+    --color-primary-400: 134 239 172;
+    --color-primary-500: 74 222 128;
+    --color-primary-600: 34 197 94;
+    --color-primary-700: 22 163 74;
+    --color-primary-800: 21 128 61;
+    --color-primary-900: 22 101 52;
+    --color-primary-950: 20 83 45;
     --conductor-green: 74 222 128;
     --conductor-green-dim: 134 239 172;
   }

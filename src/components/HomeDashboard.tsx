@@ -137,10 +137,10 @@ export default function HomeDashboard() {
     <div className="flex-1 overflow-y-auto p-4 sm:p-6">
       <div className="max-w-7xl mx-auto space-y-5">
         <section className="premium-card p-6 sm:p-7">
-          <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-            <div className="space-y-3 flex-1 min-w-0">
+          <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-6">
+            <div className="space-y-3 flex-1 min-w-0 xl:min-w-[22rem]">
               <h1 className="app-brand-name text-3xl sm:text-4xl font-black tracking-tight text-primary-400 dark:text-primary-300">PocketMind Hybrid AI Desktop</h1>
-              <p className="max-w-xl text-surface-600 dark:text-surface-300">
+              <p className="max-w-2xl text-surface-600 dark:text-surface-300">
                 Local AI for security analysts and developers: Fortinet Copilot, PocketCode, Image Studio, and on-device models.
               </p>
               <div className="flex flex-wrap gap-3">
@@ -158,33 +158,14 @@ export default function HomeDashboard() {
                   {cudaBusy ? 'Installing CUDA…' : 'Install CUDA runtime'}
                 </button>
               </div>
-              {(cudaBusy || cudaProgress || cudaMsg) && (
-                <div className="rounded-sm border border-primary-500/30 bg-primary-950/20 p-3 space-y-2 max-w-xl">
-                  <div className="flex items-center justify-between gap-3 text-xs text-primary-200">
-                    <span className="font-medium truncate">{cudaMsg || 'Preparing CUDA download…'}</span>
-                    {cudaPercent != null && <span className="tabular-nums shrink-0">{cudaPercent}%</span>}
-                  </div>
-                  <div className="h-2 rounded-sm bg-surface-800 overflow-hidden">
-                    <div
-                      className={`h-full bg-primary-500 transition-[width] duration-300 ${cudaBusy && cudaPercent == null ? 'animate-pulse w-1/3' : ''}`}
-                      style={{ width: cudaPercent != null ? `${cudaPercent}%` : cudaBusy ? undefined : '0%' }}
-                    />
-                  </div>
-                  <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-surface-400">
-                    {cudaProgress?.phase && <span>Phase: {cudaProgress.phase}</span>}
-                    {cudaProgress?.file && <span className="truncate max-w-[16rem]" title={cudaProgress.file}>{cudaProgress.file}</span>}
-                    {cudaBytesLabel && <span className="tabular-nums">{cudaBytesLabel}</span>}
-                  </div>
-                </div>
-              )}
               {!currentModel && <p className="text-sm text-amber-500">Select a model before chatting.</p>}
             </div>
-            <div className="flex flex-col gap-3 min-w-[min(320px,100%)]">
+            <div className="flex flex-col gap-3 w-full xl:w-[min(28rem,100%)] shrink-0">
               <RefreshButton
                 title="Refresh"
                 onClick={refreshDashboard}
                 busy={refreshBusy}
-                className="self-end lg:self-start"
+                className="self-end"
               />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <Stat label="Active model" value={selectedModel} icon={HardDrive} />
@@ -195,6 +176,25 @@ export default function HomeDashboard() {
               </div>
             </div>
           </div>
+          {(cudaBusy || cudaProgress || cudaMsg) && (
+            <div className="mt-5 rounded-sm border border-primary-500/30 bg-primary-950/20 p-3 space-y-2">
+              <div className="flex items-start justify-between gap-3 text-xs text-primary-200">
+                <span className="font-medium break-words min-w-0 flex-1">{cudaMsg || 'Preparing CUDA download…'}</span>
+                {cudaPercent != null && <span className="tabular-nums shrink-0 pt-0.5">{cudaPercent}%</span>}
+              </div>
+              <div className="h-2 rounded-sm bg-surface-800 overflow-hidden">
+                <div
+                  className={`h-full bg-primary-500 transition-[width] duration-300 ${cudaBusy && cudaPercent == null ? 'animate-pulse w-1/3' : ''}`}
+                  style={{ width: cudaPercent != null ? `${cudaPercent}%` : cudaBusy ? undefined : '0%' }}
+                />
+              </div>
+              <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-surface-400">
+                {cudaProgress?.phase && <span>Phase: {cudaProgress.phase}</span>}
+                {cudaProgress?.file && <span className="break-all" title={cudaProgress.file}>{cudaProgress.file}</span>}
+                {cudaBytesLabel && <span className="tabular-nums">{cudaBytesLabel}</span>}
+              </div>
+            </div>
+          )}
         </section>
 
         <section className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
