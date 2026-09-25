@@ -4,6 +4,7 @@ import { listen } from '@tauri-apps/api/event';
 import { Cpu, CheckCircle2, Download, Monitor, Zap } from 'lucide-react';
 import { useAppStore } from '../store';
 import { formatInvokeError } from '../lib/formatInvokeError';
+import { chooseWritableDataRoot, needsWritableDataRoot } from '../storageAccess';
 import type { GpuRuntimeReport, RuntimeDiagnostics, SystemInfo } from '../types';
 
 type CudaInstallProgress = {
@@ -45,6 +46,7 @@ export default function HardwareRuntimeManager() {
   const [cudaBusy, setCudaBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [cudaProgress, setCudaProgress] = useState<CudaInstallProgress | null>(null);
+  const [cudaNeedsPath, setCudaNeedsPath] = useState(false);
 
   const isRemote = store.currentModel?.startsWith('remote:') || store.currentModel?.startsWith('enterprise:') || false;
   const selectedModelPath = !isRemote ? store.currentModel : null;
@@ -138,6 +140,7 @@ export default function HardwareRuntimeManager() {
 
   const installCudaRuntime = async () => {
     setCudaBusy(true);
+    setCudaNeedsPath(false);
     setCudaProgress({ phase: 'start', message: 'Preparing CUDA download…', percent: 1 });
     setMessage('Downloading NVIDIA CUDA llama.cpp runtime (large download, often 500+ MB)…');
     try {
@@ -152,14 +155,29 @@ export default function HardwareRuntimeManager() {
       selectCuda();
       await refresh();
     } catch (err) {
-      setMessage(formatInvokeError(err));
+      const text = formatInvokeError(err);
+      setMessage(text);
+      setCudaNeedsPath(needsWritableDataRoot(err));
       setCudaProgress(prev => ({
         phase: 'error',
-        message: formatInvokeError(err),
+        message: text,
         percent: prev?.percent ?? null,
       }));
     } finally {
       setCudaBusy(false);
+    }
+  };
+
+  const chooseDataFolder = async () => {
+    try {
+      const saved = await chooseWritableDataRoot({
+        title: 'Choose writable folder for CUDA runtimes and models',
+      });
+      if (!saved) return;
+      setCudaNeedsPath(false);
+      setMessage(`Data folder set to ${saved.dataRoot}. Retry CUDA download.`);
+    } catch (err) {
+      setMessage(formatInvokeError(err));
     }
   };
 
@@ -230,10 +248,20 @@ export default function HardwareRuntimeManager() {
             <Download className="w-4 h-4" />
             {cudaBusy ? 'Downloading CUDA…' : 'Download / install CUDA llama.cpp'}
           </button>
-          {(cudaBusy || cudaProgress) && (
+          {cudaNeedsPath && (
+            <button
+              type="button"
+              className="btn-secondary text-sm inline-flex items-center gap-2 ml-2"
+              onClick={() => void chooseDataFolder()}
+            >
+              <Monitor className="w-4 h-4" />
+              Choose writable data folder…
+            </button>
+          )}
+          {(cudaBusy || cudaProgress || message) && (
             <div className="space-y-2">
-              <div className="flex items-center justify-between gap-3 text-xs text-primary-200">
-                <span className="font-medium truncate">{cudaProgress?.message || message || 'Preparing…'}</span>
+              <div className="flex items-start justify-between gap-3 text-xs text-primary-200">
+                <span className="font-medium break-words min-w-0 flex-1">{cudaProgress?.message || message || 'Preparing…'}</span>
                 {typeof cudaProgress?.percent === 'number' && (
                   <span className="tabular-nums shrink-0">{cudaProgress.percent}%</span>
                 )}
@@ -254,7 +282,7 @@ export default function HardwareRuntimeManager() {
               <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-surface-500">
                 {cudaProgress?.phase && <span>Phase: {cudaProgress.phase}</span>}
                 {cudaProgress?.file && (
-                  <span className="truncate max-w-[16rem]" title={cudaProgress.file}>{cudaProgress.file}</span>
+                  <span className="break-all" title={cudaProgress.file}>{cudaProgress.file}</span>
                 )}
                 {cudaProgress?.downloaded != null && cudaProgress?.total != null && cudaProgress.total > 0 && (
                   <span className="tabular-nums">

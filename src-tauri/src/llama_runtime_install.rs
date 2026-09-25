@@ -1,10 +1,15 @@
 //! Optional post-install llama.cpp backend download (CUDA / Vulkan / CPU).
 //! Store MSIX stays CPU-only; users can fetch GPU runtimes into the data root.
 
-use crate::deployment::preferred_data_root;
+use crate::commands::AppState;
+use crate::deployment::{
+    load_deployment_config, normalize_path_string, path_is_writable, preferred_data_root,
+    resolve_writable_data_root,
+};
 use crate::error::{AppError, AppResult};
 use serde::Serialize;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use tauri::State;
 
 #[cfg(windows)]
 use std::io::{BufRead, BufReader};
@@ -21,6 +26,8 @@ pub struct LlamaRuntimeInstallResult {
     pub server_path: Option<String>,
     pub message: String,
     pub log_tail: String,
+    /// When true, UI should offer a folder picker (Settings data root) then retry.
+    pub needs_writable_data_root: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -34,7 +41,49 @@ pub struct LlamaRuntimeInstallProgress {
     pub total: Option<u64>,
 }
 
-fn resolve_install_script() -> Option<PathBuf> {
+fn io_access_hint(err: &std::io::Error, path: &Path) -> String {
+    let kind = err.kind();
+    let raw = err.to_string();
+    let lower = raw.to_ascii_lowercase();
+    let denied = matches!(kind, std::io::ErrorKind::PermissionDenied)
+        || lower.contains("access is denied")
+        || lower.contains("permission denied");
+    let nospace = lower.contains("there is not enough space")
+        || lower.contains("no space left")
+        || lower.contains("disk full");
+    if denied {
+        format!(
+            "Access Denied writing to {}. University/lab PCs often block C: writes. Choose a writable data folder (for example D:\\PocketMind) in Settings -> Deployment, then retry the CUDA download.",
+            path.display()
+        )
+    } else if nospace {
+        format!(
+            "Disk full while writing to {}. Free space on that drive or choose another data folder in Settings -> Deployment.",
+            path.display()
+        )
+    } else {
+        format!("Could not write under {}: {err}", path.display())
+    }
+}
+
+fn looks_like_access_denied(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("access is denied")
+        || lower.contains("permission denied")
+        || lower.contains("unauthorizedaccess")
+        || lower.contains("access denied")
+        || lower.contains("no writable data folder")
+}
+
+fn looks_like_disk_full(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    lower.contains("not enough space")
+        || lower.contains("no space left")
+        || lower.contains("disk full")
+        || lower.contains("there is not enough space on the disk")
+}
+
+fn resolve_install_script(data_root: &Path) -> Option<PathBuf> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
         if let Some(parent) = exe.parent() {
@@ -66,9 +115,10 @@ fn resolve_install_script() -> Option<PathBuf> {
         return Some(found);
     }
 
-    // Store/MSIX may not ship the .ps1 next to the exe — materialize the embedded copy.
+    // Store/MSIX may not ship the .ps1 next to the exe — materialize the embedded copy
+    // under the *writable* data root (not Program Files / locked C:).
     const EMBEDDED: &str = include_str!("../../scripts/install_llama_cpp_runtimes.ps1");
-    let dest = preferred_data_root()
+    let dest = data_root
         .join("scripts")
         .join("install_llama_cpp_runtimes.ps1");
     if let Some(parent) = dest.parent() {
@@ -76,6 +126,16 @@ fn resolve_install_script() -> Option<PathBuf> {
     }
     if std::fs::write(&dest, EMBEDDED).is_ok() {
         return Some(dest);
+    }
+    // Last chance: preferred root scripts folder.
+    let fallback = preferred_data_root()
+        .join("scripts")
+        .join("install_llama_cpp_runtimes.ps1");
+    if let Some(parent) = fallback.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if std::fs::write(&fallback, EMBEDDED).is_ok() {
+        return Some(fallback);
     }
     None
 }
@@ -164,6 +224,7 @@ fn parse_and_emit_progress_line(window: &tauri::Window, backend: &str, line: &st
 #[tauri::command]
 pub async fn install_llama_runtime_backend(
     window: tauri::Window,
+    state: State<'_, AppState>,
     backend: String,
 ) -> AppResult<LlamaRuntimeInstallResult> {
     let backend = backend.trim().to_ascii_lowercase();
@@ -175,7 +236,7 @@ pub async fn install_llama_runtime_backend(
 
     #[cfg(not(windows))]
     {
-        let _ = window;
+        let _ = (window, state);
         return Err(AppError::Unknown(format!(
             "In-app {backend} runtime download is Windows-only. On this OS, place llama-server under bin/llama.cpp/{backend}/."
         )));
@@ -183,24 +244,63 @@ pub async fn install_llama_runtime_backend(
 
     #[cfg(windows)]
     {
-        let script = resolve_install_script().ok_or_else(|| {
-            AppError::Unknown(
-                "Could not find scripts/install_llama_cpp_runtimes.ps1 next to the app. Reinstall PocketMind or run the script from the repo."
-                    .to_string(),
-            )
-        })?;
-        let data_root = preferred_data_root();
-        std::fs::create_dir_all(data_root.join("bin").join("llama.cpp")).map_err(|e| {
-            AppError::Unknown(format!("Could not create runtime folder under {}: {e}", data_root.display()))
+        let configured_root = {
+            let db = state.db.lock().await;
+            let config = load_deployment_config(&db);
+            config.data_root
+        };
+
+        let data_root = match resolve_writable_data_root(Some(configured_root.as_str())) {
+            Ok(path) => path,
+            Err(message) => {
+                emit_progress(&window, &backend, "error", &message, None);
+                return Err(AppError::Unknown(format!(
+                    "{message} (needs_writable_data_root=true)"
+                )));
+            }
+        };
+
+        let runtime_bin = data_root.join("bin").join("llama.cpp");
+        if let Err(e) = std::fs::create_dir_all(&runtime_bin) {
+            let hint = io_access_hint(&e, &runtime_bin);
+            emit_progress(&window, &backend, "error", &hint, None);
+            return Err(AppError::Unknown(format!(
+                "{hint} (needs_writable_data_root=true)"
+            )));
+        }
+        if !path_is_writable(&runtime_bin) {
+            let hint = format!(
+                "Access Denied: cannot write CUDA/GPU runtimes under {}. Choose a writable data folder (for example D:\\PocketMind) in Settings -> Deployment, then retry.",
+                runtime_bin.display()
+            );
+            emit_progress(&window, &backend, "error", &hint, None);
+            return Err(AppError::Unknown(format!(
+                "{hint} (needs_writable_data_root=true)"
+            )));
+        }
+
+        let script = resolve_install_script(&data_root).ok_or_else(|| {
+            AppError::Unknown(format!(
+                "Could not find or write scripts/install_llama_cpp_runtimes.ps1 under {}. Reinstall PocketMind or choose another writable data folder. (needs_writable_data_root=true)",
+                data_root.display()
+            ))
         })?;
         let temp_root = data_root.join(".llama_runtime_tmp");
-        std::fs::create_dir_all(&temp_root).ok();
+        if let Err(e) = std::fs::create_dir_all(&temp_root) {
+            let hint = io_access_hint(&e, &temp_root);
+            return Err(AppError::Unknown(format!(
+                "{hint} (needs_writable_data_root=true)"
+            )));
+        }
 
         emit_progress(
             &window,
             &backend,
             "start",
-            &format!("Starting {backend} llama.cpp runtime install…"),
+            &format!(
+                "Starting {backend} llama.cpp runtime install into {}…",
+                normalize_path_string(&data_root.to_string_lossy())
+            ),
             Some(1),
         );
 
@@ -280,7 +380,7 @@ pub async fn install_llama_runtime_backend(
         let log_tail: String = combined
             .chars()
             .rev()
-            .take(1200)
+            .take(1600)
             .collect::<String>()
             .chars()
             .rev()
@@ -296,30 +396,37 @@ pub async fn install_llama_runtime_backend(
             .to_string();
 
         if !ok {
-            emit_progress(
-                &window,
-                &backend,
-                "error",
-                "CUDA/GPU runtime install failed.",
-                None,
-            );
-            return Err(AppError::Unknown(format!(
-                "CUDA/GPU runtime install did not produce {}.\n{}",
-                server.display(),
-                if log_tail.trim().is_empty() {
-                    "Installer exited with an error. Check NVIDIA drivers and free disk space on the data drive."
-                        .to_string()
-                } else {
-                    log_tail.clone()
-                }
-            )));
+            let needs_path = looks_like_access_denied(&combined)
+                || looks_like_access_denied(&log_tail)
+                || looks_like_disk_full(&combined)
+                || looks_like_disk_full(&log_tail);
+            let detail = if log_tail.trim().is_empty() {
+                "Installer exited with an error. Check NVIDIA drivers, free disk space, and that the data folder is writable.".to_string()
+            } else {
+                log_tail.clone()
+            };
+            let message = if needs_path {
+                format!(
+                    "CUDA/GPU runtime install failed under {} (write/permission or disk space).\n{}\nChoose a writable data folder in Settings -> Deployment (for example D:\\PocketMind), then retry. (needs_writable_data_root=true)",
+                    data_root.display(),
+                    detail
+                )
+            } else {
+                format!(
+                    "CUDA/GPU runtime install did not produce {}.\n{}",
+                    server.display(),
+                    detail
+                )
+            };
+            emit_progress(&window, &backend, "error", &message, None);
+            return Err(AppError::Unknown(message));
         }
 
         emit_progress(
             &window,
             &backend,
             "complete",
-            &format!("{backend} llama.cpp runtime installed."),
+            &format!("{backend} llama.cpp runtime installed under {}.", data_root.display()),
             Some(100),
         );
 
@@ -329,9 +436,11 @@ pub async fn install_llama_runtime_backend(
             install_dir,
             server_path: Some(server.to_string_lossy().to_string()),
             message: format!(
-                "{backend} llama.cpp runtime installed. Select NVIDIA CUDA (or Automatic Optimizer) in Hardware & Runtime, then retry chat."
+                "{backend} llama.cpp runtime installed under {}. Select NVIDIA CUDA (or Automatic Optimizer) in Hardware & Runtime, then retry chat.",
+                data_root.display()
             ),
             log_tail,
+            needs_writable_data_root: false,
         })
     }
 }

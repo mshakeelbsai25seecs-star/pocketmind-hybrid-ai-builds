@@ -96,12 +96,11 @@ pub fn default_data_root() -> PathBuf {
     preferred_data_root()
 }
 
-/// True when a system data root already exists as writable, or can be created.
-#[cfg(target_os = "linux")]
-fn linux_system_data_root_usable(path: &Path) -> bool {
+/// True when a directory exists as writable, or can be created and written.
+pub fn path_is_writable(path: &Path) -> bool {
     if path.is_dir() {
         let probe = path.join(".pocketmind_write_probe");
-        match std::fs::write(&probe, b"") {
+        match std::fs::write(&probe, b"ok") {
             Ok(()) => {
                 let _ = std::fs::remove_file(&probe);
                 true
@@ -111,12 +110,31 @@ fn linux_system_data_root_usable(path: &Path) -> bool {
     } else if path.exists() {
         false
     } else {
-        std::fs::create_dir_all(path).is_ok()
+        match std::fs::create_dir_all(path) {
+            Ok(()) => {
+                let probe = path.join(".pocketmind_write_probe");
+                match std::fs::write(&probe, b"ok") {
+                    Ok(()) => {
+                        let _ = std::fs::remove_file(&probe);
+                        true
+                    }
+                    Err(_) => false,
+                }
+            }
+            Err(_) => false,
+        }
     }
+}
+
+/// True when a system data root already exists as writable, or can be created.
+#[cfg(target_os = "linux")]
+fn linux_system_data_root_usable(path: &Path) -> bool {
+    path_is_writable(path)
 }
 
 /// Resolve the active PocketMind Hybrid AI data root (`NEXUS_DATA_ROOT`, else platform default).
 /// If a legacy NexusAI root already exists and the new root does not, keep using the legacy root.
+/// On Windows lab PCs with C: write lockdown, prefer an existing/writable D: root when available.
 pub fn preferred_data_root() -> PathBuf {
     if let Ok(value) = std::env::var("NEXUS_DATA_ROOT") {
         if !value.trim().is_empty() {
@@ -125,22 +143,38 @@ pub fn preferred_data_root() -> PathBuf {
     }
     #[cfg(target_os = "windows")]
     {
-        let portable = dirs::data_local_dir()
-            .unwrap_or_else(|| PathBuf::from(r"C:\ProgramData"))
+        let local = dirs::data_local_dir()
+            .unwrap_or_else(|| PathBuf::from(r"C:\Users\Public\AppData\Local"))
             .join("PocketMind");
         let legacy = PathBuf::from(WINDOWS_LEGACY_DATA_ROOT);
-        // Prefer an already-initialized install so upgrades do not relocate data.
-        if portable.exists() {
-            return portable;
+        let d_drive = PathBuf::from(r"D:\PocketMind");
+
+        // Prefer an already-initialized install so upgrades do not relocate data,
+        // but only when that location is still writable (lab lockdown may lock C:).
+        if local.is_dir() && path_is_writable(&local) {
+            return local;
         }
         if let Some(dev) = windows_dev_data_root_candidate() {
-            return dev;
+            if path_is_writable(&dev) {
+                return dev;
+            }
         }
-        if legacy.exists() {
+        if legacy.is_dir() && path_is_writable(&legacy) {
             return legacy;
         }
-        let _ = std::fs::create_dir_all(&portable);
-        return portable;
+        if d_drive.is_dir() && path_is_writable(&d_drive) {
+            return d_drive;
+        }
+        // New installs on locked C: — prefer D:\PocketMind when D: is present and writable.
+        if Path::new(r"D:\").is_dir() && path_is_writable(&d_drive) {
+            return d_drive;
+        }
+        if path_is_writable(&local) {
+            return local;
+        }
+        // Last resort: return LOCALAPPDATA path (callers must surface Access Denied clearly).
+        let _ = std::fs::create_dir_all(&local);
+        return local;
     }
     #[cfg(target_os = "macos")]
     {
@@ -295,6 +329,95 @@ pub fn normalize_path_string(path: &str) -> String {
 
 pub fn normalize_path_for_check(path: &str) -> String {
     normalize_path_string(path).to_lowercase()
+}
+
+/// Pick a writable data root for large downloads (CUDA runtimes, models).
+/// Prefers the configured deployment `data_root`, then `preferred_data_root()`, then common lab alternatives.
+pub fn resolve_writable_data_root(configured: Option<&str>) -> Result<PathBuf, String> {
+    let mut candidates: Vec<PathBuf> = Vec::new();
+    if let Some(value) = configured {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            candidates.push(PathBuf::from(trimmed));
+        }
+    }
+    candidates.push(preferred_data_root());
+    #[cfg(target_os = "windows")]
+    {
+        candidates.push(PathBuf::from(r"D:\PocketMind"));
+        candidates.push(PathBuf::from(WINDOWS_LEGACY_DATA_ROOT));
+        if let Some(local) = dirs::data_local_dir() {
+            candidates.push(local.join("PocketMind"));
+        }
+    }
+
+    let mut tried = Vec::new();
+    for candidate in candidates {
+        let display = normalize_path_string(&candidate.to_string_lossy());
+        if tried.iter().any(|t: &String| t.eq_ignore_ascii_case(&display)) {
+            continue;
+        }
+        tried.push(display.clone());
+        if path_is_writable(&candidate) {
+            return Ok(candidate);
+        }
+    }
+
+    Err(format!(
+        "No writable data folder found (Access Denied or disk full). Tried: {}. Choose a writable folder (for example D:\\PocketMind) in Settings -> Deployment, or set NEXUS_DATA_ROOT.",
+        tried.join("; ")
+    ))
+}
+
+/// Probe result for first-launch / Settings UX (no fake OS dialogs — UI uses folder picker).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StorageAccessProbe {
+    pub ok: bool,
+    pub data_root: String,
+    pub writable: bool,
+    pub message: String,
+    pub suggested_roots: Vec<String>,
+}
+
+pub fn probe_storage_access(configured: Option<&str>) -> StorageAccessProbe {
+    let preferred = preferred_data_root();
+    let preferred_str = normalize_path_string(&preferred.to_string_lossy());
+    let mut suggested = vec![preferred_str.clone()];
+    #[cfg(target_os = "windows")]
+    {
+        suggested.push(normalize_path_string(r"D:\PocketMind"));
+        suggested.push(normalize_path_string(WINDOWS_LEGACY_DATA_ROOT));
+        if let Some(local) = dirs::data_local_dir() {
+            suggested.push(normalize_path_string(
+                &local.join("PocketMind").to_string_lossy(),
+            ));
+        }
+    }
+    suggested.sort();
+    suggested.dedup();
+
+    match resolve_writable_data_root(configured) {
+        Ok(root) => {
+            let root_str = normalize_path_string(&root.to_string_lossy());
+            StorageAccessProbe {
+                ok: true,
+                data_root: root_str.clone(),
+                writable: true,
+                message: format!("Data folder is writable: {root_str}"),
+                suggested_roots: suggested,
+            }
+        }
+        Err(message) => StorageAccessProbe {
+            ok: false,
+            data_root: configured
+                .map(|s| normalize_path_string(s.trim()))
+                .filter(|s| !s.is_empty())
+                .unwrap_or(preferred_str),
+            writable: false,
+            message,
+            suggested_roots: suggested,
+        },
+    }
 }
 
 pub fn default_config() -> DeploymentConfig {

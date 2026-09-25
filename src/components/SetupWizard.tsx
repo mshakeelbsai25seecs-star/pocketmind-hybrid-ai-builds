@@ -5,13 +5,30 @@ import { ArrowRight, CheckCircle, Download, FolderSearch, HardDrive, Library, Sh
 import { useAppStore } from '../store';
 import { LocalModelRecord, RuntimeDiagnostics } from '../types';
 import SupportModelsPanel from './SupportModelsPanel';
+import { chooseWritableDataRoot, probeStorageAccess } from '../storageAccess';
+import { formatInvokeError } from '../lib/formatInvokeError';
 
 export default function SetupWizard() {
   const store = useAppStore();
   const [step, setStep] = useState(0);
   const [diag, setDiag] = useState<RuntimeDiagnostics | null>(null);
   const [busy, setBusy] = useState(false);
-  const steps = ['Welcome', 'Engine check', 'Models folder', 'First model', 'Support models', 'Ready'];
+  const [storageOk, setStorageOk] = useState<boolean | null>(null);
+  const [storageMsg, setStorageMsg] = useState('');
+  const [dataRoot, setDataRoot] = useState('');
+  const steps = ['Welcome', 'Engine check', 'Data & models folder', 'First model', 'Support models', 'Ready'];
+
+  const refreshStorage = async () => {
+    try {
+      const probe = await probeStorageAccess();
+      setStorageOk(probe.writable);
+      setStorageMsg(probe.message);
+      setDataRoot(probe.dataRoot);
+    } catch (err) {
+      setStorageOk(false);
+      setStorageMsg(formatInvokeError(err));
+    }
+  };
 
   const refresh = async () => {
     setBusy(true);
@@ -21,6 +38,7 @@ export default function SetupWizard() {
         modelsDir: store.modelsDir,
       });
       setDiag(d);
+      await refreshStorage();
     } finally {
       setBusy(false);
     }
@@ -31,6 +49,25 @@ export default function SetupWizard() {
   const chooseFolder = async () => {
     const selected = await open({ directory: true, multiple: false });
     if (typeof selected === 'string') store.setModelsDir(selected);
+  };
+
+  const chooseDataFolder = async () => {
+    setBusy(true);
+    try {
+      const saved = await chooseWritableDataRoot({
+        title: 'Choose writable PocketMind data folder (models, CUDA runtimes, app data)',
+        defaultPath: dataRoot || undefined,
+      });
+      if (!saved) return;
+      setDataRoot(saved.dataRoot);
+      setStorageOk(true);
+      setStorageMsg(`Data folder is writable: ${saved.dataRoot}`);
+    } catch (err) {
+      setStorageOk(false);
+      setStorageMsg(formatInvokeError(err));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const importModel = async () => {
@@ -65,18 +102,57 @@ export default function SetupWizard() {
             {steps.map((s, i) => <span key={s} className={`px-3 py-1 rounded-full text-xs font-semibold ${i <= step ? 'bg-primary-500 text-white' : 'bg-surface-100 dark:bg-surface-800 text-surface-500'}`}>{i + 1}. {s}</span>)}
           </div>
 
-          {step === 0 && <Panel icon={Sparkles} title="Welcome to PocketMind Hybrid AI Desktop" desc="This wizard checks that the local engine is ready, confirms your models folder, helps you import the first chat model, and offers downloads for Fortinet Copilot embeddings, reranker, and optional Unlimited-OCR. You can skip downloads and do them later in Settings." />}
+          {step === 0 && (
+            <Panel
+              icon={Sparkles}
+              title="Welcome to PocketMind Hybrid AI Desktop"
+              desc="This wizard checks that the local engine is ready, confirms a writable data folder (models, CUDA runtimes, app data), helps you import the first chat model, and offers downloads for Fortinet Copilot embeddings. Lab PCs that block C: writes should pick a folder on D: (or another writable drive)."
+            >
+              <CheckRow
+                ok={storageOk === true}
+                label="Writable data folder"
+                detail={storageMsg || 'Checking…'}
+              />
+              {(storageOk === false || !dataRoot) && (
+                <button type="button" onClick={() => void chooseDataFolder()} className="btn-primary mt-3" disabled={busy}>
+                  Choose writable data folder…
+                </button>
+              )}
+              {storageOk === true && dataRoot && (
+                <p className="text-xs text-surface-500 mt-2 break-all">Using: {dataRoot}</p>
+              )}
+            </Panel>
+          )}
           {step === 1 && <Panel icon={Wrench} title="Engine check" desc="PocketMind Hybrid AI needs its local engine files (llama-server) under bin/llama.cpp or next to the app.">
             <button onClick={refresh} className="btn-secondary mb-4" disabled={busy}>{busy ? 'Checking...' : 'Run check'}</button>
             <CheckRow ok={!!diag?.llama_server_found} label="Local engine found" detail={diag?.llama_server_path || diag?.llama_server_error || 'Not checked yet'} />
             <CheckRow ok={!!diag?.llama_server_help_ok} label="Local engine can start" detail={diag?.llama_server_help_ok ? 'Startup check succeeded.' : 'Copy the matching llama-server files from the same release package.'} />
           </Panel>}
-          {step === 2 && <Panel icon={FolderSearch} title="Choose models folder" desc="This is where PocketMind Hybrid AI looks for chat models and where embeddings/rerankers will be downloaded.">
-            <div className="grid md:grid-cols-[1fr_auto] gap-3">
-              <input className="input-field" value={store.modelsDir} onChange={e => store.setModelsDir(e.target.value)} />
-              <button onClick={chooseFolder} className="btn-secondary">Browse</button>
-            </div>
-          </Panel>}
+          {step === 2 && (
+            <Panel
+              icon={FolderSearch}
+              title="Data & models folders"
+              desc="PocketMind needs a writable data root for runtimes/downloads, plus a models folder for GGUF chat weights. University lab lockdowns often block C: — use D:\PocketMind when available."
+            >
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm font-medium mb-2">Data root (runtimes, caches, app data)</p>
+                  <div className="grid md:grid-cols-[1fr_auto] gap-3">
+                    <input className="input-field font-mono text-xs" value={dataRoot} readOnly placeholder="Not set" />
+                    <button type="button" onClick={() => void chooseDataFolder()} className="btn-secondary" disabled={busy}>Browse</button>
+                  </div>
+                  <CheckRow ok={storageOk === true} label={storageOk ? 'Writable' : 'Not writable yet'} detail={storageMsg || ''} />
+                </div>
+                <div>
+                  <p className="text-sm font-medium mb-2">Models folder</p>
+                  <div className="grid md:grid-cols-[1fr_auto] gap-3">
+                    <input className="input-field" value={store.modelsDir} onChange={e => store.setModelsDir(e.target.value)} />
+                    <button type="button" onClick={chooseFolder} className="btn-secondary">Browse</button>
+                  </div>
+                </div>
+              </div>
+            </Panel>
+          )}
           {step === 3 && <Panel icon={HardDrive} title="Import or download the first chat model" desc="Start with a small general chat model (for example Phi-3 Mini or Qwen). You can also open Models later to download from the catalog.">
             <div className="flex flex-wrap gap-2">
               <button onClick={importModel} className="btn-primary flex items-center gap-2"><Download className="w-4 h-4" /> Import GGUF</button>
@@ -89,7 +165,8 @@ export default function SetupWizard() {
             <p className="text-xs text-surface-500 mt-3">You can return anytime under Settings → Deployment (same download list) or Settings → Security (OCR details).</p>
           </Panel>}
           {step === 5 && <Panel icon={ShieldCheck} title="You are ready" desc="Setup is complete. Open Diagnostics if you want a health check, or finish and start using the app.">
-            <div className="grid sm:grid-cols-2 gap-3">
+            <CheckRow ok={storageOk === true} label="Writable data folder" detail={dataRoot || storageMsg || 'Not checked'} />
+            <div className="grid sm:grid-cols-2 gap-3 mt-3">
               <button onClick={() => store.setActiveView('diagnostics')} className="btn-secondary">Open Diagnostics</button>
               <button onClick={finish} className="btn-primary">Finish setup</button>
             </div>

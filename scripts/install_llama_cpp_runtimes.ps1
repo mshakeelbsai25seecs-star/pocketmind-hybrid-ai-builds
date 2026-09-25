@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
   Download and stage llama.cpp Windows runtimes (CPU + CUDA + Vulkan) into the
   bin\llama.cpp\{cpu,cuda,vulkan} layout that PocketMind Hybrid AI expects.
@@ -63,15 +63,31 @@ try {
 }
 
 $Target = Join-Path $ProjectPath "bin\llama.cpp"
-New-Item -ItemType Directory -Force -Path $Target | Out-Null
+try {
+  New-Item -ItemType Directory -Force -Path $Target -ErrorAction Stop | Out-Null
+} catch {
+  throw ("Cannot create runtime folder '{0}'. Access Denied or disk full. Choose a writable data folder (e.g. D:\PocketMind) in Settings -> Deployment, then retry. Details: {1}" -f $Target, $_)
+}
 
-# Stage downloads on the project drive by default. The system drive may be too
-# small for the CUDA archives (~580 MB combined).
+# Stage downloads under the same writable data root (not locked C:\TEMP).
 if (-not $TempRoot) {
   $TempRoot = Join-Path $ProjectPath ".llama_runtime_tmp"
 }
-New-Item -ItemType Directory -Force -Path $TempRoot | Out-Null
+try {
+  New-Item -ItemType Directory -Force -Path $TempRoot -ErrorAction Stop | Out-Null
+} catch {
+  throw ("Cannot create temp folder '{0}'. Access Denied or disk full. Choose a writable data folder in Settings -> Deployment. Details: {1}" -f $TempRoot, $_)
+}
 $script:TempRoot = $TempRoot
+
+# Probe write access before downloading hundreds of MB.
+$probe = Join-Path $Target ".pocketmind_write_probe"
+try {
+  Set-Content -LiteralPath $probe -Value "ok" -Encoding Ascii -ErrorAction Stop
+  Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue
+} catch {
+  throw ("Access Denied writing to '{0}'. Lab PCs often block C: writes. Set data root to a writable drive (D:\PocketMind) in Settings -> Deployment. Details: {1}" -f $Target, $_)
+}
 
 function Write-Section($text) { Write-Host "`n=== $text ===" -ForegroundColor Cyan }
 
@@ -275,7 +291,11 @@ function Download-FileWithRetry {
         Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
       }
       if ($attempt -ge $MaxAttempts) {
-        throw "Failed to download $Url after $MaxAttempts attempts. Last error: $($_.Exception.Message)"
+        $msg = [string]$_.Exception.Message
+        if ($msg -match 'Access is denied|UnauthorizedAccess|Permission denied|not enough space|disk full|There is not enough space') {
+          throw ("Write/permission failure saving to {0}: {1}. Choose a writable data folder (e.g. D:\PocketMind) in Settings -> Deployment." -f $OutFile, $msg)
+        }
+        throw ("Failed to download {0} after {1} attempts. Last error: {2}" -f $Url, $MaxAttempts, $msg)
       }
       Start-Sleep -Seconds ([Math]::Min(30, 3 * $attempt))
     }

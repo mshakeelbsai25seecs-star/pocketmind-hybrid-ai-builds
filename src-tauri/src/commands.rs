@@ -1786,6 +1786,16 @@ pub async fn get_deployment_config(state: State<'_, AppState>) -> AppResult<depl
 }
 
 #[tauri::command]
+pub async fn probe_storage_access(state: State<'_, AppState>) -> AppResult<deployment::StorageAccessProbe> {
+    let configured = {
+        let db = state.db.lock().await;
+        let config = deployment::load_deployment_config(&db);
+        config.data_root
+    };
+    Ok(deployment::probe_storage_access(Some(configured.as_str())))
+}
+
+#[tauri::command]
 pub async fn set_deployment_config(
     state: State<'_, AppState>,
     config: deployment::DeploymentConfig,

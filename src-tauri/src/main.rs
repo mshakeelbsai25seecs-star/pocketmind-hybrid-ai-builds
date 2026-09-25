@@ -137,6 +137,7 @@ fn main() {
             commands::get_settings,
             commands::set_setting,
             commands::get_deployment_config,
+            commands::probe_storage_access,
             commands::set_deployment_config,
             commands::get_deployment_paths,
             commands::ensure_deployment_directories,

@@ -7,6 +7,7 @@ import { Conversation, LocalModelRecord, Message, SystemInfo } from '../types';
 import RefreshButton from './RefreshButton';
 import { filterChatSelectableLocalModels } from '../localModels';
 import { formatInvokeError } from '../lib/formatInvokeError';
+import { chooseWritableDataRoot, needsWritableDataRoot, probeStorageAccess } from '../storageAccess';
 
 function fmtBytes(bytes?: number | null) {
   if (!bytes || bytes <= 0) return 'Unknown';
@@ -45,6 +46,24 @@ export default function HomeDashboard() {
   const [cudaBusy, setCudaBusy] = useState(false);
   const [cudaMsg, setCudaMsg] = useState<string | null>(null);
   const [cudaProgress, setCudaProgress] = useState<CudaInstallProgress | null>(null);
+  const [cudaNeedsPath, setCudaNeedsPath] = useState(false);
+  const [dataRootHint, setDataRootHint] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void probeStorageAccess()
+      .then(probe => {
+        if (cancelled) return;
+        if (!probe.writable) {
+          setDataRootHint(probe.message);
+          setCudaNeedsPath(true);
+        } else {
+          setDataRootHint(`Runtimes/models write to: ${probe.dataRoot}`);
+        }
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
@@ -77,8 +96,24 @@ export default function HomeDashboard() {
     }
   };
 
+  const chooseDataFolder = async () => {
+    try {
+      const saved = await chooseWritableDataRoot({
+        title: 'Choose writable folder for models and CUDA runtimes',
+        defaultPath: dataRootHint?.includes(':\\') ? undefined : 'D:\\PocketMind',
+      });
+      if (!saved) return;
+      setCudaNeedsPath(false);
+      setDataRootHint(`Runtimes/models write to: ${saved.dataRoot}`);
+      setCudaMsg(`Data folder set to ${saved.dataRoot}. You can retry CUDA download.`);
+    } catch (err) {
+      setCudaMsg(formatInvokeError(err));
+    }
+  };
+
   const installCudaRuntime = async () => {
     setCudaBusy(true);
+    setCudaNeedsPath(false);
     setCudaProgress({ phase: 'start', message: 'Preparing CUDA download…', percent: 1 });
     setCudaMsg('Downloading NVIDIA CUDA llama.cpp runtime…');
     try {
@@ -92,10 +127,12 @@ export default function HomeDashboard() {
       });
       await refreshDashboard();
     } catch (err) {
-      setCudaMsg(formatInvokeError(err));
+      const text = formatInvokeError(err);
+      setCudaMsg(text);
+      setCudaNeedsPath(needsWritableDataRoot(err));
       setCudaProgress(prev => ({
         phase: 'error',
-        message: formatInvokeError(err),
+        message: text,
         percent: prev?.percent ?? null,
       }));
     } finally {
@@ -157,7 +194,21 @@ export default function HomeDashboard() {
                   <Download className="w-4 h-4" />
                   {cudaBusy ? 'Installing CUDA…' : 'Install CUDA runtime'}
                 </button>
+                {cudaNeedsPath && (
+                  <button
+                    type="button"
+                    onClick={() => void chooseDataFolder()}
+                    className="btn-secondary inline-flex items-center gap-2"
+                    title="Lab PCs often block C: writes — pick a writable drive folder"
+                  >
+                    <HardDrive className="w-4 h-4" />
+                    Choose data folder…
+                  </button>
+                )}
               </div>
+              {dataRootHint && (
+                <p className={`text-xs ${cudaNeedsPath ? 'text-amber-400' : 'text-surface-500'}`}>{dataRootHint}</p>
+              )}
               {!currentModel && <p className="text-sm text-amber-500">Select a model before chatting.</p>}
             </div>
             <div className="flex flex-col gap-3 w-full xl:w-[min(28rem,100%)] shrink-0">
@@ -193,6 +244,11 @@ export default function HomeDashboard() {
                 {cudaProgress?.file && <span className="break-all" title={cudaProgress.file}>{cudaProgress.file}</span>}
                 {cudaBytesLabel && <span className="tabular-nums">{cudaBytesLabel}</span>}
               </div>
+              {cudaNeedsPath && (
+                <button type="button" onClick={() => void chooseDataFolder()} className="btn-secondary text-xs px-3 py-1.5">
+                  Choose writable data folder…
+                </button>
+              )}
             </div>
           )}
         </section>
