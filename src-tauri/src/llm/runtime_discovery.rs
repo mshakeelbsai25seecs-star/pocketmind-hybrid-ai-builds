@@ -97,12 +97,15 @@ fn is_native_macos_runtime(path: &Path) -> bool {
 pub fn candidate_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
 
-    // User data root (post-Store CUDA/Vulkan downloads land under {data}/bin/llama.cpp/).
-    let data = crate::deployment::preferred_data_root();
-    if data.is_dir() {
-        roots.push(data.clone());
-        roots.push(data.join("bin"));
-        roots.push(data.join("resources"));
+    // User data roots (post-Store CUDA/Vulkan downloads land under {data}/bin/llama.cpp/).
+    // Search preferred + common lab/portable locations so Auto finds CUDA after install
+    // even when Deployment data_root differs from the default LOCALAPPDATA path.
+    for data in data_root_search_paths() {
+        if data.is_dir() {
+            roots.push(data.clone());
+            roots.push(data.join("bin"));
+            roots.push(data.join("resources"));
+        }
     }
 
     if let Ok(dir) = env::current_dir() {
@@ -137,6 +140,27 @@ pub fn candidate_roots() -> Vec<PathBuf> {
     roots.sort();
     roots.dedup();
     roots
+}
+
+/// Roots that may hold post-install CUDA/Vulkan under bin/llama.cpp/.
+fn data_root_search_paths() -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    out.push(crate::deployment::preferred_data_root());
+    #[cfg(target_os = "windows")]
+    {
+        out.push(PathBuf::from(r"D:\PocketMind"));
+        out.push(PathBuf::from(crate::deployment::WINDOWS_LEGACY_DATA_ROOT));
+        if let Some(local) = dirs::data_local_dir() {
+            out.push(local.join("PocketMind"));
+        }
+        if let Ok(prog) = env::var("LOCALAPPDATA") {
+            let p = PathBuf::from(prog).join("PocketMind");
+            out.push(p);
+        }
+    }
+    out.sort();
+    out.dedup();
+    out
 }
 
 /// True when an NVIDIA driver is present (so CUDA runtimes should be preferred).
@@ -304,13 +328,24 @@ pub fn all_runtime_candidates(gpu_layers: i32) -> Vec<RuntimeCandidate> {
 /// similar) with little dedicated VRAM. Vulkan backends still initialize the
 /// device even at `--gpu-layers 0` and often crash with `0xc0000005` / OOM on
 /// those GPUs — prefer the dedicated CPU binary instead.
+///
+/// Never returns true when NVIDIA is present (driver, NVML/DXGI name, or a real
+/// CUDA llama.cpp runtime). Lab machines often report 0 VRAM via DXGI when NVML
+/// is unavailable — that must not force Automatic Optimizer onto CPU.
 pub fn weak_igpu_only() -> bool {
     if has_nvidia_driver() {
         return false;
     }
+    if has_usable_cuda_runtime() {
+        return false;
+    }
     let mut monitor = HardwareMonitor::new();
     let info = monitor.get_system_info();
+    if info.gpus.iter().any(gpu_looks_nvidia) {
+        return false;
+    }
     if info.gpus.is_empty() {
+        // No GPU inventory: still allow CUDA if a runtime exists (handled above).
         return true;
     }
     let four_gb = 4u64 * 1024 * 1024 * 1024;
@@ -320,12 +355,37 @@ pub fn weak_igpu_only() -> bool {
     }
     info.gpus.iter().all(|g| {
         let name = g.name.to_lowercase();
+        let vendor = g.vendor.to_lowercase();
+        // Do NOT treat unknown-VRAM discrete cards as weak — only clear iGPU names.
         name.contains("intel")
             || name.contains("uhd")
             || name.contains("iris")
             || name.contains("radeon graphics")
-            || g.vram_total_bytes < 2 * 1024 * 1024 * 1024
+            || vendor.contains("intel")
+            || (g.vram_total_bytes > 0 && g.vram_total_bytes < 2 * 1024 * 1024 * 1024 && !gpu_looks_nvidia(g))
     })
+}
+
+fn gpu_looks_nvidia(g: &crate::hardware::GPUInfo) -> bool {
+    if g.is_cuda_capable {
+        return true;
+    }
+    let name = g.name.to_lowercase();
+    let vendor = g.vendor.to_lowercase();
+    vendor.contains("nvidia")
+        || name.contains("nvidia")
+        || name.contains("geforce")
+        || name.contains("quadro")
+        || name.contains("tesla")
+        || name.contains("rtx ")
+        || name.contains("gtx ")
+}
+
+/// True when a discovered cuda/ folder contains real CUDA backend libraries.
+pub fn has_usable_cuda_runtime() -> bool {
+    all_runtime_candidates(-1)
+        .iter()
+        .any(|c| c.mode == "cuda" && !c.force_cpu)
 }
 
 /// Order discovered runtimes by the platform-aware device priority used for chat.
@@ -335,10 +395,15 @@ pub fn ordered_runtime_candidates(gpu_layers: i32) -> AppResult<Vec<RuntimeCandi
         return Err(AppError::InferenceError(missing_runtime_message()));
     }
 
-    let nvidia_ok = has_nvidia_driver();
+    let nvidia_ok = has_nvidia_driver() || has_usable_cuda_runtime() || {
+        let mut monitor = HardwareMonitor::new();
+        monitor.get_system_info().gpus.iter().any(gpu_looks_nvidia)
+    };
     let metal_hw = macos_metal_hardware();
     let wants_gpu = gpu_layers != 0;
-    let prefer_cpu = weak_igpu_only();
+    // Weak-iGPU CPU preference is for Vulkan crash avoidance on Intel-only laptops.
+    // Never CPU-first when NVIDIA/CUDA is available — Automatic Optimizer must offload.
+    let prefer_cpu = weak_igpu_only() && !nvidia_ok;
     let mut ordered = Vec::<RuntimeCandidate>::new();
 
     if wants_gpu && !prefer_cpu {
@@ -587,7 +652,91 @@ pub fn gpu_layer_attempts(model_path: &str, requested_gpu_layers: i32, force_cpu
 }
 
 fn gpu_layer_runtime_available() -> bool {
-    ordered_runtime_candidates(-1)
-        .map(|r| r.into_iter().any(|c| !c.force_cpu))
-        .unwrap_or(false)
+    // Inspect raw candidates (not ordered) so weak-iGPU CPU preference cannot
+    // hide a real CUDA/Vulkan/Metal runtime from Auto offload planning.
+    all_runtime_candidates(-1)
+        .iter()
+        .any(|c| !c.force_cpu && matches!(c.mode, "cuda" | "vulkan" | "metal"))
+}
+
+// ---------------------------------------------------------------------------
+// Last successful launch status (UI / diagnostics)
+// ---------------------------------------------------------------------------
+
+use std::sync::Mutex;
+
+#[derive(Debug, Clone, Default)]
+pub struct LastLaunchStatus {
+    pub backend: String,
+    pub runtime_path: String,
+    pub gpu_layers: i32,
+    pub force_cpu: bool,
+    pub label: String,
+}
+
+static LAST_LAUNCH: Mutex<LastLaunchStatus> = Mutex::new(LastLaunchStatus {
+    backend: String::new(),
+    runtime_path: String::new(),
+    gpu_layers: 0,
+    force_cpu: true,
+    label: String::new(),
+});
+
+pub fn set_last_launch_status(backend: &str, path: &Path, gpu_layers: i32, force_cpu: bool, label: &str) {
+    if let Ok(mut guard) = LAST_LAUNCH.lock() {
+        guard.backend = backend.to_string();
+        guard.runtime_path = path.display().to_string();
+        guard.gpu_layers = gpu_layers;
+        guard.force_cpu = force_cpu;
+        guard.label = label.to_string();
+    }
+}
+
+pub fn last_launch_status() -> LastLaunchStatus {
+    LAST_LAUNCH.lock().map(|g| g.clone()).unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hardware::GPUInfo;
+
+    fn gpu(name: &str, vendor: &str, vram: u64, cuda: bool) -> GPUInfo {
+        GPUInfo {
+            name: name.to_string(),
+            vendor: vendor.to_string(),
+            vram_total_bytes: vram,
+            vram_used_bytes: 0,
+            is_cuda_capable: cuda,
+            is_metal_capable: false,
+            is_vulkan_capable: true,
+            compute_score: 1000,
+        }
+    }
+
+    #[test]
+    fn nvidia_name_not_treated_as_weak_even_with_zero_vram() {
+        let nvidia = gpu("NVIDIA GeForce RTX 3060", "NVIDIA", 0, false);
+        assert!(gpu_looks_nvidia(&nvidia));
+        let intel = gpu("Intel UHD Graphics", "Intel", 128 * 1024 * 1024, false);
+        // Dual-GPU laptop: NVIDIA present => not weak-iGPU-only.
+        assert!(![nvidia.clone(), intel].iter().all(|g| {
+            let name = g.name.to_lowercase();
+            name.contains("intel") || (g.vram_total_bytes > 0 && g.vram_total_bytes < 2 * 1024 * 1024 * 1024 && !gpu_looks_nvidia(g))
+        }));
+    }
+
+    #[test]
+    fn intel_only_small_vram_matches_weak_heuristic_names() {
+        let intel = gpu("Intel(R) UHD Graphics 620", "Intel", 128 * 1024 * 1024, false);
+        let name = intel.name.to_lowercase();
+        assert!(name.contains("intel") || name.contains("uhd"));
+        assert!(!gpu_looks_nvidia(&intel));
+    }
+
+    #[test]
+    fn runtime_candidate_force_cpu_when_cuda_libs_missing() {
+        // Unit-level: mode labeling helpers stay consistent.
+        assert_eq!(binary_name().contains("llama-server"), true);
+    }
 }

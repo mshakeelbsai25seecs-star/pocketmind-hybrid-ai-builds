@@ -90,7 +90,7 @@ if (-not $makeAppx) {
 $outDir = Join-Path $msixRoot "out"
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 if (-not $OutFile) {
-  $ver = "1.0.4.0"
+  $ver = "1.0.5.0"
   $manifestText = Get-Content -LiteralPath $appxManifest -Raw
   if ($manifestText -match 'Version="([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)"') {
     $ver = $Matches[1]

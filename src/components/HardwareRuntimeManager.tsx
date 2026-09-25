@@ -96,7 +96,12 @@ export default function HardwareRuntimeManager() {
   const gpu = info?.gpus?.[0];
   const vramGb = gpu?.vram_total_bytes ? Math.round(gpu.vram_total_bytes / 1_073_741_824) : 0;
 
-  const cudaOk = Boolean(report?.supports_cuda_hint || gpu?.is_cuda_capable);
+  const cudaOk = Boolean(
+    report?.cuda_runtime_found
+    || report?.supports_cuda_hint
+    || gpu?.is_cuda_capable
+    || /nvidia|geforce|rtx |gtx /i.test(gpu?.name || ''),
+  );
   const vulkanOk = Boolean(report?.supports_vulkan_hint || gpu?.is_vulkan_capable);
   const cpuOk = true;
 
@@ -111,7 +116,16 @@ export default function HardwareRuntimeManager() {
       batch_size: report?.auto_batch_size || report?.recommended_batch_size || 256,
       flash_attention: !!report?.supports_flash_attention,
     });
-    setMessage('Automatic Optimizer is on. PocketMind will pick CUDA, Vulkan, or CPU for each model.');
+    const plan = report?.recommended_mode || 'Automatic';
+    const layers = report?.auto_gpu_layers ?? report?.recommended_gpu_layers ?? -1;
+    if (cudaOk) {
+      setMessage(
+        `Automatic Optimizer on: prefers CUDA when available (plan: ${plan}, layers ${layers}). `
+        + (report?.cuda_runtime_found ? 'CUDA runtime folder found.' : 'Install CUDA runtime if chat stays on CPU.'),
+      );
+    } else {
+      setMessage(`Automatic Optimizer on: ${plan} (no CUDA runtime/GPU detected yet — CPU fallback until CUDA is installed).`);
+    }
   };
 
   const applyCpuSafe = () => {
@@ -350,6 +364,31 @@ export default function HardwareRuntimeManager() {
           {diag?.llama_server_path && (
             <p className="text-[11px] font-mono text-surface-500 mt-1 break-all">{diag.llama_server_path}</p>
           )}
+          <div className="mt-3 rounded-sm border border-white/10 bg-black/40 p-3 space-y-1 text-xs">
+            <p className="font-semibold text-surface-200">Offload status</p>
+            <p className="text-surface-400">
+              Mode: {automatic ? 'Automatic Optimizer' : cpuSafe ? 'CPU Safe' : `Manual GPU layers (${mode})`}
+            </p>
+            <p className="text-surface-400">
+              Plan: {report?.recommended_mode || '—'}
+              {typeof report?.auto_gpu_layers === 'number' ? ` · planned layers ${report.auto_gpu_layers}` : ''}
+            </p>
+            <p className="text-surface-400">
+              CUDA runtime: {report?.cuda_runtime_found ? 'found' : 'not found'}
+              {report?.gpu_acceleration_available ? ' · GPU libs available' : ' · GPU libs missing'}
+            </p>
+            {report?.active_backend && (
+              <p className="text-primary-300 break-all">
+                Last load: {report.active_backend}
+                {typeof report.active_gpu_layers === 'number' ? ` · ngl ${report.active_gpu_layers}` : ''}
+                {report.active_launch_label ? ` · ${report.active_launch_label}` : ''}
+              </p>
+            )}
+            {report?.active_runtime_path && (
+              <p className="font-mono text-[11px] text-surface-500 break-all">{report.active_runtime_path}</p>
+            )}
+            {report?.warning && <p className="text-amber-300">{report.warning}</p>}
+          </div>
           <button type="button" className="btn-secondary mt-3 text-sm" disabled={busy} onClick={() => void refresh()}>
             {busy ? 'Scanning…' : 'Rescan hardware'}
           </button>

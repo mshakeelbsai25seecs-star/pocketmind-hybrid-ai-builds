@@ -618,5 +618,10 @@ export interface GpuRuntimeReport {
   estimated_available_vram_bytes?: number;
   estimated_available_ram_bytes?: number;
   warning?: string | null;
+  active_backend?: string | null;
+  active_runtime_path?: string | null;
+  active_gpu_layers?: number | null;
+  active_launch_label?: string | null;
+  cuda_runtime_found?: boolean;
   checks: GpuRuntimeCheck[];
 }

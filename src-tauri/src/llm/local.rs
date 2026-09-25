@@ -1221,7 +1221,15 @@ impl InferenceBackend for LlamaCppBackend {
                             // Record GPU usage so Knowledge Chat embeddings can avoid
                             // competing for the same VRAM (0 when this plan is CPU-only).
                             let active = if plan.runtime.force_cpu || plan.gpu_layers == 0 { 0 } else { plan.gpu_layers };
+                            let mode = if plan.runtime.force_cpu || plan.gpu_layers == 0 { "cpu" } else { plan.runtime.mode };
                             runtime_discovery::set_chat_gpu_layers_active(active);
+                            runtime_discovery::set_last_launch_status(
+                                mode,
+                                &plan.runtime.path,
+                                plan.gpu_layers,
+                                plan.runtime.force_cpu || plan.gpu_layers == 0,
+                                &plan.label,
+                            );
                             return Ok(());
                         }
                         Err(e) => {

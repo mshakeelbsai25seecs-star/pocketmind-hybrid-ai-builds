@@ -2984,6 +2984,13 @@ pub struct GpuRuntimeReport {
     pub estimated_available_vram_bytes: u64,
     pub estimated_available_ram_bytes: u64,
     pub warning: Option<String>,
+    /// Last successful chat launch (backend / layers) when a model has been loaded.
+    pub active_backend: Option<String>,
+    pub active_runtime_path: Option<String>,
+    pub active_gpu_layers: Option<i32>,
+    pub active_launch_label: Option<String>,
+    /// True when a real CUDA llama.cpp folder was discovered under data_root or the app bundle.
+    pub cuda_runtime_found: bool,
     pub checks: Vec<GpuRuntimeCheck>,
 }
 
@@ -3054,7 +3061,31 @@ fn auto_fit_plan_for_model(
         );
     }
 
+    let has_nvidia = gpus.iter().any(|g| {
+        g.is_cuda_capable
+            || g.vendor.to_lowercase().contains("nvidia")
+            || g.name.to_lowercase().contains("nvidia")
+            || g.name.to_lowercase().contains("geforce")
+            || g.name.to_lowercase().contains("rtx ")
+            || g.name.to_lowercase().contains("gtx ")
+    });
+
     if total_vram == 0 {
+        // DXGI/lab scanners often report 0 VRAM for NVIDIA when NVML is missing.
+        // If a CUDA/Vulkan/Metal backend exists (or NVIDIA is detected), still plan GPU-first;
+        // launch-time fallback will reduce layers / CPU if the device cannot offload.
+        if has_nvidia || gpu_acceleration_available {
+            return (
+                999,
+                4096,
+                256,
+                "Automatic GPU-first mode".to_string(),
+                "GPU runtime present; dedicated VRAM size unknown — will try full offload then fall back".to_string(),
+                Some("Automatic Optimizer will try CUDA/GPU offload first. If the driver reports no usable VRAM, PocketMind falls back to partial layers then CPU.".to_string()),
+                total_vram,
+                free_vram,
+            );
+        }
         return (
             0,
             2048,
@@ -3234,9 +3265,13 @@ pub async fn get_gpu_runtime_report(
         .map(|p| crate::llm::runtime_discovery::probe_runtime_backends(p))
         .unwrap_or_default();
     let any_gpu_backend = crate::llm::runtime_discovery::any_gpu_runtime_backend_available();
-    let supports_cuda_hint = selected_backends.cuda || help_cuda;
-    let supports_vulkan_hint = selected_backends.vulkan || help_vulkan;
-    let supports_metal_hint = selected_backends.metal || help_metal;
+    let cuda_runtime_found = crate::llm::runtime_discovery::has_usable_cuda_runtime();
+    let supports_cuda_hint = selected_backends.cuda || help_cuda || cuda_runtime_found
+        || all_runtimes.iter().any(|p| crate::llm::runtime_discovery::probe_runtime_backends(p).cuda);
+    let supports_vulkan_hint = selected_backends.vulkan || help_vulkan
+        || all_runtimes.iter().any(|p| crate::llm::runtime_discovery::probe_runtime_backends(p).vulkan);
+    let supports_metal_hint = selected_backends.metal || help_metal
+        || all_runtimes.iter().any(|p| crate::llm::runtime_discovery::probe_runtime_backends(p).metal);
     let gpu_acceleration_available = any_gpu_backend;
 
     checks.push(gpu_check(
@@ -3419,6 +3454,23 @@ It is functionally a CPU runtime — GPU offload plans will not be offered."
         estimated_available_vram_bytes: free_vram,
         estimated_available_ram_bytes: info.memory.available_bytes,
         warning,
+        active_backend: {
+            let s = crate::llm::runtime_discovery::last_launch_status();
+            if s.backend.is_empty() { None } else { Some(s.backend) }
+        },
+        active_runtime_path: {
+            let s = crate::llm::runtime_discovery::last_launch_status();
+            if s.runtime_path.is_empty() { None } else { Some(s.runtime_path) }
+        },
+        active_gpu_layers: {
+            let s = crate::llm::runtime_discovery::last_launch_status();
+            if s.backend.is_empty() { None } else { Some(s.gpu_layers) }
+        },
+        active_launch_label: {
+            let s = crate::llm::runtime_discovery::last_launch_status();
+            if s.label.is_empty() { None } else { Some(s.label) }
+        },
+        cuda_runtime_found,
         checks,
     })
 }

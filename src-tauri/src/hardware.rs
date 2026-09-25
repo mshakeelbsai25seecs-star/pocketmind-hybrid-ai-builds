@@ -180,10 +180,13 @@ impl HardwareMonitor {
                     vendor: vendor.to_string(),
                     vram_total_bytes: vram_total,
                     vram_used_bytes: 0,
-                    is_cuda_capable: false,
+                    // DXGI often finds NVIDIA when NVML is unavailable (lab lockdown /
+                    // missing nvml.dll). Treat NVIDIA adapters as CUDA-capable so
+                    // Automatic Optimizer does not fall through to CPU-only.
+                    is_cuda_capable: vendor == "NVIDIA",
                     is_metal_capable: false,
                     is_vulkan_capable: true,
-                    compute_score: if vendor == "AMD" { 2500 } else { 1500 },
+                    compute_score: if vendor == "AMD" { 2500 } else if vendor == "NVIDIA" { 4000 } else { 1500 },
                 });
             }
         }
