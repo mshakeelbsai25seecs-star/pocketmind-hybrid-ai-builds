@@ -16,12 +16,18 @@
   Use -MsixOnly when the Store-safe EXE/release tree already exists and you only need
   to strip leftover cuda/vulkan under CARGO_TARGET_DIR and pack MSIX (no cargo rebuild).
 
+  Use -SkipGitFetch when the network cannot reach origin (Recv failure) but local HEAD
+  is already the desired commit. Optionally pass -ExpectedSha to require that SHA.
+
 .EXAMPLE
   cd D:\nexus-ai-deep-fixed
   powershell -ExecutionPolicy Bypass -File .\scripts\REBUILD-STORE-EXE-AND-MSIX.ps1
 
 .EXAMPLE
   powershell -ExecutionPolicy Bypass -File .\scripts\REBUILD-STORE-EXE-AND-MSIX.ps1 -MsixOnly
+
+.EXAMPLE
+  powershell -ExecutionPolicy Bypass -File .\scripts\REBUILD-STORE-EXE-AND-MSIX.ps1 -SkipGitFetch -ExpectedSha dbae23f
 #>
 [CmdletBinding()]
 param(
@@ -29,7 +35,9 @@ param(
   [string]$DevCacheRoot = "D:\DevCache",
   [switch]$SkipLlamaDownload,
   [switch]$AllowNonDDrive,
-  [string]$ExpectedMainPrefix = "52a8a62",
+  [string]$ExpectedMainPrefix = "dbae23f",
+  [string]$ExpectedSha = "",
+  [switch]$SkipGitFetch,
   [switch]$MsixOnly
 )
 
@@ -71,18 +79,55 @@ if ($MsixOnly) {
 }
 Write-Host "  ProjectRoot: $ProjectRoot"
 
-Write-Host "`n==> Syncing git to origin/main (hard reset)" -ForegroundColor Cyan
-git fetch origin main
-if ($LASTEXITCODE -ne 0) { throw "git fetch origin main failed" }
-git checkout main
-if ($LASTEXITCODE -ne 0) { throw "git checkout main failed" }
-git reset --hard origin/main
-if ($LASTEXITCODE -ne 0) { throw "git reset --hard origin/main failed" }
-git clean -fd --exclude=node_modules --exclude=bin --exclude=src-tauri/resources/llama.cpp --exclude=distribution/windows-desktop/payload --exclude=distribution/windows-desktop/msix/layout --exclude=distribution/windows-desktop/msix/out
+Write-Host "`n==> Syncing git to origin/main" -ForegroundColor Cyan
+$fetchedOk = $false
+if ($SkipGitFetch) {
+  Write-Host "  Skipping git fetch (-SkipGitFetch). Using local HEAD." -ForegroundColor Yellow
+} else {
+  git fetch origin main
+  if ($LASTEXITCODE -eq 0) {
+    $fetchedOk = $true
+  } else {
+    Write-Host "  WARNING: git fetch origin main failed (network?). Will continue only if local HEAD is acceptable." -ForegroundColor Yellow
+  }
+}
+
+if ($fetchedOk) {
+  git checkout main
+  if ($LASTEXITCODE -ne 0) { throw "git checkout main failed" }
+  git reset --hard origin/main
+  if ($LASTEXITCODE -ne 0) { throw "git reset --hard origin/main failed" }
+  git clean -fd --exclude=node_modules --exclude=bin --exclude=src-tauri/resources/llama.cpp --exclude=distribution/windows-desktop/payload --exclude=distribution/windows-desktop/msix/layout --exclude=distribution/windows-desktop/msix/out
+} else {
+  # Stay on current branch/commit; ensure we are on main when possible.
+  $branch = (& git rev-parse --abbrev-ref HEAD 2>$null | Out-String).Trim()
+  if ($branch -ne "main") {
+    Write-Host "  NOTE: current branch is '$branch' (expected main). Continuing with local HEAD." -ForegroundColor Yellow
+  }
+}
+
 $head = (& git rev-parse HEAD).Trim()
 $headShort = (& git rev-parse --short HEAD).Trim()
 Write-Host "  HEAD: $head"
 Write-Host "  short: $headShort"
+
+if ($ExpectedSha) {
+  $want = $ExpectedSha.Trim().ToLowerInvariant()
+  $okSha = ($head.ToLowerInvariant().StartsWith($want)) -or ($headShort.ToLowerInvariant().StartsWith($want))
+  if (-not $okSha) {
+    throw "HEAD $headShort does not match -ExpectedSha $ExpectedSha. Fetch when online, or check out the correct commit first."
+  }
+  Write-Host "  OK: HEAD matches -ExpectedSha $ExpectedSha" -ForegroundColor Green
+} elseif (-not $fetchedOk) {
+  # Offline / skip-fetch without ExpectedSha: accept HEAD if it matches origin/main tip when known, else warn.
+  $originTip = ""
+  try { $originTip = (& git rev-parse origin/main 2>$null | Out-String).Trim() } catch {}
+  if ($originTip -and ($originTip -eq $head)) {
+    Write-Host "  OK: local HEAD matches origin/main ($headShort) without fetch." -ForegroundColor Green
+  } else {
+    Write-Host "  WARNING: rebuild proceeding on local HEAD $headShort without a successful fetch. Pass -ExpectedSha <sha> to enforce." -ForegroundColor Yellow
+  }
+}
 
 if ($ExpectedMainPrefix -and ($headShort -notlike "$ExpectedMainPrefix*") -and ($head -notlike "$ExpectedMainPrefix*")) {
   Write-Host "  NOTE: HEAD does not start with expected prefix '$ExpectedMainPrefix' (repo may have moved forward -- that is OK if SHA is newer)." -ForegroundColor Yellow

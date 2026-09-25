@@ -65,9 +65,23 @@ Assert-True (Test-Path -LiteralPath $stage) "MSIX stage script present"
 $stageText = Get-Content -LiteralPath $stage -Raw
 Assert-True ($stageText -match 'Remove-BannedLlamaBackends|Assert-NoBannedLlamaBackends|cuda') "MSIX stage still strips/refuses cuda"
 
-$ver = Select-String -Path $manifest -Pattern 'Version="([0-9.]+)"' | ForEach-Object { $_.Matches[0].Groups[1].Value } | Select-Object -First 1
-Write-Host "MSIX Identity Version: $ver"
-Assert-True ([version]$ver -ge [version]"1.0.5.0") "MSIX version >= 1.0.5.0 for Partner Center upload"
+# Parse Identity Version="x.y.z.w" only -- do NOT match <?xml version="1.0" ...>.
+$manifestText = Get-Content -LiteralPath $manifest -Raw
+$identityVer = $null
+if ($manifestText -match '(?s)<Identity\b[^>]*\bVersion="(\d+\.\d+\.\d+\.\d+)"') {
+  $identityVer = $Matches[1]
+}
+Write-Host "MSIX Identity Version: $identityVer"
+Assert-True ($null -ne $identityVer) "Package.appxmanifest Identity Version is a full x.y.z.w value"
+$minParts = @(1, 0, 5, 0)
+$verParts = @($identityVer.Split('.') | ForEach-Object { [int]$_ })
+Assert-True ($verParts.Count -eq 4) "Identity Version has 4 parts (got '$identityVer')"
+$geMin = $true
+for ($i = 0; $i -lt 4; $i++) {
+  if ($verParts[$i] -gt $minParts[$i]) { break }
+  if ($verParts[$i] -lt $minParts[$i]) { $geMin = $false; break }
+}
+Assert-True $geMin "MSIX version >= 1.0.5.0 for Partner Center upload (got $identityVer)"
 
 Write-Host ""
 Write-Host "Lab confirmation still needed:" -ForegroundColor Yellow
