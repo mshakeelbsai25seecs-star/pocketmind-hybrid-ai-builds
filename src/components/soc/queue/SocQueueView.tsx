@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Plus, Upload } from 'lucide-react';
 import { createBlankCase } from '../../../soc/caseFactory';
 import { socDeleteCase, socUpsertCase } from '../../../soc/caseStore';
@@ -15,22 +15,58 @@ function ageLabel(ts: number): string {
 
 export default function SocQueueView() {
   const {
-    index, refreshIndex, setActiveCaseId, setNav, setStatus, busy, setBusy, saveActiveCase,
+    index, refreshIndex, setActiveCaseId, setNav, setStatus, busy, setBusy, saveActiveCase, activeCase,
   } = useSocActiveCase();
   const [q, setQ] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [severityFilter, setSeverityFilter] = useState<string>('all');
+  const [selectedIdx, setSelectedIdx] = useState(0);
 
   const rows = useMemo(() => {
     const query = q.trim().toLowerCase();
     return index.filter(row => {
       if (statusFilter !== 'all' && row.status !== statusFilter) return false;
+      if (severityFilter !== 'all' && row.severity !== severityFilter) return false;
       if (!query) return true;
       return [row.id, row.title, row.assignee, row.external_id || '']
         .join(' ')
         .toLowerCase()
         .includes(query);
     });
-  }, [index, q, statusFilter]);
+  }, [index, q, statusFilter, severityFilter]);
+
+  useEffect(() => {
+    setSelectedIdx(0);
+  }, [q, statusFilter, severityFilter, index.length]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+        if (e.key === '/' && (e.target as HTMLInputElement).placeholder === 'Search cases') return;
+        if (e.key !== 'Escape') return;
+      }
+      if (e.key === '/' && tag !== 'INPUT' && tag !== 'TEXTAREA') {
+        e.preventDefault();
+        document.getElementById('soc-queue-search')?.focus();
+        return;
+      }
+      if (e.key === 'j') {
+        e.preventDefault();
+        setSelectedIdx(i => Math.min(rows.length - 1, i + 1));
+      }
+      if (e.key === 'k') {
+        e.preventDefault();
+        setSelectedIdx(i => Math.max(0, i - 1));
+      }
+      if (e.key === 'Enter' && rows[selectedIdx]) {
+        e.preventDefault();
+        openRow(rows[selectedIdx]!);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [rows, selectedIdx]);
 
   const createCase = async () => {
     setBusy(true);
@@ -59,6 +95,7 @@ export default function SocQueueView() {
     setBusy(true);
     try {
       await socDeleteCase(row.id);
+      if (activeCase?.id === row.id) setActiveCaseId(null);
       await refreshIndex();
       setStatus(`Deleted ${row.id}`);
     } catch (err) {
@@ -72,16 +109,13 @@ export default function SocQueueView() {
     <div className="flex-1 min-h-0 flex flex-col p-4 sm:p-5 gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <input
+          id="soc-queue-search"
           className="input-field text-sm max-w-xs"
           placeholder="Search cases"
           value={q}
           onChange={e => setQ(e.target.value)}
         />
-        <select
-          className="input-field text-sm w-auto"
-          value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value)}
-        >
+        <select className="input-field text-sm w-auto" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
           <option value="all">All statuses</option>
           <option value="new">New</option>
           <option value="investigating">Investigating</option>
@@ -89,11 +123,17 @@ export default function SocQueueView() {
           <option value="pending_approval">Pending approval</option>
           <option value="closed">Closed</option>
         </select>
-        <div className="flex-1" />
-        <button type="button" className="btn-secondary text-sm inline-flex items-center gap-1" onClick={() => setNav('import')} disabled={busy}>
+        <select className="input-field text-sm w-auto" value={severityFilter} onChange={e => setSeverityFilter(e.target.value)}>
+          <option value="all">All severities</option>
+          {['critical', 'high', 'medium', 'low', 'info', 'unknown'].map(s => (
+            <option key={s} value={s}>{s}</option>
+          ))}
+        </select>
+        <div className="flex-1 min-w-[0.5rem]" />
+        <button type="button" className="btn-secondary text-sm inline-flex items-center gap-1 shrink-0" onClick={() => setNav('import')} disabled={busy}>
           <Upload className="w-4 h-4" /> Import
         </button>
-        <button type="button" className="btn-primary text-sm inline-flex items-center gap-1" onClick={() => void createCase()} disabled={busy}>
+        <button type="button" className="btn-primary text-sm inline-flex items-center gap-1 shrink-0" onClick={() => void createCase()} disabled={busy}>
           <Plus className="w-4 h-4" /> New case
         </button>
       </div>
@@ -117,10 +157,14 @@ export default function SocQueueView() {
               </tr>
             </thead>
             <tbody>
-              {rows.map(row => (
+              {rows.map((row, idx) => (
                 <tr
                   key={row.id}
-                  className="border-t border-surface-100 dark:border-surface-800 hover:bg-surface-50/80 dark:hover:bg-surface-900/40 cursor-pointer"
+                  className={`border-t border-surface-100 dark:border-surface-800 cursor-pointer ${
+                    idx === selectedIdx
+                      ? 'bg-primary-500/10'
+                      : 'hover:bg-surface-50/80 dark:hover:bg-surface-900/40'
+                  }`}
                   onClick={() => openRow(row)}
                 >
                   <td className="px-3 py-2">

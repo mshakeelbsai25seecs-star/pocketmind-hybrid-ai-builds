@@ -40,7 +40,56 @@ export default function SocMetricsView() {
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-5 space-y-4">
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          className="btn-secondary text-sm"
+          disabled={busy || !metrics}
+          onClick={() => {
+            if (!metrics) return;
+            const blob = new Blob([JSON.stringify(metrics, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `soc-metrics-${metrics.computed_at}.json`;
+            a.click();
+            URL.revokeObjectURL(url);
+            setStatus('Metrics JSON downloaded.');
+          }}
+        >
+          Export JSON
+        </button>
+        <button
+          type="button"
+          className="btn-secondary text-sm"
+          disabled={busy || !metrics}
+          onClick={() => {
+            if (!metrics) return;
+            const rows = [
+              ['metric', 'value'],
+              ['total_cases', String(metrics.total_cases)],
+              ['open_cases', String(metrics.open_cases)],
+              ['closed_cases', String(metrics.closed_cases)],
+              ['with_verdict', String(metrics.with_verdict)],
+              ['investigated_coverage', String(metrics.investigated_coverage)],
+              ['override_rate', String(metrics.override_rate ?? '')],
+              ['override_count', String(metrics.override_count)],
+              ['median_time_to_verdict_ms', String(metrics.median_time_to_verdict_ms ?? '')],
+              ['p90_time_to_close_ms', String(metrics.p90_time_to_close_ms ?? '')],
+            ];
+            const csv = rows.map(r => r.map(c => `"${c.replace(/"/g, '""')}"`).join(',')).join('\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `soc-metrics-${metrics.computed_at}.csv`;
+            a.click();
+            URL.revokeObjectURL(url);
+            setStatus('Metrics CSV downloaded.');
+          }}
+        >
+          Export CSV
+        </button>
         <button type="button" className="btn-secondary text-sm" disabled={busy} onClick={() => void reload()}>
           Refresh
         </button>

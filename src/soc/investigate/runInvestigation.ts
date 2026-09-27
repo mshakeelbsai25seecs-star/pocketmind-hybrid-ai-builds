@@ -25,6 +25,16 @@ export async function runInvestigation(
   if (!deps.currentModel?.trim()) {
     throw new Error('Select a model before investigating.');
   }
+  const hasEvidence = Boolean(
+    inputCase.summary?.trim()
+    || inputCase.rawEvidence?.trim()
+    || inputCase.entities.sourceIp?.trim()
+    || inputCase.entities.username?.trim()
+    || inputCase.entities.asset?.trim(),
+  );
+  if (!hasEvidence) {
+    throw new Error('Add a summary, raw evidence, or entities before investigating.');
+  }
 
   const now = Date.now();
   let socCase: SocCase = {
@@ -112,26 +122,58 @@ export async function runInvestigation(
   });
 
   const { backend, modelPath } = pickChatBackend(deps.currentModel);
-  const chunk = await invoke<GenerationChunk>('generate_response', {
-    request: {
-      prompt,
-      system_prompt: SOC_INVESTIGATION_SYSTEM,
-      params: {
-        ...deps.defaultParams,
-        max_tokens: Math.max(Number(deps.defaultParams.max_tokens) || 0, 1200),
-        temperature: 0.2,
+  let chunk: GenerationChunk;
+  try {
+    chunk = await invoke<GenerationChunk>('generate_response', {
+      request: {
+        prompt,
+        system_prompt: SOC_INVESTIGATION_SYSTEM,
+        params: {
+          ...deps.defaultParams,
+          max_tokens: Math.max(Number(deps.defaultParams.max_tokens) || 0, 1200),
+          temperature: 0.2,
+        },
+        model_path: modelPath || deps.currentModel,
+        backend,
+        messages: [
+          { role: 'system', content: SOC_INVESTIGATION_SYSTEM },
+          { role: 'user', content: prompt },
+        ],
       },
-      model_path: modelPath || deps.currentModel,
-      backend,
-      messages: [
-        { role: 'system', content: SOC_INVESTIGATION_SYSTEM },
-        { role: 'user', content: prompt },
+    });
+  } catch (err) {
+    const failed = {
+      ...socCase,
+      status: 'needs_human' as const,
+      evidenceChain: [
+        ...socCase.evidenceChain,
+        createEvidenceStep(
+          'agent',
+          'Investigation failed',
+          err instanceof Error ? err.message : String(err),
+          { ok: false },
+        ),
       ],
-    },
-  });
+      updatedAt: Date.now(),
+    };
+    await socUpsertCase(failed);
+    throw new Error(
+      `Investigation model call failed: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
 
   const rawText = (chunk.text || '').trim();
   if (!rawText) {
+    const failed = {
+      ...socCase,
+      status: 'needs_human' as const,
+      evidenceChain: [
+        ...socCase.evidenceChain,
+        createEvidenceStep('agent', 'Investigation failed', 'Model returned an empty response.', { ok: false }),
+      ],
+      updatedAt: Date.now(),
+    };
+    await socUpsertCase(failed);
     throw new Error('Model returned an empty investigation response.');
   }
 

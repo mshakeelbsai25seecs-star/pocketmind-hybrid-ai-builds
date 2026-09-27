@@ -5,6 +5,7 @@ import {
   socEnsureDirs,
   socGetCase,
   socListCases,
+  socPersistenceMode,
   socUpsertCase,
 } from '../../soc/caseStore';
 import { newImportBatchId } from '../../soc/ids';
@@ -96,9 +97,14 @@ export default function SocShell() {
     notes: activeCase?.notes || '',
   }), [activeCase]);
 
+  const goNav = useCallback((next: SocNavId) => {
+    setStatus(null);
+    setNav(next);
+  }, []);
+
   const ctx = {
     nav,
-    setNav,
+    setNav: goNav,
     index,
     refreshIndex,
     activeCase,
@@ -127,7 +133,9 @@ export default function SocShell() {
                 {nav === 'case' && activeCase ? activeCase.id : nav.charAt(0).toUpperCase() + nav.slice(1)}
               </h1>
             </div>
-            {!ready && <span className="text-xs text-surface-500">Loading…</span>}
+            <div className="text-xs text-surface-500">
+              {!ready ? 'Loading…' : socPersistenceMode() === 'browser' ? 'Browser store' : 'Desktop store'}
+            </div>
           </header>
           {status && (
             <p className="px-4 sm:px-5 py-2 text-xs border-b border-surface-200 dark:border-surface-800 text-primary-700 dark:text-primary-300">
@@ -156,10 +164,13 @@ export default function SocShell() {
             <div className="flex-1 min-h-0 overflow-y-auto">
               {activeCase && (
                 <div className="px-4 sm:px-6 pt-4 text-xs text-surface-500">
-                  Active case {activeCase.id} — copy fields into Workspace actions as needed.
+                  Active case {activeCase.id} loaded into Workspace fields.
                 </div>
               )}
-              <SocWorkspace />
+              <SocWorkspace
+                seedKey={activeCase?.id}
+                seedInput={activeCase ? workspaceInput : undefined}
+              />
             </div>
           )}
           {nav === 'validators' && (

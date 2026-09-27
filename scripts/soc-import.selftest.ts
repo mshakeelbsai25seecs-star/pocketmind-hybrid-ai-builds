@@ -37,6 +37,18 @@ assert.equal(cefParsed.alerts.length, 1);
 assert.equal(cefParsed.alerts[0]?.entities.sourceIp, '1.2.3.4');
 assert.equal(cefParsed.formatUsed, 'generic_cef');
 
+const jsonl = [
+  JSON.stringify({ incidentId: 'j1', incidentTitle: 'JSONL one', srcIpAddr: '10.1.1.1', eventSeverityCat: 'Low' }),
+  JSON.stringify({ incidentId: 'j2', incidentTitle: 'JSONL two', srcIpAddr: '10.1.1.2', eventSeverityCat: 'High' }),
+].join('\n');
+const jsonlParsed = parseImportFiles([{ name: 'a.jsonl', text: jsonl }], 'auto');
+assert.equal(jsonlParsed.alerts.length, 2);
+assert.equal(jsonlParsed.alerts[1]?.externalId, 'j2');
+
+const emptyParsed = parseImportFiles([{ name: 'empty.txt', text: '   ' }], 'auto');
+assert.equal(emptyParsed.alerts.length, 0);
+assert.ok(emptyParsed.errors.some(e => /empty/i.test(e.message)));
+
 const csv = 'title,severity,source_ip,user\nPhish,High,8.8.8.8,bob\n';
 const csvParsed = parseImportFiles([{ name: 'a.csv', text: csv }], 'auto');
 assert.equal(csvParsed.alerts.length, 1);
