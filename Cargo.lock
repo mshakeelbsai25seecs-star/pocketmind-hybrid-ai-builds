@@ -672,6 +672,7 @@ name = "pocketcode-workspace"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "flate2",
  "hex",
  "regex",
  "serde",

@@ -1,4 +1,4 @@
-﻿#Requires -Version 5.1
+#Requires -Version 5.1
 <#
 .SYNOPSIS
   Stage a Store-safe (CPU-only) release folder into an MSIX loose layout.
@@ -203,6 +203,6 @@ Assert-NoBannedLlamaBackends -Root $layout -Label "MSIX layout"
 Write-Host "Done. Next:" -ForegroundColor Green
 Write-Host "  powershell -ExecutionPolicy Bypass -File .\distribution\windows-desktop\msix\PACK-MSIX.ps1"
 Write-Host "Then upload the .msix from distribution\windows-desktop\msix\out\"
-Write-Host "Version in manifest must be higher than previous Store submission (now 1.0.5.0)."
+Write-Host "Version in manifest must be higher than previous Store submission (now 1.0.6.0)."
 Write-Host "See: distribution\windows-desktop\msix\README.md"
 Write-Host "Certification checklist: distribution\windows-desktop\STORE_RESUBMIT_CERT_FIXES.md"

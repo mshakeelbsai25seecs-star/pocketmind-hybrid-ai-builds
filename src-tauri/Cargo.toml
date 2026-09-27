@@ -54,6 +54,11 @@ tree-sitter-c = { version = "0.23", optional = true }
 tree-sitter-cpp = { version = "0.23", optional = true }
 tree-sitter-c-sharp = { version = "0.23", optional = true }
 streaming-iterator = { version = "0.1.9", optional = true }
+flate2 = "1"
+bytes = "1"
+hyper = { version = "0.14", features = ["server", "http1", "tcp", "stream"] }
+globset = "=0.4.16"
+indexmap = "=2.7.1"
 
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 nvml-wrapper = "0.9"

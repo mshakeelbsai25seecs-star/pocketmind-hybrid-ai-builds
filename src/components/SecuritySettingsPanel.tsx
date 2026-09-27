@@ -19,6 +19,11 @@ import {
   type OcrImageRagConfig,
   type UnlimitedOcrProbe,
 } from '../ocrImageRagConfig';
+import {
+  installOptionalParserComponent,
+  listOptionalParserComponents,
+  type OptionalParserComponent,
+} from '../lanHost';
 
 export default function SecuritySettingsPanel() {
   const { productConfig, setProductConfig } = useAppStore();
@@ -298,6 +303,7 @@ export default function SecuritySettingsPanel() {
         </label>
 
         <OcrImageRagSettingsBlock />
+        <OptionalParsersSettingsBlock />
 
         <div className="flex flex-wrap gap-2 pt-2">
           <button type="button" onClick={() => void save()} disabled={busy} className="btn-primary flex items-center gap-2 disabled:opacity-60">
@@ -578,6 +584,79 @@ function OcrImageRagSettingsBlock() {
           Remove API key
         </button>
       </div>
+      {msg && <p className="text-sm text-emerald-600 dark:text-emerald-300">{msg}</p>}
+      {err && <p className="text-sm text-red-600 dark:text-red-300">{err}</p>}
+    </div>
+  );
+}
+
+function OptionalParsersSettingsBlock() {
+  const [items, setItems] = useState<OptionalParserComponent[]>([]);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  const reload = async () => {
+    setItems(await listOptionalParserComponents());
+  };
+
+  useEffect(() => {
+    void reload().catch(e => setErr(e instanceof Error ? e.message : String(e)));
+  }, []);
+
+  const install = async (id: string) => {
+    setBusyId(id);
+    setMsg(null);
+    setErr(null);
+    try {
+      await installOptionalParserComponent(id);
+      await reload();
+      setMsg(`Installed ${id}.`);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div className="mt-4 pt-4 border-t border-surface-200 dark:border-surface-700 space-y-3">
+      <h3 className="font-medium text-sm">Optional file readers (Settings download)</h3>
+      <p className="text-xs text-surface-500">
+        PocketCode already reads .log, .csv, .json, .jsonl, gzip, and syslog-style text.
+        Download optional packs for extended log/doc parsers, Windows .evtx, and .pcap summaries.
+        OCR weights are managed in the section above.
+      </p>
+      <ul className="space-y-3">
+        {items.map(item => (
+          <li
+            key={item.id}
+            className="rounded-xl border border-surface-200 dark:border-surface-700 p-3 space-y-1"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-sm font-medium">{item.label}</p>
+                <p className="text-xs text-surface-500">{item.description}</p>
+                <p className="text-xs text-surface-500 mt-1">
+                  {item.installed ? item.detail : 'Not installed'}
+                  {item.path ? ` · ${item.path}` : ''}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn-secondary text-xs whitespace-nowrap"
+                disabled={busyId === item.id || item.installed}
+                onClick={() => void install(item.id)}
+              >
+                {busyId === item.id ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin inline" />
+                ) : null}
+                {item.installed ? 'Installed' : 'Download'}
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
       {msg && <p className="text-sm text-emerald-600 dark:text-emerald-300">{msg}</p>}
       {err && <p className="text-sm text-red-600 dark:text-red-300">{err}</p>}
     </div>

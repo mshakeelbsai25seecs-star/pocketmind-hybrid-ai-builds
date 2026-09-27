@@ -53,12 +53,41 @@ export const MODE_TOOLS: Record<PocketCodeAgentMode, readonly CodeWorkspaceToolN
   ],
 };
 
-export function modeAllowsTool(mode: PocketCodeAgentMode, tool: string): boolean {
+/** Tools that would mutate the host workspace or run commands — blocked for LAN remote sessions. */
+export const REMOTE_BLOCKED_TOOLS: readonly string[] = [
+  'apply_edit',
+  'delete_file',
+  'run_command',
+  'read_terminal',
+  'kill_terminal',
+  'create_plan',
+  'update_plan',
+];
+
+/** Remote LAN/host sessions are read-only: agent/debug behave like ask for tool access. */
+export function effectiveModeForRemote(
+  mode: PocketCodeAgentMode,
+  remoteReadOnly: boolean,
+): PocketCodeAgentMode {
+  if (!remoteReadOnly) return mode;
+  if (mode === 'plan') return 'plan';
+  return 'ask';
+}
+
+export function modeAllowsTool(
+  mode: PocketCodeAgentMode,
+  tool: string,
+  opts?: { remoteReadOnly?: boolean },
+): boolean {
+  if (opts?.remoteReadOnly && REMOTE_BLOCKED_TOOLS.includes(tool)) {
+    return false;
+  }
+  const effective = effectiveModeForRemote(mode, Boolean(opts?.remoteReadOnly));
   // Cursor-style MCP tools: mcp__server__tool (and legacy mcp_call)
   if (tool === 'mcp_call' || tool.startsWith('mcp__')) {
-    return (MODE_TOOLS[mode] as readonly string[]).includes('mcp_call');
+    return (MODE_TOOLS[effective] as readonly string[]).includes('mcp_call');
   }
-  return (MODE_TOOLS[mode] as readonly string[]).includes(tool);
+  return (MODE_TOOLS[effective] as readonly string[]).includes(tool);
 }
 
 export function cycleMode(current: PocketCodeAgentMode): PocketCodeAgentMode {

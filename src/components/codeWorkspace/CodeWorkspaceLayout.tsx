@@ -950,6 +950,7 @@ export default function CodeWorkspaceLayout() {
       modelPath: currentModel,
       params: defaultParams,
       mode,
+      remoteReadOnly: remoteWorkspace,
       images: images.length > 0 ? images : undefined,
       onApplyWrite: async (path, content) => {
         await cwApplyEditWrite(workspaceRoot, path, content);

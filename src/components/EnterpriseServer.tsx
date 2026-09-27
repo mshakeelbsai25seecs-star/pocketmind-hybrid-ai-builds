@@ -8,7 +8,10 @@ import { useAppStore } from '../store';
 import { Conversation, EnterpriseEmbeddingProbe, EnterpriseModelInfo, EnterpriseServerConfig, EnterpriseServerTestResult } from '../types';
 import { probeServerRag } from '../knowledgeChat/serverRag';
 import EnterpriseServerHostPanel from './EnterpriseServerHostPanel';
+import LanHostPanel from './LanHostPanel';
 import RefreshButton from './RefreshButton';
+import { agentBaseFromOpenAiUrl } from '../lanHost';
+import { saveRuntimeProfile } from '../codeWorkspace/runtimeProfile';
 
 function humanError(err: unknown): string {
   if (!err) return 'Unknown error';
@@ -213,6 +216,58 @@ export default function EnterpriseServer() {
     }
   };
 
+  /** Paste URL+key, save, and point PocketCode at the host workspace (read-only remote tools). */
+  const useAsRemote = async () => {
+    const url = baseUrl.trim();
+    if (!url) {
+      setError('Paste the host OpenAI-compatible base URL first (example: http://192.168.1.50:8787/v1).');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      let modelId = selectedModel.trim();
+      await saveConfig({ selected: modelId || undefined });
+      try {
+        const list = await invoke<EnterpriseModelInfo[]>('list_enterprise_server_models', {
+          baseUrl: url,
+          apiKey: apiKey.trim() ? apiKey.trim() : null,
+        });
+        setModels(list);
+        if (!modelId && list[0]?.id) {
+          modelId = list[0].id;
+          setSelectedModel(modelId);
+          await saveConfig({ selected: modelId });
+        }
+      } catch {
+        if (!modelId) modelId = 'pocketmind-host';
+      }
+      if (!modelId) modelId = 'pocketmind-host';
+      store.setCurrentModel(`enterprise:${modelId}`);
+
+      const agentBase = agentBaseFromOpenAiUrl(url);
+      await saveRuntimeProfile({
+        inferenceHost: 'enterprise',
+        workspaceHost: 'remote',
+        provision: 'preloaded',
+        uiShell: 'desktop_full',
+        remote: {
+          baseUrl: agentBase,
+          workspaceId: 'host-workspace',
+        },
+      });
+
+      setStatus(
+        `Connected as remote client to ${url}. Chat uses the host model; PocketCode tools are read-only on the host workspace.`,
+      );
+      store.setActiveView('code-workspace');
+    } catch (err) {
+      setError(humanError(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const clearToken = async () => {
     setBusy(true);
     setError(null);
@@ -275,6 +330,8 @@ export default function EnterpriseServer() {
         </div>
       </div>
 
+      <LanHostPanel />
+
       <EnterpriseServerHostPanel />
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
@@ -284,8 +341,11 @@ export default function EnterpriseServer() {
               <ServerCog className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-xl font-black">Server connection</h2>
-              <p className="text-sm text-surface-500">Use a vLLM, TGI, llama.cpp, or compatible private endpoint that exposes /v1/models and /v1/chat/completions.</p>
+              <h2 className="text-xl font-black">Client — connect to a host</h2>
+              <p className="text-sm text-surface-500">
+                Paste another PocketMind LAN host base URL + API key, or any OpenAI-compatible private endpoint
+                (/v1/models and /v1/chat/completions). Use as remote for grounded chat and PocketCode agent tools.
+              </p>
             </div>
           </div>
 
@@ -322,6 +382,9 @@ export default function EnterpriseServer() {
               <button onClick={testConnection} disabled={busy || !baseUrl.trim()} className="btn-primary">
                 {busy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Network className="w-4 h-4" />}
                 Test connection
+              </button>
+              <button onClick={() => void useAsRemote()} disabled={busy || !baseUrl.trim()} className="btn-primary">
+                <ExternalLink className="w-4 h-4" /> Use as remote
               </button>
               <button onClick={refreshModels} disabled={busy || !baseUrl.trim()} className="btn-secondary">
                 <RefreshCw className="w-4 h-4" /> Load models

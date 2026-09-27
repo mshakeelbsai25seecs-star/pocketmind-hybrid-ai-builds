@@ -52,7 +52,7 @@ const FINISH_POLICY = `FINISHING — the summary you pass to done IS what the us
 - No tool JSON, no raw file dumps, and no "I grepped then read the file" narration in the summary.
 - If evidence is incomplete, say what you found and exactly what is missing — then finish anyway.
 - Fenced code blocks only for real code/config; inline backticks for single identifiers.
-- Your tool budget is about 28 turns. Duplicate calls burn it for nothing.`;
+- Duplicate tool calls burn context for nothing — reuse results you already have.`;
 
 const EFFICIENCY_RULES = `EDIT EFFICIENCY:
 - Prefer one turn: locate → read_file → apply_edit (batching tools in one turn is good).

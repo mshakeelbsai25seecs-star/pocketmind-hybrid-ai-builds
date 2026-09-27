@@ -432,6 +432,7 @@ class AgentSession {
   }
 
   async start(input: {
+    remoteReadOnly?: boolean;
     workspaceRoot: string;
     task: string;
     modelPath: string;
@@ -459,8 +460,8 @@ class AgentSession {
     }
 
     let runId: string | null = null;
-    // Checkpoints only for modes that can mutate project files.
-    if (mode === 'agent' || mode === 'debug') {
+    // Checkpoints only for modes that can mutate project files (never for remote read-only).
+    if (!input.remoteReadOnly && (mode === 'agent' || mode === 'debug')) {
       try {
         runId = await cwCheckpointBegin(input.workspaceRoot);
       } catch (err) {
@@ -511,6 +512,7 @@ class AgentSession {
         modelPath: input.modelPath,
         params: input.params,
         mode,
+        remoteReadOnly: Boolean(input.remoteReadOnly),
         images: input.images,
         skillsMarkdown,
         mcpCatalog,

@@ -3,6 +3,7 @@
 use crate::error::{Error, Result};
 use crate::path::{canonicalize_root, resolve_under_root, standardize, to_rel_display};
 use crate::types::{DirEntryInfo, EditPreview};
+use flate2::read::GzDecoder;
 use regex::RegexBuilder;
 use std::io::{BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
@@ -318,6 +319,82 @@ fn escape_for_error(s: &str) -> String {
     out
 }
 
+fn path_is_gzip(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("gz") || e.eq_ignore_ascii_case("gzip"))
+        .unwrap_or(false)
+}
+
+fn decompress_gzip_text(file: &Path, display: &str) -> Result<String> {
+    let fh = std::fs::File::open(file)
+        .map_err(|e| Error::msg(format!("Cannot open gzip file: {e}")))?;
+    let mut decoder = GzDecoder::new(fh);
+    let mut buf = String::new();
+    decoder
+        .read_to_string(&mut buf)
+        .map_err(|e| Error::msg(format!("Cannot decompress gzip `{display}`: {e}")))?;
+    if buf.as_bytes().contains(&0) {
+        return Err(Error::msg(format!(
+            "Gzip content is binary, not text: {display}"
+        )));
+    }
+    Ok(buf)
+}
+
+fn read_text_window(
+    body: &str,
+    display: &str,
+    offset: usize,
+    limit: usize,
+    hard_cap: usize,
+) -> Result<String> {
+    let want = if limit == 0 {
+        READ_DEFAULT_LINES.min(hard_cap)
+    } else {
+        limit.min(hard_cap)
+    };
+    let start = offset;
+    let normalized = normalize_newlines(body);
+    let lines: Vec<&str> = normalized.lines().collect();
+    let slice = if start >= lines.len() {
+        &[][..]
+    } else {
+        let end = (start + want).min(lines.len());
+        &lines[start..end]
+    };
+    let end_excl = start + slice.len();
+    let end_inclusive = if slice.is_empty() {
+        start
+    } else {
+        end_excl.saturating_sub(1)
+    };
+    let mut total_bytes = 0usize;
+    let mut collected = Vec::new();
+    let mut truncated_bytes = false;
+    for line in slice {
+        let add = line.len() + 1;
+        if total_bytes + add > READ_MAX_BYTES {
+            truncated_bytes = true;
+            break;
+        }
+        total_bytes += add;
+        collected.push(*line);
+    }
+    let header = format!(
+        "// PocketCode read: `{display}` lines {start}-{end_inclusive} (offset={start}, window={want})\n",
+    );
+    let mut out = format!("{header}{}", collected.join("\n"));
+    if truncated_bytes {
+        out.push_str("\n…[truncated at byte cap — use a smaller window or offset]");
+    } else if end_excl < lines.len() {
+        out.push_str(&format!(
+            "\n…[more lines after {end_inclusive} — call read_file with offset={end_excl}]"
+        ));
+    }
+    Ok(out)
+}
+
 pub fn read_file(
     workspace_root: &Path,
     path: &str,
@@ -333,13 +410,21 @@ pub fn read_file(
         )));
     }
     let display = to_rel_display(workspace_root, &file);
-    reject_if_binary_file(&file, &display)?;
 
     let hard_cap = if for_ui {
         READ_UI_MAX_LINES
     } else {
         READ_MAX_LINES
     };
+
+    // gzip / .log.gz / .json.gz / syslog.gz — decompress then window as text
+    if path_is_gzip(&file) {
+        let body = decompress_gzip_text(&file, &display)?;
+        return read_text_window(&body, &display, offset, limit, hard_cap);
+    }
+
+    reject_if_binary_file(&file, &display)?;
+
     let want = if limit == 0 {
         READ_DEFAULT_LINES.min(hard_cap)
     } else {
@@ -519,4 +604,25 @@ pub fn delete_file(workspace_root: &Path, path: &str) -> Result<()> {
     }
     std::fs::remove_file(&file).map_err(|e| Error::msg(format!("Cannot delete file: {e}")))?;
     Ok(())
+}
+
+#[cfg(test)]
+mod gzip_read_tests {
+    use super::*;
+    use flate2::write::GzEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+
+    #[test]
+    fn read_file_decompresses_gzip_text() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let gz_path = root.join("sample.log.gz");
+        let mut enc = GzEncoder::new(Vec::new(), Compression::default());
+        enc.write_all(b"line-one\nline-two\nline-three\n").unwrap();
+        std::fs::write(&gz_path, enc.finish().unwrap()).unwrap();
+        let out = read_file(root, "sample.log.gz", 0, 10, false).unwrap();
+        assert!(out.contains("line-one"));
+        assert!(out.contains("line-two"));
+    }
 }

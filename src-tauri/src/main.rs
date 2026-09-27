@@ -40,6 +40,8 @@ mod power_commands;
 mod unlimited_ocr;
 mod llama_runtime_install;
 mod doc_export;
+mod lan_host;
+mod optional_parsers;
 
 use tauri::{GlobalShortcutManager, Manager, WindowEvent};
 use std::sync::Arc;
@@ -275,9 +277,22 @@ fn main() {
             power_commands::mcp_export_to_cursor,
             power_commands::mcp_cursor_paths,
             power_commands::get_llama_server_host_hint,
+            lan_host::get_lan_host_status,
+            lan_host::set_lan_host_config,
+            lan_host::restart_lan_host,
+            optional_parsers::list_optional_parser_components,
+            optional_parsers::install_optional_parser_component,
         ])
         .setup(|app| {
             knowledge_chat::qa_corpus::spawn_startup_bootstrap(app.handle());
+
+            // OpenAI-compatible LAN host (on by default; bind failures surface in Host UI).
+            {
+                let handle = app.handle();
+                tauri::async_runtime::spawn(async move {
+                    lan_host::bootstrap(handle).await;
+                });
+            }
 
             let handle = app.handle();
             if let Err(err) = app.global_shortcut_manager().register("Ctrl+Shift+Space", move || {

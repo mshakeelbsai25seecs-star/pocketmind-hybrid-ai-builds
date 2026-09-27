@@ -225,6 +225,15 @@ impl LlamaCppBackend {
         }
     }
 
+    /// Loopback OpenAI-compat port for the child llama-server (LAN gateway proxies here).
+    pub fn local_openai_port(&self) -> u16 {
+        self.port
+    }
+
+    pub async fn loaded_model_path(&self) -> Option<String> {
+        self.loaded_model_path.lock().await.clone()
+    }
+
     pub async fn generate_stream_cancellable(
         &self,
         request: GenerationRequest,

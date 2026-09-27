@@ -590,6 +590,31 @@ fn path_has_binary_extension(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+fn path_is_gzip(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("gz") || e.eq_ignore_ascii_case("gzip"))
+        .unwrap_or(false)
+}
+
+fn decompress_gzip_text(file: &Path, display: &str) -> AppResult<String> {
+    use flate2::read::GzDecoder;
+    use std::io::Read;
+    let fh = std::fs::File::open(file)
+        .map_err(|e| AppError::Unknown(format!("Cannot open gzip file: {e}")))?;
+    let mut decoder = GzDecoder::new(fh);
+    let mut buf = String::new();
+    decoder
+        .read_to_string(&mut buf)
+        .map_err(|e| AppError::Unknown(format!("Cannot decompress gzip `{display}`: {e}")))?;
+    if buf.as_bytes().contains(&0) {
+        return Err(AppError::Unknown(format!(
+            "Gzip content is binary, not text: {display}"
+        )));
+    }
+    Ok(buf)
+}
+
 fn reject_if_binary_file(file: &Path, display: &str) -> AppResult<()> {
     if path_has_binary_extension(file) {
         return Err(AppError::Unknown(format!(
@@ -714,6 +739,12 @@ pub fn read_file(
         return read_text_window_from_string(&body, &display, offset, limit, line_cap);
     }
 
+    // gzip / .log.gz / .csv.gz / .jsonl.gz / syslog.gz
+    if path_is_gzip(&file) {
+        let body = decompress_gzip_text(&file, &display)?;
+        return read_text_window_from_string(&body, &display, offset, limit, line_cap);
+    }
+
     reject_if_binary_file(&file, &display)?;
 
     let hard_cap = line_cap
@@ -726,7 +757,7 @@ pub fn read_file(
     };
     let start = offset;
 
-    // Stream lines so multi‑MB files are not fully loaded for a small window.
+    // Stream lines so multi-MB files are not fully loaded for a small window.
     use std::io::{BufRead, BufReader};
     let fh = std::fs::File::open(&file)
         .map_err(|e| AppError::Unknown(format!("Cannot open file: {e}")))?;

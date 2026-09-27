@@ -30,7 +30,7 @@ Sharp assets now live in `distribution/windows-desktop/msix/Assets/` (base + `.s
 tiny `src-tauri/icons/Square*.png` placeholders.
 
 After any tile fix, bump `Package.appxmanifest` `Identity Version` before resubmitting.
-Current package version target: **1.0.5.0** (Automatic Optimizer CUDA offload fix + lab C: path + UI polish).
+Current package version target: **1.0.6.0** (LAN host/client gateway, PocketCode read-only remote + gzip readers, agent step budget removed).
 
 Certification resubmit checklist for 10.2.4.1 / 11.16 / 10.1.2.7:
 `distribution/windows-desktop/STORE_RESUBMIT_CERT_FIXES.md`
@@ -83,7 +83,7 @@ winget install -e --id Microsoft.winappcli --source winget
 
 Output file:
 
-`distribution\windows-desktop\msix\out\PocketMind.PocketMindAI_1.0.5.0_x64.msix`
+`distribution\windows-desktop\msix\out\PocketMind.PocketMindAI_1.0.6.0_x64.msix`
 
 Upload that `.msix` in Partner Center → Packages (upload button — not a URL).
 Do **not** buy a code-signing cert for Store MSIX — Microsoft re-signs it.

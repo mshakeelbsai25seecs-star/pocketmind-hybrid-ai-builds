@@ -13,7 +13,7 @@ import {
   cwRepoMap,
   cwRunSandbox,
 } from '../../api/codeWorkspace';
-import { modeAllowsTool, type PocketCodeAgentMode } from '../../codeWorkspace/agentModes';
+import { effectiveModeForRemote, modeAllowsTool, type PocketCodeAgentMode } from '../../codeWorkspace/agentModes';
 import {
   NATIVE_TOOL_REPAIR_PROMPT,
   TOOL_REPAIR_PROMPT,
@@ -87,10 +87,6 @@ async function runMcpWithPermission(
   }
 }
 
-/** Soft ceiling to stop retry storms / runaway tool loops without blocking normal edits. */
-const MAX_STEPS = 28;
-/** How many turns before the ceiling the model is told to wrap up. */
-const WRAP_UP_LEAD = 4;
 /** Grep / maps may be larger; reads stay tight. */
 const TOOL_RESULT_MAX_DEFAULT = 48_000;
 const TOOL_RESULT_MAX_READ = 32_000;
@@ -279,6 +275,8 @@ export interface AgentLoopInput {
   callbacks: AgentLoopCallbacks;
   signal?: AbortSignal;
   mode?: PocketCodeAgentMode;
+  /** When true (LAN/remote host workspace), block all mutating tools. */
+  remoteReadOnly?: boolean;
   /** Vision images for first user turn (org/online vision models). */
   images?: AgentImagePayload[];
   skillsMarkdown?: string;
@@ -305,12 +303,16 @@ function appendStreamChunk(current: string, piece: string): string {
 function toolParams(base: GenerationParams, modelPath: string): GenerationParams {
   const enterpriseOrRemote =
     modelPath.startsWith('enterprise:') || modelPath.startsWith('remote:');
-  const maxFloor = enterpriseOrRemote ? 8192 : 384;
+  // Online / org models: full supported context and a high completion budget (no artificial cap).
+  const maxFloor = enterpriseOrRemote ? 16_384 : 384;
+  const contextFloor = enterpriseOrRemote ? 128_000 : 0;
+  const baseContext = Number(base.context_size ?? 4096);
   return {
     ...base,
     temperature: Math.min(Number(base.temperature ?? 0.2), 0.15),
     top_p: Math.min(Number(base.top_p ?? 0.9), 0.85),
     max_tokens: Math.max(Number(base.max_tokens ?? 512), maxFloor),
+    context_size: contextFloor > 0 ? Math.max(baseContext, contextFloor) : baseContext,
     repetition_penalty: Math.max(Number(base.repetition_penalty ?? 1.1), 1.08),
   };
 }
@@ -483,6 +485,7 @@ async function executeTool(
   protocol: ToolProtocol = 'json',
   cache?: ToolRunCache,
   step = 0,
+  remoteReadOnly = false,
 ): Promise<string> {
   if (cache) {
     const replay = cache.check(tool, args, step);
@@ -499,6 +502,7 @@ async function executeTool(
     mode,
     mcpCatalog,
     protocol,
+    remoteReadOnly,
   );
   cache?.record(tool, args, step, result);
   return result;
@@ -512,9 +516,12 @@ async function executeToolRaw(
   mode: PocketCodeAgentMode,
   mcpCatalog: McpToolInfo[] = [],
   protocol: ToolProtocol = 'json',
+  remoteReadOnly = false,
 ): Promise<string> {
-  if (!modeAllowsTool(mode, tool)) {
-    return `Tool "${tool}" is not available in ${mode} mode. Switch mode or use an allowed tool.`;
+  if (!modeAllowsTool(mode, tool, { remoteReadOnly })) {
+    return remoteReadOnly && ['apply_edit', 'delete_file', 'run_command'].includes(tool)
+      ? `Tool "${tool}" is blocked: remote LAN sessions are read-only on the host workspace.`
+      : `Tool "${tool}" is not available in ${mode} mode. Switch mode or use an allowed tool.`;
   }
   if (tool.startsWith('mcp__')) {
     const resolved = resolveMcpToolName(tool, mcpCatalog);
@@ -751,9 +758,9 @@ export async function runCodeWorkspaceAgent(
     throw new Error(rustGate.reason || gate.reason);
   }
 
-  const mode = input.mode || 'agent';
-  // Self-hosted / offline servers advertise an OpenAI-compatible API but may ignore the tool
-  // schema; activeProtocol can drop to JSON mid-run when that happens.
+  const requestedMode = input.mode || 'agent';
+  const remoteReadOnly = Boolean(input.remoteReadOnly);
+  const mode = effectiveModeForRemote(requestedMode, remoteReadOnly);
   const protocol = toolProtocolForModel(input.modelPath);
   let activeProtocol: ToolProtocol = protocol;
   let jsonFallbackUsed = false;
@@ -765,7 +772,7 @@ export async function runCodeWorkspaceAgent(
   const tools = protocol === 'native' ? buildOpenAiToolsForMode(mode, mcpTools) : [];
   // Hand the model the layout up front so it does not spend turns rediscovering it.
   input.callbacks.onStatus?.('Reading workspace layout…');
-  const canRunCommands = modeAllowsTool(mode, 'run_command');
+  const canRunCommands = modeAllowsTool(mode, 'run_command', { remoteReadOnly });
   const [workspaceBrief, projectRules, projectCommandList] = await Promise.all([
     buildWorkspaceBrief(input.workspaceRoot).catch(() => ''),
     loadProjectRules(input.workspaceRoot).catch(() => ''),
@@ -784,13 +791,12 @@ export async function runCodeWorkspaceAgent(
   };
   const toolCache = new ToolRunCache();
 
-  const stepLimitSummary =
-    `Agent stopped after ${MAX_STEPS} steps (turn limit). Narrow the task or send a follow-up to continue.`;
-  let summary = stepLimitSummary;
+  let summary = 'Agent finished without a summary.';
   let lastAssistantText = '';
   let repairsUsed = 0;
   let lastPlanId: string | null = null;
   let thrashNudged = false;
+  let step = 0;
 
   /** One firm reminder when the model starts looping on identical tool calls. */
   const nudgeIfThrashing = () => {
@@ -815,26 +821,17 @@ export async function runCodeWorkspaceAgent(
     },
   };
 
-  for (let step = 0; step < MAX_STEPS; step += 1) {
+  while (true) {
     if (input.signal?.aborted) {
       summary = 'Agent cancelled.';
       break;
     }
+    step += 1;
 
     const protoLabel = activeProtocol === 'native' ? 'native tools' : 'JSON tools';
     input.callbacks.onStatus?.(
-      `${mode} · ${protoLabel} · Thinking (step ${step + 1}/${MAX_STEPS})…`,
+      `${mode} · ${protoLabel} · Thinking (step ${step})…`,
     );
-
-    // Land a real answer instead of getting cut off mid-exploration at the hard limit.
-    if (step === MAX_STEPS - WRAP_UP_LEAD && step > 0) {
-      transcript.push({
-        role: 'user',
-        content:
-          `Only ${WRAP_UP_LEAD} tool turns remain. Stop exploring now and finish with your best answer `
-          + 'from the results you already have — concrete paths, lines and values, plus anything still missing.',
-      });
-    }
 
     let turn: AssistantTurnResult;
     try {
@@ -850,7 +847,7 @@ export async function runCodeWorkspaceAgent(
       );
     } catch (err) {
       const msg = formatInvokeError(err);
-      const errStep: AgentStep = { step: step + 1, kind: 'error', content: msg };
+      const errStep: AgentStep = { step, kind: 'error', content: msg };
       steps.push(errStep);
       input.callbacks.onStep(errStep);
       summary = `Generation failed: ${msg}`;
@@ -862,7 +859,7 @@ export async function runCodeWorkspaceAgent(
     if (assistantText.trim()) lastAssistantText = assistantText.trim();
 
     const assistantStep: AgentStep = {
-      step: step + 1,
+      step,
       kind: 'assistant',
       content:
         nativeCalls.length > 0
@@ -914,7 +911,7 @@ export async function runCodeWorkspaceAgent(
         }
         // Prose-only reply: treat as final answer when no tools were called.
         summary = assistantText;
-        const doneStep: AgentStep = { step: step + 1, kind: 'done', content: summary };
+        const doneStep: AgentStep = { step, kind: 'done', content: summary };
         steps.push(doneStep);
         input.callbacks.onStep(doneStep);
         break;
@@ -933,7 +930,7 @@ export async function runCodeWorkspaceAgent(
         const args = parseToolArgs(tc.function?.arguments || '');
         if (toolName === 'done') {
           summary = String(args.summary ?? 'Task complete.');
-          const doneStep: AgentStep = { step: step + 1, kind: 'done', content: summary };
+          const doneStep: AgentStep = { step, kind: 'done', content: summary };
           steps.push(doneStep);
           input.callbacks.onStep(doneStep);
           finished = true;
@@ -949,11 +946,12 @@ export async function runCodeWorkspaceAgent(
             mcpTools,
             activeProtocol,
             toolCache,
-            step + 1,
+            step,
+            remoteReadOnly,
           );
           const clipped = clipToolResult(toolName, toolResult);
           const toolStep: AgentStep = {
-            step: step + 1,
+            step,
             kind: 'tool',
             content: `Tool ${toolName}`,
             tool: toolName,
@@ -970,7 +968,7 @@ export async function runCodeWorkspaceAgent(
         } catch (err) {
           const msg = formatInvokeError(err);
           const errStep: AgentStep = {
-            step: step + 1,
+            step,
             kind: 'error',
             content: msg,
             tool: toolName,
@@ -1014,7 +1012,7 @@ export async function runCodeWorkspaceAgent(
       summary =
         'Agent stopped: model did not emit valid tool JSON. Try a larger/better-instruction model, or rephrase the task.';
       const errStep: AgentStep = {
-        step: step + 1,
+        step,
         kind: 'error',
         content: summary,
       };
@@ -1027,7 +1025,7 @@ export async function runCodeWorkspaceAgent(
 
     if (call.tool === 'done') {
       summary = String(call.args.summary ?? 'Task complete.');
-      const doneStep: AgentStep = { step: step + 1, kind: 'done', content: summary };
+      const doneStep: AgentStep = { step, kind: 'done', content: summary };
       steps.push(doneStep);
       input.callbacks.onStep(doneStep);
       break;
@@ -1043,11 +1041,12 @@ export async function runCodeWorkspaceAgent(
         mcpTools,
         activeProtocol,
         toolCache,
-        step + 1,
+        step,
+        remoteReadOnly,
       );
       const clipped = clipToolResult(call.tool, toolResult);
       const toolStep: AgentStep = {
-        step: step + 1,
+        step,
         kind: 'tool',
         content: `Tool ${call.tool}`,
         tool: call.tool,
@@ -1064,13 +1063,13 @@ export async function runCodeWorkspaceAgent(
       const approxChars = transcript.reduce((n, m) => n + m.content.length, 0);
       if (approxChars > 80_000) {
         input.callbacks.onStatus?.(
-          `Thinking (step ${step + 1}/${MAX_STEPS})… · context ~${Math.round(approxChars / 1000)}k chars (older tool bodies collapsed)`,
+          `Thinking (step ${step})… · context ~${Math.round(approxChars / 1000)}k chars (older tool bodies collapsed)`,
         );
       }
     } catch (err) {
       const msg = formatInvokeError(err);
       const errStep: AgentStep = {
-        step: step + 1,
+        step,
         kind: 'error',
         content: msg,
         tool: call.tool,
@@ -1084,10 +1083,6 @@ export async function runCodeWorkspaceAgent(
     }
   }
 
-  // Hitting the ceiling should still show the model's best prose rather than only a stop notice.
-  if (summary === stepLimitSummary && lastAssistantText.length > 80) {
-    summary = `${lastAssistantText}\n\n_Stopped at the ${MAX_STEPS}-step limit — send a follow-up to continue._`;
-  }
   console.info(
     `[pocketcode agent] ${mode} · ${protocol}`
     + `${activeProtocol !== protocol ? ` → ${activeProtocol}` : ''} · ${toolCache.summary()}`,
