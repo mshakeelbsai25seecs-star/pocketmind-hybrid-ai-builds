@@ -58,6 +58,14 @@ export function parseImportFiles(
 
   for (const file of files) {
     try {
+      if (!file.text || !file.text.trim()) {
+        errors.push({ file: file.name, message: 'File is empty.' });
+        continue;
+      }
+      if (file.text.length > 25_000_000) {
+        errors.push({ file: file.name, message: 'File exceeds 25 MB import limit.' });
+        continue;
+      }
       const resolved = format === 'auto' ? detectFormat(file.text) : format;
       lastFormat = resolved;
       const parsed = parseWithFormat(file.text, file.name, resolved);
@@ -65,7 +73,15 @@ export function parseImportFiles(
         errors.push({ file: file.name, message: 'No alerts found in file.' });
         continue;
       }
-      alerts.push(...parsed);
+      if (parsed.length > 5000) {
+        errors.push({
+          file: file.name,
+          message: `File produced ${parsed.length} alerts; importing first 5000.`,
+        });
+        alerts.push(...parsed.slice(0, 5000));
+      } else {
+        alerts.push(...parsed);
+      }
     } catch (err) {
       errors.push({
         file: file.name,

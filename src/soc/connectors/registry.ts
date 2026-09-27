@@ -1,4 +1,6 @@
 import { invoke } from '@tauri-apps/api/tauri';
+import { browserGetConnectorsConfig, browserSaveConnectorsConfig } from '../browserStore';
+import { isSocTauriRuntime } from '../runtime';
 import type { SocConnectorDescriptor } from '../types';
 
 export const SOC_CONNECTORS: SocConnectorDescriptor[] = [
@@ -37,12 +39,22 @@ export const SOC_CONNECTORS: SocConnectorDescriptor[] = [
 ];
 
 export async function loadConnectorsConfig(): Promise<Record<string, unknown>> {
-  const raw = await invoke<Record<string, unknown>>('soc_get_connectors_config');
-  return raw && typeof raw === 'object' ? raw : {};
+  if (!isSocTauriRuntime()) return browserGetConnectorsConfig();
+  try {
+    const raw = await invoke<Record<string, unknown>>('soc_get_connectors_config');
+    return raw && typeof raw === 'object' ? raw : {};
+  } catch {
+    return browserGetConnectorsConfig();
+  }
 }
 
 export async function saveConnectorsConfig(value: Record<string, unknown>): Promise<Record<string, unknown>> {
-  return invoke<Record<string, unknown>>('soc_save_connectors_config', { value });
+  if (!isSocTauriRuntime()) return browserSaveConnectorsConfig(value);
+  try {
+    return await invoke<Record<string, unknown>>('soc_save_connectors_config', { value });
+  } catch {
+    return browserSaveConnectorsConfig(value);
+  }
 }
 
 export function liveConnectorUnavailableMessage(): string {

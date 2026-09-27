@@ -19,6 +19,15 @@ export default function SocImportView() {
   const [preview, setPreview] = useState<ParsedAlert[]>([]);
   const [errors, setErrors] = useState<{ file: string; row?: number; message: string }[]>([]);
   const [files, setFiles] = useState<{ name: string; text: string }[]>([]);
+  const [pasteText, setPasteText] = useState('');
+
+  const applyLoaded = (loaded: { name: string; text: string }[]) => {
+    setFiles(loaded);
+    const parsed = parseImportFiles(loaded, format);
+    setPreview(parsed.alerts.slice(0, 500));
+    setErrors(parsed.errors);
+    setStatus(`Parsed ${parsed.alerts.length} alert(s) from ${loaded.length} file(s).`);
+  };
 
   const pickFiles = async () => {
     setStatus(null);
@@ -36,16 +45,37 @@ export default function SocImportView() {
         const name = path.split(/[/\\]/).pop() || path;
         loaded.push({ name, text });
       }
-      setFiles(loaded);
-      const parsed = parseImportFiles(loaded, format);
-      setPreview(parsed.alerts.slice(0, 500));
-      setErrors(parsed.errors);
-      setStatus(`Parsed ${parsed.alerts.length} alert(s) from ${loaded.length} file(s).`);
+      applyLoaded(loaded);
+    } catch (err) {
+      // Browser / missing dialog: allow HTML file input fallback message
+      setStatus(`${String(err)} Use paste below if the file picker is unavailable.`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onHtmlFile = async (list: FileList | null) => {
+    if (!list?.length) return;
+    setBusy(true);
+    try {
+      const loaded: { name: string; text: string }[] = [];
+      for (const file of Array.from(list)) {
+        loaded.push({ name: file.name, text: await file.text() });
+      }
+      applyLoaded(loaded);
     } catch (err) {
       setStatus(String(err));
     } finally {
       setBusy(false);
     }
+  };
+
+  const parsePaste = () => {
+    if (!pasteText.trim()) {
+      setStatus('Paste alert export text first.');
+      return;
+    }
+    applyLoaded([{ name: 'pasted-alert.txt', text: pasteText }]);
   };
 
   const reparse = () => {
@@ -141,11 +171,33 @@ export default function SocImportView() {
         <button type="button" className="btn-secondary text-sm" disabled={busy} onClick={() => void pickFiles()}>
           Choose files
         </button>
+        <label className="btn-secondary text-sm cursor-pointer inline-flex items-center">
+          Browse
+          <input
+            type="file"
+            className="hidden"
+            multiple
+            accept=".json,.jsonl,.xml,.csv,.txt,.log,.cef"
+            onChange={e => void onHtmlFile(e.target.files)}
+          />
+        </label>
         <button type="button" className="btn-secondary text-sm" disabled={busy || !files.length} onClick={reparse}>
           Re-parse
         </button>
         <button type="button" className="btn-primary text-sm" disabled={busy || !files.length} onClick={() => void commit()}>
           Import into queue
+        </button>
+      </div>
+
+      <div className="space-y-2">
+        <textarea
+          className="input-field font-mono text-xs min-h-[6rem]"
+          value={pasteText}
+          onChange={e => setPasteText(e.target.value)}
+          placeholder="Or paste FortiSIEM JSON / CEF / CSV / XML here"
+        />
+        <button type="button" className="btn-secondary text-sm" disabled={busy} onClick={parsePaste}>
+          Parse paste
         </button>
       </div>
 

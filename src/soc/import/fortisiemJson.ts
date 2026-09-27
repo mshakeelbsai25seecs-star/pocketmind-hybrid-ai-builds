@@ -64,32 +64,57 @@ function objectToAlert(obj: Record<string, unknown>, sourceLabel: string): Parse
   };
 }
 
+function parseJsonLines(text: string): Record<string, unknown>[] {
+  const rows: Record<string, unknown>[] = [];
+  for (const line of text.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('//') || trimmed.startsWith('#')) continue;
+    try {
+      const item = JSON.parse(trimmed) as unknown;
+      if (item && typeof item === 'object' && !Array.isArray(item)) {
+        rows.push(item as Record<string, unknown>);
+      }
+    } catch {
+      // skip bad lines; caller may report aggregate errors
+    }
+  }
+  return rows;
+}
+
 export function parseFortiSiEmJson(text: string, fileLabel: string): ParsedAlert[] {
   const trimmed = text.trim();
   if (!trimmed) return [];
-  const parsed = JSON.parse(trimmed) as unknown;
   const rows: Record<string, unknown>[] = [];
 
-  if (Array.isArray(parsed)) {
-    for (const item of parsed) {
-      if (item && typeof item === 'object') rows.push(item as Record<string, unknown>);
+  try {
+    const parsed = JSON.parse(trimmed) as unknown;
+    if (Array.isArray(parsed)) {
+      for (const item of parsed) {
+        if (item && typeof item === 'object') rows.push(item as Record<string, unknown>);
+      }
+    } else if (parsed && typeof parsed === 'object') {
+      const obj = parsed as Record<string, unknown>;
+      if (Array.isArray(obj.data)) {
+        for (const item of obj.data) {
+          if (item && typeof item === 'object') rows.push(item as Record<string, unknown>);
+        }
+      } else if (Array.isArray(obj.events)) {
+        for (const item of obj.events) {
+          if (item && typeof item === 'object') rows.push(item as Record<string, unknown>);
+        }
+      } else if (Array.isArray(obj.incidents)) {
+        for (const item of obj.incidents) {
+          if (item && typeof item === 'object') rows.push(item as Record<string, unknown>);
+        }
+      } else {
+        rows.push(obj);
+      }
     }
-  } else if (parsed && typeof parsed === 'object') {
-    const obj = parsed as Record<string, unknown>;
-    if (Array.isArray(obj.data)) {
-      for (const item of obj.data) {
-        if (item && typeof item === 'object') rows.push(item as Record<string, unknown>);
-      }
-    } else if (Array.isArray(obj.events)) {
-      for (const item of obj.events) {
-        if (item && typeof item === 'object') rows.push(item as Record<string, unknown>);
-      }
-    } else if (Array.isArray(obj.incidents)) {
-      for (const item of obj.incidents) {
-        if (item && typeof item === 'object') rows.push(item as Record<string, unknown>);
-      }
-    } else {
-      rows.push(obj);
+  } catch {
+    // JSONL / NDJSON fallback
+    rows.push(...parseJsonLines(trimmed));
+    if (!rows.length) {
+      throw new Error(`Invalid JSON/JSONL in ${fileLabel}`);
     }
   }
 
@@ -99,8 +124,10 @@ export function parseFortiSiEmJson(text: string, fileLabel: string): ParsedAlert
 }
 
 export function canParseFortiSiEmJson(text: string): boolean {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
   try {
-    const parsed = JSON.parse(text.trim()) as unknown;
+    const parsed = JSON.parse(trimmed) as unknown;
     if (Array.isArray(parsed)) {
       return parsed.some(item => item && typeof item === 'object' && looksLikeFortiSiEmObject(item as Record<string, unknown>));
     }
@@ -116,6 +143,7 @@ export function canParseFortiSiEmJson(text: string): boolean {
     }
     return false;
   } catch {
-    return false;
+    const lines = parseJsonLines(trimmed);
+    return lines.some(looksLikeFortiSiEmObject);
   }
 }

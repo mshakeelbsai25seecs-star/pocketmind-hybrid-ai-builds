@@ -1,14 +1,26 @@
 import { invoke } from '@tauri-apps/api/tauri';
+import { browserListMemory, browserSaveMemory } from './browserStore';
 import { newMemoryId, normalizeMemoryKey } from './ids';
+import { isSocTauriRuntime } from './runtime';
 import type { SocMemoryEntry } from './types';
 
 export async function socListMemory(): Promise<SocMemoryEntry[]> {
-  const raw = await invoke<SocMemoryEntry[]>('soc_list_memory');
-  return Array.isArray(raw) ? raw : [];
+  if (!isSocTauriRuntime()) return browserListMemory();
+  try {
+    const raw = await invoke<SocMemoryEntry[]>('soc_list_memory');
+    return Array.isArray(raw) ? raw : [];
+  } catch {
+    return browserListMemory();
+  }
 }
 
 export async function socSaveMemory(entries: SocMemoryEntry[]): Promise<SocMemoryEntry[]> {
-  return invoke<SocMemoryEntry[]>('soc_save_memory', { entries });
+  if (!isSocTauriRuntime()) return browserSaveMemory(entries);
+  try {
+    return await invoke<SocMemoryEntry[]>('soc_save_memory', { entries });
+  } catch {
+    return browserSaveMemory(entries);
+  }
 }
 
 export function createMemoryEntry(input: {
@@ -20,11 +32,14 @@ export function createMemoryEntry(input: {
   createdFromCaseId?: string;
 }): SocMemoryEntry {
   const now = Date.now();
+  const key = normalizeMemoryKey(input.entityType, input.key);
+  if (!key) throw new Error('Memory key is required.');
+  if (!input.note.trim()) throw new Error('Memory note is required.');
   return {
     schemaVersion: 1,
     id: newMemoryId(),
     entityType: input.entityType,
-    key: normalizeMemoryKey(input.entityType, input.key),
+    key,
     note: input.note.trim(),
     classification: input.classification,
     active: true,

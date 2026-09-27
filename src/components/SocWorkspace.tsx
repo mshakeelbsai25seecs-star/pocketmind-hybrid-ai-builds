@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { invoke } from '@tauri-apps/api/tauri';
 import {
   Check, ClipboardCopy, Copy, Search, Send
@@ -55,12 +55,24 @@ function defaultTitleForAction(kind: SocPromptKind): string {
   return action ? `SOC ${action.shortLabel}` : 'SOC Workspace';
 }
 
-export default function SocWorkspace() {
-  const [input, setInput] = useState<SocWorkspaceInput>(emptyInput);
+export default function SocWorkspace({
+  seedInput,
+  seedKey,
+}: {
+  seedInput?: SocWorkspaceInput;
+  seedKey?: string;
+} = {}) {
+  const [input, setInput] = useState<SocWorkspaceInput>(seedInput || emptyInput);
   const [activeAction, setActiveAction] = useState<SocPromptKind>('triage');
   const [copied, setCopied] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!seedInput || !seedKey) return;
+    setInput(seedInput);
+    setNotice(`Loaded fields from case ${seedKey}.`);
+  }, [seedKey]); // eslint-disable-line react-hooks/exhaustive-deps -- seed on case change only
 
   const store = useAppStore();
   const {
