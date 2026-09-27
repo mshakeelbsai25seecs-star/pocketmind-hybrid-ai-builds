@@ -7,7 +7,7 @@ PocketMind Hybrid AI is a desktop application for security analysts. It helps yo
 ## Before you start
 
 1. Your IT team must install PocketMind Hybrid AI and configure server paths (**Settings → Deployment**).
-2. An admin must index the company data folder (**Fortinet Copilot → Grounded SOC Knowledge → Scan & Index**).
+2. An admin must index the company data folder (**SOC → Knowledge → Scan & Index**).
 3. You must select a local AI model (**Models**).
 
 ## Main areas
@@ -15,30 +15,26 @@ PocketMind Hybrid AI is a desktop application for security analysts. It helps yo
 ### Home
 Overview and shortcuts to SOC, Knowledge Chat, Chat, and Models.
 
-### Fortinet Copilot (SOC)
-Your primary workspace for incidents.
+### SOC
+Alert queue, investigation, Fortinet engineering tools, and company knowledge. Fresh installs start with an empty queue. Cases persist under the deployment data root in `soc/`.
 
-**Triage an alert**
-1. Open **Fortinet Copilot**.
-2. Fill in alert summary, logs, IPs, user, asset, severity.
-3. Click **Triage Alert**.
-4. Review auto-retrieved company policy snippets.
-5. Click **Send to Chat** for the AI answer.
+**Investigate an alert**
+1. Open **SOC → Queue**.
+2. **Import** FortiSIEM/CEF/CSV/XML exports, or create a blank case and paste evidence.
+3. Open the case → **Investigate** (requires a selected model).
+4. Review the evidence chain and verdict; override disposition if needed.
+5. Approve / close with your name for the audit log; **Export** the case report when needed.
 
-**Generate a report**
-1. Scroll to **SOC Reports**.
-2. Choose report type and fill in fields.
-3. Click **Generate Grounded Report with AI**.
-4. Export or copy the Markdown file.
-
-**Validators**
-Paste parser XML, playbook JSON, or sample logs. The app runs **local checks** (pass/warning/fail). This is not AI — it is deterministic validation.
+**Engineering (rules / parsers / playbooks)**
+1. Open **SOC → Workspace** (or Validators / Reports).
+2. Draft FortiSIEM/FortiSOAR artifacts with company knowledge grounding.
+3. Run **Validators** for local parser/playbook checks (deterministic, not AI).
 
 ### Knowledge Chat
 Ask plain-language questions about indexed company folders. Answers cite source files.
 
 ### Chat
-General conversations. SOC prompts from Fortinet Copilot open here automatically.
+General conversations. SOC Workspace prompts can open here automatically.
 
 ### Models
 Import and select GGUF models stored on the server.
@@ -49,7 +45,7 @@ Import and select GGUF models stored on the server.
 ## Important rules
 
 - AI recommendations require **human approval** before production actions.
-- The app does **not** connect live to FortiSIEM/FortiSOAR — you paste exports.
+- The app does **not** call live FortiSIEM/FortiSOAR APIs in this build — use Import or paste exports.
 - If answers seem generic, ask an admin to **re-index** the company folder.
 
 ## Getting help

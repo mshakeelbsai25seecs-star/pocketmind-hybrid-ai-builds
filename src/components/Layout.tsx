@@ -12,7 +12,7 @@ import StorageManager from './StorageManager';
 import HelpCenter from './HelpCenter';
 import ImageStudio from './ImageStudio';
 import DocumentStudio from './DocumentStudio';
-import SocCopilot from './SocCopilot';
+import SocShell from './soc/SocShell';
 import CodeWorkspaceLayout from './codeWorkspace/CodeWorkspaceLayout';
 import HardwareRuntimeManager from './HardwareRuntimeManager';
 import ControlCenter, { tabForView } from './ControlCenter';
@@ -65,7 +65,7 @@ export default function Layout() {
         {activeView === 'home' && <HomeDashboard />}
         {activeView === 'setup' && <SetupWizard />}
         {activeView === 'chat' && <ChatView />}
-        {activeView === 'soc' && <SocCopilot />}
+        {activeView === 'soc' && <SocShell />}
         {keepCodeWorkspace && (
           <div
             className={

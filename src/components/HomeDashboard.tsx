@@ -164,7 +164,7 @@ export default function HomeDashboard() {
 
   const cards = [
     { title: 'PocketCode', desc: 'Open a project folder and run the coding agent: search, edit, terminal, checkpoints, and plans — without cluttering your repo.', icon: Code2, action: 'Open PocketCode', view: 'code-workspace' as const },
-    { title: 'Fortinet Copilot', desc: 'Triage alerts, run validators, write reports, and search your company documents.', icon: ShieldCheck, action: 'Open SOC', view: 'soc' as const },
+    { title: 'SOC', desc: 'Alert queue, investigation, Fortinet engineering tools, and company knowledge.', icon: ShieldCheck, action: 'Open SOC', view: 'soc' as const },
     { title: 'Image Studio', desc: 'Generate, compare, and export images.', icon: FileText, action: 'Open Image Studio', view: 'image-studio' as const },
     { title: 'Chat', desc: 'Local or online conversations.', icon: MessageSquare, action: 'Open Chat', view: 'chat' as const },
     { title: 'Models', desc: 'Import, scan, and select GGUF models.', icon: Download, action: 'Manage Models', view: 'models' as const },

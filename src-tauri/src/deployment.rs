@@ -714,6 +714,7 @@ pub fn ensure_deployment_directories(config: &DeploymentConfig) -> std::io::Resu
         .map(|p| p.to_string_lossy().to_string())
         .unwrap_or_else(|| join_path(Path::new(&paths.models_dir), &["rerankers"]));
 
+    let soc_ops_root = join_path(Path::new(&paths.data_root), &["soc"]);
     let mut dir_paths = vec![
         paths.data_root.clone(),
         paths.models_dir.clone(),
@@ -724,6 +725,12 @@ pub fn ensure_deployment_directories(config: &DeploymentConfig) -> std::io::Resu
         paths.export_dir.clone(),
         paths.knowledge_db_dir.clone(),
         dense_parent,
+        soc_ops_root.clone(),
+        join_path(Path::new(&soc_ops_root), &["cases"]),
+        join_path(Path::new(&soc_ops_root), &["memory"]),
+        join_path(Path::new(&soc_ops_root), &["imports"]),
+        join_path(Path::new(&soc_ops_root), &["metrics"]),
+        join_path(Path::new(&soc_ops_root), &["connectors"]),
         normalize_path_string(&app_database_dir().to_string_lossy()),
         normalize_path_string(&hnsw_index_dir().to_string_lossy()),
         normalize_path_string(&process_cache_dir().to_string_lossy()),

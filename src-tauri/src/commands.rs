@@ -1832,7 +1832,15 @@ pub async fn ensure_deployment_directories(
     let db = state.db.lock().await;
     let config = deployment::load_deployment_config(&db);
     drop(db);
-    deployment::ensure_deployment_directories(&config).map_err(|e| AppError::Unknown(e.to_string()))
+    let mut result = deployment::ensure_deployment_directories(&config)
+        .map_err(|e| AppError::Unknown(e.to_string()))?;
+    let soc_created = crate::soc_store::ensure_soc_dirs(&config)?;
+    for path in soc_created {
+        if !result.created.contains(&path) && !result.existing.contains(&path) {
+            result.created.push(path);
+        }
+    }
+    Ok(result)
 }
 
 #[tauri::command]
@@ -2604,6 +2612,216 @@ pub async fn link_mmproj_beside_model(model_path: String, mmproj_path: String) -
         })?;
     }
     Ok(dest.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn soc_ensure_dirs(state: State<'_, AppState>) -> AppResult<Vec<String>> {
+    let db = state.db.lock().await;
+    let config = deployment::load_deployment_config(&db);
+    drop(db);
+    crate::soc_store::ensure_soc_dirs(&config)
+}
+
+#[tauri::command]
+pub async fn soc_list_cases(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<crate::soc_store::SocCaseIndexEntry>> {
+    let db = state.db.lock().await;
+    let config = deployment::load_deployment_config(&db);
+    drop(db);
+    crate::soc_store::list_cases(&config)
+}
+
+#[tauri::command]
+pub async fn soc_get_case(state: State<'_, AppState>, case_id: String) -> AppResult<Value> {
+    let db = state.db.lock().await;
+    let config = deployment::load_deployment_config(&db);
+    drop(db);
+    crate::soc_store::get_case(&config, case_id.trim())
+}
+
+#[tauri::command]
+pub async fn soc_upsert_case(state: State<'_, AppState>, case: Value) -> AppResult<Value> {
+    let db = state.db.lock().await;
+    let config = deployment::load_deployment_config(&db);
+    drop(db);
+    let saved = crate::soc_store::upsert_case(&config, case)?;
+    let id = saved.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    record_audit(
+        &state,
+        "soc.case.upsert",
+        "soc",
+        &format!("SOC case saved {id}"),
+        None,
+        Some(id),
+        true,
+    )
+    .await;
+    Ok(saved)
+}
+
+#[tauri::command]
+pub async fn soc_delete_case(state: State<'_, AppState>, case_id: String) -> AppResult<()> {
+    let db = state.db.lock().await;
+    let config = deployment::load_deployment_config(&db);
+    drop(db);
+    let id = case_id.trim().to_string();
+    crate::soc_store::delete_case(&config, &id)?;
+    record_audit(
+        &state,
+        "soc.case.delete",
+        "soc",
+        &format!("SOC case deleted {id}"),
+        None,
+        Some(id),
+        true,
+    )
+    .await;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn soc_rebuild_index(
+    state: State<'_, AppState>,
+) -> AppResult<Vec<crate::soc_store::SocCaseIndexEntry>> {
+    let db = state.db.lock().await;
+    let config = deployment::load_deployment_config(&db);
+    drop(db);
+    crate::soc_store::rebuild_index(&config)
+}
+
+#[tauri::command]
+pub async fn soc_list_memory(state: State<'_, AppState>) -> AppResult<Value> {
+    let db = state.db.lock().await;
+    let config = deployment::load_deployment_config(&db);
+    drop(db);
+    crate::soc_store::list_memory(&config)
+}
+
+#[tauri::command]
+pub async fn soc_save_memory(state: State<'_, AppState>, entries: Value) -> AppResult<Value> {
+    let db = state.db.lock().await;
+    let config = deployment::load_deployment_config(&db);
+    drop(db);
+    let saved = crate::soc_store::save_memory(&config, entries)?;
+    record_audit(
+        &state,
+        "soc.memory.save",
+        "soc",
+        "SOC memory saved",
+        Some(format!(
+            "entries={}",
+            saved.as_array().map(|a| a.len()).unwrap_or(0)
+        )),
+        None,
+        true,
+    )
+    .await;
+    Ok(saved)
+}
+
+#[tauri::command]
+pub async fn soc_save_import_batch(state: State<'_, AppState>, batch: Value) -> AppResult<Value> {
+    let db = state.db.lock().await;
+    let config = deployment::load_deployment_config(&db);
+    drop(db);
+    let saved = crate::soc_store::save_import_batch(&config, batch)?;
+    record_audit(
+        &state,
+        "soc.import.batch",
+        "soc",
+        "SOC import batch saved",
+        saved.get("id").and_then(|v| v.as_str()).map(|s| s.to_string()),
+        None,
+        true,
+    )
+    .await;
+    Ok(saved)
+}
+
+#[tauri::command]
+pub async fn soc_write_case_artifact(
+    state: State<'_, AppState>,
+    case_id: String,
+    relative_name: String,
+    contents: String,
+) -> AppResult<String> {
+    let db = state.db.lock().await;
+    let config = deployment::load_deployment_config(&db);
+    drop(db);
+    crate::soc_store::write_case_artifact(&config, case_id.trim(), relative_name.trim(), &contents)
+}
+
+#[tauri::command]
+pub async fn soc_write_case_import_blob(
+    state: State<'_, AppState>,
+    case_id: String,
+    relative_name: String,
+    contents: String,
+) -> AppResult<String> {
+    let db = state.db.lock().await;
+    let config = deployment::load_deployment_config(&db);
+    drop(db);
+    crate::soc_store::write_case_import_blob(
+        &config,
+        case_id.trim(),
+        relative_name.trim(),
+        &contents,
+    )
+}
+
+#[tauri::command]
+pub async fn soc_export_case_markdown(
+    state: State<'_, AppState>,
+    case_id: String,
+    markdown: String,
+    filename: Option<String>,
+) -> AppResult<String> {
+    let db = state.db.lock().await;
+    let config = deployment::load_deployment_config(&db);
+    drop(db);
+    let path =
+        crate::soc_store::export_case_markdown(&config, case_id.trim(), &markdown, filename)?;
+    record_audit(
+        &state,
+        "soc.case.export",
+        "soc",
+        "SOC case markdown exported",
+        Some(path.clone()),
+        Some(case_id.trim().to_string()),
+        true,
+    )
+    .await;
+    Ok(path)
+}
+
+#[tauri::command]
+pub async fn soc_recompute_metrics(
+    state: State<'_, AppState>,
+) -> AppResult<crate::soc_store::SocMetricsSummary> {
+    let db = state.db.lock().await;
+    let config = deployment::load_deployment_config(&db);
+    drop(db);
+    crate::soc_store::recompute_metrics(&config)
+}
+
+#[tauri::command]
+pub async fn soc_get_connectors_config(state: State<'_, AppState>) -> AppResult<Value> {
+    let db = state.db.lock().await;
+    let config = deployment::load_deployment_config(&db);
+    drop(db);
+    crate::soc_store::get_connectors_config(&config)
+}
+
+#[tauri::command]
+pub async fn soc_save_connectors_config(
+    state: State<'_, AppState>,
+    value: Value,
+) -> AppResult<Value> {
+    let db = state.db.lock().await;
+    let config = deployment::load_deployment_config(&db);
+    drop(db);
+    crate::soc_store::save_connectors_config(&config, value)
 }
 
 #[tauri::command]
