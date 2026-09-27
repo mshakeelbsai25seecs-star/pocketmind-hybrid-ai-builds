@@ -257,7 +257,7 @@ export default function Sidebar() {
     ...(FEATURE_FLAGS.codeWorkspace ? [{ id: 'code-workspace' as const, icon: Code2, label: 'PocketCode' }] : []),
     { id: 'image-studio' as const, icon: ImageIcon, label: 'Image Studio' },
     { id: 'characters' as const, icon: Users, label: 'Characters' },
-    { id: 'soc' as const, icon: ShieldCheck, label: 'Fortinet Copilot' },
+    { id: 'soc' as const, icon: ShieldCheck, label: 'SOC' },
     { id: 'models' as const, icon: Download, label: 'Model Manager' },
     { id: 'hardware-runtime' as const, icon: Cpu, label: 'Hardware & Runtime' },
     { id: 'control-center' as const, icon: ServerCog, label: 'Control Center' },

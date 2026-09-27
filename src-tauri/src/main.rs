@@ -42,6 +42,7 @@ mod llama_runtime_install;
 mod doc_export;
 mod lan_host;
 mod optional_parsers;
+mod soc_store;
 
 use tauri::{GlobalShortcutManager, Manager, WindowEvent};
 use std::sync::Arc;
@@ -128,6 +129,21 @@ fn main() {
             commands::path_exists,
             commands::link_mmproj_beside_model,
             commands::write_soc_text_export,
+            commands::soc_ensure_dirs,
+            commands::soc_list_cases,
+            commands::soc_get_case,
+            commands::soc_upsert_case,
+            commands::soc_delete_case,
+            commands::soc_rebuild_index,
+            commands::soc_list_memory,
+            commands::soc_save_memory,
+            commands::soc_save_import_batch,
+            commands::soc_write_case_artifact,
+            commands::soc_write_case_import_blob,
+            commands::soc_export_case_markdown,
+            commands::soc_recompute_metrics,
+            commands::soc_get_connectors_config,
+            commands::soc_save_connectors_config,
             commands::scan_soc_knowledge_folder,
             commands::validate_soc_dense_embedding_provider,
             commands::embed_soc_dense_texts,

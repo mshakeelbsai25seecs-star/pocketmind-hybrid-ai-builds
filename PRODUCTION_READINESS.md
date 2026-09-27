@@ -4,18 +4,19 @@
 
 1. **Settings → Deployment** — confirm where models, company data, and exports are stored.
 2. **Models** — add a GGUF chat model and an embedding model for document search.
-3. **Fortinet Copilot → Company knowledge** — link your folder and click **Scan & Index**.
+3. **SOC → Knowledge** — link your company folder and click **Scan & Index**.
 
 ## Daily workflow
 
-1. Enter alert details in **Incident input**.
-2. Choose what you want to do (triage, rule draft, playbook, etc.).
-3. Click **Send to Chat** or generate a report.
-4. Use **Validators** for parser/playbook checks and **Reports** for Markdown output.
+1. Open **SOC → Queue** (empty on a fresh install).
+2. **Import** FortiSIEM/CEF/CSV/XML exports, or create a blank case and paste evidence.
+3. Open the case → **Investigate** (model required) → review evidence chain and verdict.
+4. Approve / close with an analyst name for the audit log; export the case report as needed.
+5. Use **Workspace / Validators / Reports** for Fortinet rule, parser, and playbook engineering.
 
 ## Practice scenarios
 
-The **Practice scenarios** section includes synthetic VPN and parser examples. Use **Load into form** to try the workflow without real incident data.
+**SOC → Practice** can create a case from a sample on demand. Nothing is preloaded into the queue.
 
 ## Settings
 
@@ -29,4 +30,5 @@ The **Practice scenarios** section includes synthetic VPN and parser examples. U
 
 - All processing runs on your machine unless you connect an organization LLM server.
 - Human approval is required before response actions in your environment.
-- The app does not connect live to FortiSIEM or FortiSOAR unless you paste exported data.
+- The app does not call live FortiSIEM or FortiSOAR APIs in this build. Use Import or paste exports.
+- Case data persists under `{data_root}/soc/` (cases, memory, imports, metrics).

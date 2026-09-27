@@ -11,7 +11,6 @@ import SocRetrievedSources from './SocRetrievedSources';
 import SocValidators from './SocValidators';
 import SocReports from './SocReports';
 import SocDashboard from './SocDashboard';
-import SocExamplesPanel from './SocExamplesPanel';
 import { logAuditEvent } from '../auditLog';
 import SocDataPackIntake from './SocDataPackIntake';
 import { useSocGroundedKnowledge } from '../hooks/useSocGroundedKnowledge';
@@ -23,7 +22,6 @@ import {
 } from '../socPromptTemplates';
 import { buildSocAutoKnowledgeContextBlock } from '../socKnowledgeRetrieval';
 import { buildSocRetrievedSnippetContext } from '../socKnowledgeIndex';
-import type { SocDemoSample } from '../socDemoSamples';
 import { SOC_SYSTEM_PROMPT } from '../socChatHandoff';
 
 const emptyInput: SocWorkspaceInput = {
@@ -179,20 +177,10 @@ export default function SocWorkspace() {
     setNotice('SOC workspace fields cleared.');
   };
 
-  const applyExample = (sample: SocDemoSample) => {
-    setInput(sample.input);
-    setActiveAction(sample.recommendedAction);
-    setNotice(`Loaded example: ${sample.title}.`);
-  };
-
   return (
     <div className="flex-1 overflow-y-auto p-4 sm:p-6 lg:p-8 space-y-6">
       <div className="panel-shell p-4 sm:p-5 space-y-2">
-        <h1 className="text-2xl font-black text-surface-950 dark:text-white">Fortinet Copilot</h1>
-        <p className="text-sm text-surface-600 dark:text-surface-300 max-w-3xl">
-          Index your company folder, enter alert details below, pick an action, then send to Chat or generate a report.
-          Company policies are pulled in automatically when indexed.
-        </p>
+        <h1 className="text-2xl font-black text-surface-950 dark:text-white">Workspace</h1>
       </div>
 
       <div id="soc-knowledge-collection" className="scroll-mt-6">
@@ -205,10 +193,6 @@ export default function SocWorkspace() {
 
       <div id="soc-data-pack-intake" className="scroll-mt-6">
         <SocDataPackIntake />
-      </div>
-
-      <div id="soc-examples" className="scroll-mt-6">
-        <SocExamplesPanel onApplySample={applyExample} />
       </div>
 
       <div id="soc-workspace" className="scroll-mt-6 grid xl:grid-cols-[minmax(0,1.05fr)_minmax(22rem,0.95fr)] gap-6">
