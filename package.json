@@ -28,6 +28,8 @@
     "verify:linux-runtimes": "bash scripts/verify_linux_runtimes.sh",
     "build:macos-x64-metal": "bash scripts/build_macos_x64_metal_runtime.sh",
     "build:macos-release": "bash scripts/build_macos_release.sh",
+    "build:linux-desktop": "bash scripts/build-linux-desktop.sh",
+    "build:macos-desktop": "bash scripts/build-macos-desktop.sh",
     "dist:stage:windows": "powershell -ExecutionPolicy Bypass -File distribution/windows-desktop/scripts/stage-release.ps1",
     "dist:stage:macos": "bash distribution/macos-desktop/scripts/stage-release.sh",
     "dist:stage:linux": "bash distribution/linux-desktop/scripts/stage-release.sh",

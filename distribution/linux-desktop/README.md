@@ -4,12 +4,22 @@ Linux desktop deliverable (AppImage and/or `.deb` from Tauri).
 
 ## Build
 
+Preferred one-shot (AppImage + `.deb` + staged tar.gz; CPU llama runtime):
+
 ```bash
 cd /path/to/nexus-ai-deep-fixed
+./scripts/build-linux-desktop.sh
+# artifacts → dist-desktop/linux/
+```
+
+CI: GitHub Actions workflow **Package Linux Desktop** (`.github/workflows/package-linux.yml`). Isolated from Windows Store/MSIX.
+
+Manual / legacy:
+
+```bash
 npm install
-npm run tauri build
+npm run tauri build -- --bundles appimage,deb
 npm run dist:stage:linux
-# or: ./distribution/linux-desktop/scripts/stage-release.sh
 ```
 
 ## Runtimes

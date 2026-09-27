@@ -22,29 +22,31 @@ npm run tauri build
 
 ## macOS desktop + macOS server
 
-On a Mac:
+On a Mac (or CI workflow **Package macOS Desktop**):
 
 ```bash
 cd /path/to/nexus-ai-deep-fixed
-npm run build
-npm run tauri build
-chmod +x distribution/macos-desktop/scripts/stage-release.sh
-./distribution/macos-desktop/scripts/stage-release.sh
+./scripts/build-macos-desktop.sh
+# artifacts → dist-desktop/macos/
+# Server optional:
 chmod +x distribution/macos-server/scripts/prepare-server.sh
 sudo ./distribution/macos-server/scripts/prepare-server.sh
 ```
 
 ## Linux desktop + Linux server
 
+On Linux (or CI workflow **Package Linux Desktop**):
+
 ```bash
 cd /path/to/nexus-ai-deep-fixed
-npm run build
-npm run tauri build
-chmod +x distribution/linux-desktop/scripts/stage-release.sh
-./distribution/linux-desktop/scripts/stage-release.sh
+./scripts/build-linux-desktop.sh
+# artifacts → dist-desktop/linux/
+# Server optional:
 chmod +x distribution/linux-server/scripts/prepare-server.sh
 sudo ./distribution/linux-server/scripts/prepare-server.sh
 ```
+
+Windows Store/MSIX remains isolated (`scripts/REBUILD-STORE-EXE-AND-MSIX.ps1`, `.github/workflows/store-msix.yml`).
 
 ## Validation
 

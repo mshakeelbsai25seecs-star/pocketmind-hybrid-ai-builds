@@ -1,0 +1,108 @@
+name: Package Linux Desktop
+
+# Isolated from Windows Store/MSIX workflows. Failures here must not block Store packaging.
+# Produces AppImage + .deb + staged tar.gz (CPU llama runtime; CUDA optional post-install).
+
+on:
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Upload artifacts to a GitHub Release (tag desktop-linux-<sha> or use push tag)'
+        type: boolean
+        default: false
+      include_cuda:
+        description: 'Also download Linux CUDA llama runtime into the package (larger)'
+        type: boolean
+        default: false
+  push:
+    tags:
+      - 'v*'
+      - 'desktop-*'
+      - 'linux-*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: package-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-linux:
+    name: Linux AppImage + deb
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux Tauri / WebKit deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.0-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libsoup2.4-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            appstream
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: package-linux-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock', 'src-tauri/Cargo.toml', 'crates/**/Cargo.toml') }}
+          restore-keys: |
+            package-linux-${{ runner.os }}-
+
+      - name: Build Linux desktop packages
+        env:
+          INCLUDE_CUDA: ${{ github.event_name == 'workflow_dispatch' && inputs.include_cuda && '1' || '0' }}
+          SKIP_CUDA: ${{ github.event_name == 'workflow_dispatch' && inputs.include_cuda && '0' || '1' }}
+          SKIP_VULKAN: '1'
+          CI: 'true'
+        run: |
+          chmod +x scripts/build-linux-desktop.sh \
+            scripts/setup_linux_runtimes.sh \
+            distribution/linux-desktop/scripts/stage-release.sh
+          ./scripts/build-linux-desktop.sh
+
+      - name: Upload Actions artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketMind-Hybrid-AI-linux-x86_64
+          path: dist-desktop/linux/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish to GitHub Release (tags or dispatch)
+        if: >-
+          startsWith(github.ref, 'refs/tags/') ||
+          (github.event_name == 'workflow_dispatch' && inputs.create_release)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('desktop-linux-{0}', github.sha) }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('Linux desktop {0}', github.sha) }}
+          draft: ${{ github.event_name == 'workflow_dispatch' }}
+          files: dist-desktop/linux/*
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -9,7 +9,7 @@
 ## Steps
 
 1. Open the `.dmg` and drag **PocketMind Hybrid AI** to Applications.
-2. First launch: right-click → **Open** if macOS blocks the app.
+2. First launch (unsigned CI/GitHub builds): **right-click → Open → Open**. Gatekeeper blocks unsigned apps until you approve once. (Signed/notarized builds from Apple Developer certs skip this.)
 3. Go to **Settings → Deployment**, check the folders, then **Save**.
 4. Add chat models under `~/Library/Application Support/PocketMind/models/`.
 5. Add company files under `company-data/` if you use Fortinet Copilot.

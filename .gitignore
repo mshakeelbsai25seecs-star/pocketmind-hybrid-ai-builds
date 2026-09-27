@@ -113,3 +113,6 @@ android/local.properties
 android/keystore.properties
 *.jks
 *.keystore
+
+# Linux/macOS desktop packaging output (CI + local)
+dist-desktop/

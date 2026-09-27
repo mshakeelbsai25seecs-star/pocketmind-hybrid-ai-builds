@@ -1,0 +1,95 @@
+name: Package macOS Desktop
+
+# Isolated from Windows Store/MSIX and Linux packaging workflows.
+# Builds unsigned .app / .dmg on macos-latest. Gatekeeper: right-click → Open.
+
+on:
+  workflow_dispatch:
+    inputs:
+      create_release:
+        description: 'Upload artifacts to a GitHub Release (draft tag desktop-macos-<sha>)'
+        type: boolean
+        default: false
+      universal:
+        description: 'Build universal-apple-darwin (needs both Rust targets; slower)'
+        type: boolean
+        default: false
+  push:
+    tags:
+      - 'v*'
+      - 'desktop-*'
+      - 'macos-*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: package-macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-macos:
+    name: macOS app + dmg
+    runs-on: macos-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: package-macos-${{ runner.os }}-${{ hashFiles('src-tauri/Cargo.lock', 'src-tauri/Cargo.toml', 'crates/**/Cargo.toml') }}
+          restore-keys: |
+            package-macos-${{ runner.os }}-
+
+      - name: Build macOS desktop packages (unsigned)
+        env:
+          UNIVERSAL: ${{ github.event_name == 'workflow_dispatch' && inputs.universal && '1' || '0' }}
+          CI: 'true'
+          # No Apple signing secrets → unsigned; RUN.txt documents Gatekeeper Open.
+          APPLE_CERTIFICATE: ''
+          APPLE_SIGNING_IDENTITY: ''
+        run: |
+          chmod +x scripts/build-macos-desktop.sh \
+            scripts/setup_macos_runtimes.sh \
+            scripts/build_macos_release.sh \
+            distribution/macos-desktop/scripts/stage-release.sh
+          ./scripts/build-macos-desktop.sh
+
+      - name: Upload Actions artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketMind-Hybrid-AI-macos
+          path: dist-desktop/macos/*
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish to GitHub Release (tags or dispatch)
+        if: >-
+          startsWith(github.ref, 'refs/tags/') ||
+          (github.event_name == 'workflow_dispatch' && inputs.create_release)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('desktop-macos-{0}', github.sha) }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || format('macOS desktop {0}', github.sha) }}
+          draft: ${{ github.event_name == 'workflow_dispatch' }}
+          files: dist-desktop/macos/*
+          fail_on_unmatched_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

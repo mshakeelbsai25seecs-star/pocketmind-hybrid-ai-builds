@@ -28,11 +28,21 @@ nexus-ai
 
 Data usually lives in `~/.local/share/PocketMind`.
 
+## Optional: CUDA / Vulkan llama runtime
+
+CPU runtime is usually bundled. For NVIDIA CUDA or Vulkan after install:
+
+```bash
+# from a git checkout of the app, or copy binaries into your data dir:
+SKIP_CUDA=0 ./scripts/setup_linux_runtimes.sh
+# or place under ~/.local/share/PocketMind/bin/llama.cpp/{cuda,vulkan}/
+```
+
 ## Optional: better PDF OCR (Knowledge Chat)
 
-`ash
+```bash
 pip3 install pymupdf pillow pytesseract opencv-python-headless docling
-`
+```
 
 Docling models are not bundled by default. Online Image RAG remains off unless enabled globally and per collection.
 

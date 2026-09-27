@@ -55,9 +55,9 @@ function listFilesRecursive(absDir) {
   return out;
 }
 
-for (const backend of ['cpu', 'cuda', 'vulkan']) {
+function addBackendDir(backend) {
   const dir = path.join(llamaRoot, backend);
-  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) continue;
+  if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) return;
 
   let files = listFilesRecursive(dir);
   if (files.length === 0) {
@@ -71,6 +71,18 @@ for (const backend of ['cpu', 'cuda', 'vulkan']) {
     resources.push(rel);
   }
   console.log(`  backend ${backend}: ${files.length} file(s)`);
+}
+
+// Windows / Linux backends
+for (const backend of ['cpu', 'cuda', 'vulkan']) {
+  addBackendDir(backend);
+}
+
+// macOS backends (macos-arm64-metal, macos-x64-cpu, …) when present — no-op on Windows.
+if (fs.existsSync(llamaRoot)) {
+  for (const name of fs.readdirSync(llamaRoot)) {
+    if (name.startsWith('macos-')) addBackendDir(name);
+  }
 }
 
 // Verify every path exists (no globs expected after rewrite).
