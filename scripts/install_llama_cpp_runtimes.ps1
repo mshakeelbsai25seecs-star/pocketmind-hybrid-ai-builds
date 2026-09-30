@@ -33,11 +33,21 @@
   the same drive as the project so the system drive (often space-constrained)
   is not used for multi-hundred-MB staging.
 
+.PARAMETER MirrorBaseUrl
+  Optional public CDN/R2 base URL (no trailing slash). When set, the installer
+  fetches `{MirrorBaseUrl}/manifest.json` first and downloads zip assets from
+  that mirror. Falls back to the official ggml-org/llama.cpp GitHub releases
+  API if the mirror is unreachable or incomplete. Also read from env
+  NEXUS_LLAMA_RUNTIME_MIRROR or POCKETMIND_LLAMA_RUNTIME_BASE_URL.
+
 .EXAMPLE
   pwsh -File scripts\install_llama_cpp_runtimes.ps1
 
 .EXAMPLE
   pwsh -File scripts\install_llama_cpp_runtimes.ps1 -Tag b7525 -CudaVersion 12.4
+
+.EXAMPLE
+  pwsh -File scripts\install_llama_cpp_runtimes.ps1 -MirrorBaseUrl "https://runtimes.example.com/llama.cpp"
 #>
 param(
   [string]$ProjectPath = (Split-Path -Parent $PSScriptRoot),
@@ -47,7 +57,8 @@ param(
   [switch]$SkipCuda,
   [switch]$SkipVulkan,
   [switch]$SkipCpu,
-  [string]$TempRoot = ""
+  [string]$TempRoot = "",
+  [string]$MirrorBaseUrl = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -91,26 +102,29 @@ try {
 
 function Write-Section($text) { Write-Host "`n=== $text ===" -ForegroundColor Cyan }
 
+function Get-MirrorBaseUrl {
+  $candidates = @(
+    $MirrorBaseUrl,
+    $env:NEXUS_LLAMA_RUNTIME_MIRROR,
+    $env:POCKETMIND_LLAMA_RUNTIME_BASE_URL
+  )
+  foreach ($c in $candidates) {
+    if ($c -and $c.Trim()) {
+      return $c.Trim().TrimEnd('/')
+    }
+  }
+  return ""
+}
+
 function Get-GitHubToken {
   $token = $env:GH_TOKEN
   if (-not $token) { $token = $env:GITHUB_TOKEN }
   return $token
 }
 
-function Get-GitHubHeaders {
-  $headers = @{
-    "User-Agent" = "PocketMind-Hybrid-AI-Installer"
-    "Accept" = "application/vnd.github+json"
-    "X-GitHub-Api-Version" = "2022-11-28"
-  }
-  $token = Get-GitHubToken
-  if ($token) {
-    $headers["Authorization"] = "Bearer $token"
-    Write-Host "GitHub API: using authenticated requests (rate-limit safe)"
-  } else {
-    Write-Warning "GitHub API: unauthenticated (may hit rate limits on CI shared IPs). Set GH_TOKEN or GITHUB_TOKEN."
-  }
-  return $headers
+function Test-IsGitHubUrl {
+  param([Parameter(Mandatory = $true)][string]$Url)
+  return ($Url -match '(?i)^https?://([^/]+\.)?github\.com/') -or ($Url -match '(?i)^https?://objects\.githubusercontent\.com/')
 }
 
 function Get-CurlExe {
@@ -131,7 +145,22 @@ function Invoke-GitHubApiJson {
     [Parameter(Mandatory = $true)][string]$Url,
     [int]$MaxAttempts = 5
   )
-  $headers = Get-GitHubHeaders
+  $headers = @{
+    "User-Agent" = "PocketMind-Hybrid-AI-Installer"
+    "Accept" = "application/json"
+  }
+  $isGitHub = Test-IsGitHubUrl -Url $Url
+  if ($isGitHub) {
+    $headers["Accept"] = "application/vnd.github+json"
+    $headers["X-GitHub-Api-Version"] = "2022-11-28"
+    $token = Get-GitHubToken
+    if ($token) {
+      $headers["Authorization"] = "Bearer $token"
+      Write-Host "GitHub API: using authenticated requests (rate-limit safe)"
+    } else {
+      Write-Warning "GitHub API: unauthenticated (may hit rate limits on CI shared IPs). Set GH_TOKEN or GITHUB_TOKEN."
+    }
+  }
   $curl = Get-CurlExe
   $lastError = $null
 
@@ -143,12 +172,14 @@ function Invoke-GitHubApiJson {
           "--retry", "3", "--retry-delay", "2",
           "--connect-timeout", "30",
           "-A", "PocketMind-Hybrid-AI-Installer",
-          "-H", "Accept: application/vnd.github+json",
-          "-H", "X-GitHub-Api-Version: 2022-11-28"
+          "-H", ("Accept: {0}" -f $headers["Accept"])
         )
-        $token = Get-GitHubToken
-        if ($token) {
-          $curlArgs += @("-H", "Authorization: Bearer $token")
+        if ($isGitHub) {
+          $curlArgs += @("-H", "X-GitHub-Api-Version: 2022-11-28")
+          $token = Get-GitHubToken
+          if ($token) {
+            $curlArgs += @("-H", "Authorization: Bearer $token")
+          }
         }
         $curlArgs += $Url
         $raw = & $curl @curlArgs 2>&1
@@ -162,12 +193,12 @@ function Invoke-GitHubApiJson {
       return Invoke-RestMethod -Uri $Url -Headers $headers
     } catch {
       $lastError = $_
-      Write-Warning ("GitHub API attempt {0}/{1} failed: {2}" -f $attempt, $MaxAttempts, $_.Exception.Message)
+      Write-Warning ("API/manifest attempt {0}/{1} failed: {2}" -f $attempt, $MaxAttempts, $_.Exception.Message)
       if ($attempt -lt $MaxAttempts) { Start-Sleep -Seconds ([Math]::Min(20, 2 * $attempt)) }
     }
   }
 
-  throw "GitHub API request failed after $MaxAttempts attempts for $Url. Last error: $lastError"
+  throw "API/manifest request failed after $MaxAttempts attempts for $Url. Last error: $lastError"
 }
 
 function Write-PmProgress {
@@ -218,8 +249,10 @@ function Download-FileWithRetry {
         # Windows PowerShell 5.1 (avoids "connection was closed on a send").
         # Launch as a Process and poll partial file size for UI progress.
         $argList = New-Object System.Collections.Generic.List[string]
+        # Only attach GitHub credentials to github.com / objects.githubusercontent.com URLs.
+        # Cloudflare R2 / custom CDN mirrors must not receive a Bearer token.
         $token = Get-GitHubToken
-        if ($token) {
+        if ($token -and (Test-IsGitHubUrl -Url $Url)) {
           $argList.Add("-H")
           $argList.Add("Authorization: Bearer $token")
         }
@@ -302,7 +335,96 @@ function Download-FileWithRetry {
   }
 }
 
-function Get-ReleaseAssets {
+function ConvertTo-MirrorRelease {
+  param(
+    [Parameter(Mandatory = $true)]$Manifest,
+    [Parameter(Mandatory = $true)][string]$BaseUrl
+  )
+
+  $tagName = [string]$Manifest.tag_name
+  if (-not $tagName) { $tagName = [string]$Manifest.tag }
+  if (-not $tagName) { $tagName = "mirror" }
+
+  $rawAssets = @()
+  if ($Manifest.assets) { $rawAssets = @($Manifest.assets) }
+
+  $assets = @()
+  foreach ($a in $rawAssets) {
+    $name = [string]$a.name
+    if (-not $name) { continue }
+
+    $url = [string]$a.browser_download_url
+    if (-not $url) { $url = [string]$a.url }
+    if (-not $url) {
+      $key = [string]$a.key
+      if (-not $key) { $key = [string]$a.path }
+      if ($key) {
+        $key = $key.TrimStart('/')
+        $url = "$BaseUrl/$key"
+      }
+    }
+    if (-not $url) {
+      # Default object key layout under the mirror base.
+      $url = "$BaseUrl/$tagName/$name"
+    }
+
+    $size = 0L
+    if ($null -ne $a.size) {
+      try { $size = [long]$a.size } catch { $size = 0L }
+    }
+
+    $assets += [pscustomobject]@{
+      name = $name
+      size = $size
+      browser_download_url = $url
+    }
+  }
+
+  if ($assets.Count -eq 0) {
+    throw "Mirror manifest at $BaseUrl has no assets."
+  }
+
+  return [pscustomobject]@{
+    tag_name = $tagName
+    assets = $assets
+    source = "mirror"
+  }
+}
+
+function Get-MirrorReleaseAssets {
+  param(
+    [Parameter(Mandatory = $true)][string]$BaseUrl,
+    [string]$Tag = ""
+  )
+
+  $manifestCandidates = @(
+    "$BaseUrl/manifest.json"
+  )
+  if ($Tag) {
+    $manifestCandidates = @(
+      "$BaseUrl/$Tag/manifest.json",
+      "$BaseUrl/manifest.json"
+    ) + $manifestCandidates
+  }
+
+  $lastError = $null
+  foreach ($manifestUrl in $manifestCandidates) {
+    try {
+      Write-Host "Querying runtime mirror manifest: $manifestUrl"
+      $manifest = Invoke-GitHubApiJson -Url $manifestUrl -MaxAttempts 3
+      $release = ConvertTo-MirrorRelease -Manifest $manifest -BaseUrl $BaseUrl
+      Write-Host ("Mirror release: {0} ({1} assets)" -f $release.tag_name, @($release.assets).Count)
+      return $release
+    } catch {
+      $lastError = $_
+      Write-Warning ("Mirror manifest attempt failed for {0}: {1}" -f $manifestUrl, $_.Exception.Message)
+    }
+  }
+
+  throw "Mirror manifest fetch failed for $BaseUrl. Last error: $lastError"
+}
+
+function Get-GitHubReleaseAssets {
   param([string]$Tag)
 
   if ($Tag) {
@@ -329,6 +451,21 @@ function Get-ReleaseAssets {
   }
 
   throw "Could not find a llama.cpp release with Windows CPU x64 binaries (bin-win-cpu-x64). Pass -Tag b10615 (or newer)."
+}
+
+function Get-ReleaseAssets {
+  param([string]$Tag)
+
+  $mirror = Get-MirrorBaseUrl
+  if ($mirror) {
+    try {
+      return Get-MirrorReleaseAssets -BaseUrl $mirror -Tag $Tag
+    } catch {
+      Write-Warning ("Runtime mirror unavailable ({0}); falling back to GitHub releases. Details: {1}" -f $mirror, $_.Exception.Message)
+    }
+  }
+
+  return Get-GitHubReleaseAssets -Tag $Tag
 }
 
 function Find-Asset {

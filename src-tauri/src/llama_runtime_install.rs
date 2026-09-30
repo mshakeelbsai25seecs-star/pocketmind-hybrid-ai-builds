@@ -315,6 +315,27 @@ pub async fn install_llama_runtime_backend(
             "-TempRoot".to_string(),
             temp_root.to_string_lossy().to_string(),
         ];
+        // Prefer Cloudflare R2 / CDN mirror when configured (avoids GitHub rate limits).
+        // Env: NEXUS_LLAMA_RUNTIME_MIRROR or POCKETMIND_LLAMA_RUNTIME_BASE_URL
+        // Optional baked-in default once the public R2 domain is live (leave empty until then).
+        const BAKED_RUNTIME_MIRROR: &str = "";
+        let mirror = std::env::var("NEXUS_LLAMA_RUNTIME_MIRROR")
+            .or_else(|_| std::env::var("POCKETMIND_LLAMA_RUNTIME_BASE_URL"))
+            .ok()
+            .map(|s| s.trim().trim_end_matches('/').to_string())
+            .filter(|s| !s.is_empty())
+            .or_else(|| {
+                let baked = BAKED_RUNTIME_MIRROR.trim().trim_end_matches('/');
+                if baked.is_empty() {
+                    None
+                } else {
+                    Some(baked.to_string())
+                }
+            });
+        if let Some(base) = mirror {
+            args.push("-MirrorBaseUrl".into());
+            args.push(base);
+        }
         match backend.as_str() {
             "cuda" => {
                 args.push("-SkipVulkan".into());
