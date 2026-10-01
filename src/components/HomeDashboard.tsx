@@ -228,14 +228,24 @@ export default function HomeDashboard() {
             </div>
           </div>
           {(cudaBusy || cudaProgress || cudaMsg) && (
-            <div className="mt-5 rounded-sm border border-primary-500/30 bg-primary-950/20 p-3 space-y-2">
-              <div className="flex items-start justify-between gap-3 text-xs text-primary-200">
+            <div className={`mt-5 rounded-sm border p-3 space-y-2 ${
+              cudaProgress?.phase === 'stalled' || cudaProgress?.phase === 'retrying'
+                ? 'border-amber-500/40 bg-amber-950/20'
+                : 'border-primary-500/30 bg-primary-950/20'
+            }`}>
+              <div className={`flex items-start justify-between gap-3 text-xs ${
+                cudaProgress?.phase === 'stalled' || cudaProgress?.phase === 'retrying'
+                  ? 'text-amber-200'
+                  : 'text-primary-200'
+              }`}>
                 <span className="font-medium break-words min-w-0 flex-1">{cudaMsg || 'Preparing CUDA download…'}</span>
                 {cudaPercent != null && <span className="tabular-nums shrink-0 pt-0.5">{cudaPercent}%</span>}
               </div>
               <div className="h-2 rounded-sm bg-surface-800 overflow-hidden">
                 <div
-                  className={`h-full bg-primary-500 transition-[width] duration-300 ${cudaBusy && cudaPercent == null ? 'animate-pulse w-1/3' : ''}`}
+                  className={`h-full transition-[width] duration-300 ${
+                    cudaProgress?.phase === 'stalled' || cudaProgress?.phase === 'retrying' ? 'bg-amber-500' : 'bg-primary-500'
+                  } ${cudaBusy && cudaPercent == null ? 'animate-pulse w-1/3' : ''}`}
                   style={{ width: cudaPercent != null ? `${cudaPercent}%` : cudaBusy ? undefined : '0%' }}
                 />
               </div>
