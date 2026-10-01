@@ -317,8 +317,9 @@ pub async fn install_llama_runtime_backend(
         ];
         // Prefer Cloudflare R2 / CDN mirror when configured (avoids GitHub rate limits).
         // Env: NEXUS_LLAMA_RUNTIME_MIRROR or POCKETMIND_LLAMA_RUNTIME_BASE_URL
-        // Optional baked-in default once the public R2 domain is live (leave empty until then).
-        const BAKED_RUNTIME_MIRROR: &str = "";
+        // Public r2.dev base (no trailing slash). Env vars override this when set.
+        const BAKED_RUNTIME_MIRROR: &str =
+            "https://pub-445d2932437643739332a15768c80a05.r2.dev/llama.cpp";
         let mirror = std::env::var("NEXUS_LLAMA_RUNTIME_MIRROR")
             .or_else(|_| std::env::var("POCKETMIND_LLAMA_RUNTIME_BASE_URL"))
             .ok()
