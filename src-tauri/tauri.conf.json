@@ -80,7 +80,7 @@
         "exceptionDomain": "",
         "frameworks": [],
         "providerShortName": null,
-        "signingIdentity": null
+        "signingIdentity": "-"
       },
       "resources": [
         "resources/tooling/MANIFEST.json",

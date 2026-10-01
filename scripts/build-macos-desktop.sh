@@ -37,6 +37,11 @@ echo "    Signing: unsigned (no Apple cert configured in this script)"
 
 export PATH="${HOME}/.cargo/bin:/usr/local/bin:${PATH}"
 export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$PROJECT_DIR/src-tauri/target}"
+# Tauri treats an empty signing identity as a real identity and fails codesign.
+# Default to ad-hoc ("-") unless a real Apple identity is provided.
+if [[ -z "${APPLE_SIGNING_IDENTITY:-}" ]]; then
+  export APPLE_SIGNING_IDENTITY='-'
+fi
 
 if [[ ! -d node_modules ]]; then
   npm ci

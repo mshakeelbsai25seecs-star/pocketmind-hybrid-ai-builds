@@ -62,9 +62,9 @@ jobs:
         env:
           UNIVERSAL: ${{ github.event_name == 'workflow_dispatch' && inputs.universal && '1' || '0' }}
           CI: 'true'
-          # No Apple signing secrets → unsigned; RUN.txt documents Gatekeeper Open.
-          APPLE_CERTIFICATE: ''
-          APPLE_SIGNING_IDENTITY: ''
+          # "-" = ad-hoc sign (no Apple Developer cert). Empty string makes Tauri fail.
+          APPLE_SIGNING_IDENTITY: '-'
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           chmod +x scripts/build-macos-desktop.sh \
             scripts/setup_macos_runtimes.sh \

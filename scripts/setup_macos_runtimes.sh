@@ -55,10 +55,14 @@ download_latest_asset() {
 
   echo "Resolving llama.cpp release asset matching *$needle* ..." >&2
   local url name out
+  local auth_hdrs=(-H 'Accept: application/vnd.github+json' -H 'User-Agent: PocketMind Hybrid AI-Installer')
+  if [[ -n "${GITHUB_TOKEN:-${GH_TOKEN:-}}" ]]; then
+    auth_hdrs+=(-H "Authorization: Bearer ${GITHUB_TOKEN:-$GH_TOKEN}")
+  fi
   # IMPORTANT: /releases/latest is often a stub (e.g. v0.5.0) with no binaries.
   # Prefer the newest b##### release that ships the requested macOS asset.
   url="$(
-    curl -fsSL "https://api.github.com/repos/${REPO}/releases?per_page=20" | python3 -c '
+    curl -fsSL "${auth_hdrs[@]}" "https://api.github.com/repos/${REPO}/releases?per_page=20" | python3 -c '
 import json, sys, re
 needle = sys.argv[1].lower()
 releases = json.load(sys.stdin)
