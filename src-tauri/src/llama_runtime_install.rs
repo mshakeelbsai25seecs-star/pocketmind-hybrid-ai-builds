@@ -180,6 +180,9 @@ fn parse_and_emit_progress_line(window: &tauri::Window, backend: &str, line: &st
     if let Some(json) = trimmed.strip_prefix("##PM_PROGRESS##") {
         let json = json.trim();
         if let Ok(value) = serde_json::from_str::<serde_json::Value>(json) {
+            // Phases from install_llama_cpp_runtimes.ps1 include download / resuming /
+            // stalled / retrying / extract / complete / error. Forward verbatim so the
+            // UI can surface stall + auto-retry instead of freezing on the last %.
             let phase = value
                 .get("phase")
                 .and_then(|v| v.as_str())

@@ -273,8 +273,16 @@ export default function HardwareRuntimeManager() {
             </button>
           )}
           {(cudaBusy || cudaProgress || message) && (
-            <div className="space-y-2">
-              <div className="flex items-start justify-between gap-3 text-xs text-primary-200">
+            <div className={`space-y-2 rounded-sm border p-3 ${
+              cudaProgress?.phase === 'stalled' || cudaProgress?.phase === 'retrying'
+                ? 'border-amber-500/40 bg-amber-950/20'
+                : 'border-transparent'
+            }`}>
+              <div className={`flex items-start justify-between gap-3 text-xs ${
+                cudaProgress?.phase === 'stalled' || cudaProgress?.phase === 'retrying'
+                  ? 'text-amber-200'
+                  : 'text-primary-200'
+              }`}>
                 <span className="font-medium break-words min-w-0 flex-1">{cudaProgress?.message || message || 'Preparing…'}</span>
                 {typeof cudaProgress?.percent === 'number' && (
                   <span className="tabular-nums shrink-0">{cudaProgress.percent}%</span>
@@ -282,7 +290,9 @@ export default function HardwareRuntimeManager() {
               </div>
               <div className="h-2 rounded-sm bg-surface-800 overflow-hidden">
                 <div
-                  className={`h-full bg-primary-500 transition-[width] duration-300 ${cudaBusy && cudaProgress?.percent == null ? 'animate-pulse w-1/3' : ''}`}
+                  className={`h-full transition-[width] duration-300 ${
+                    cudaProgress?.phase === 'stalled' || cudaProgress?.phase === 'retrying' ? 'bg-amber-500' : 'bg-primary-500'
+                  } ${cudaBusy && cudaProgress?.percent == null ? 'animate-pulse w-1/3' : ''}`}
                   style={{
                     width:
                       typeof cudaProgress?.percent === 'number'

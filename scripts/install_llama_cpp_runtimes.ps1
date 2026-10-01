@@ -222,46 +222,97 @@ function Write-PmProgress {
   Write-Host ("##PM_PROGRESS## {0}" -f $json)
 }
 
+function Get-FileLengthSafe {
+  param([string]$Path)
+  if (-not $Path) { return 0L }
+  if (-not (Test-Path -LiteralPath $Path)) { return 0L }
+  try { return [long](Get-Item -LiteralPath $Path).Length } catch { return 0L }
+}
+
+function Stop-ProcessTreeSafe {
+  param($Process)
+  if (-not $Process) { return }
+  try {
+    if (-not $Process.HasExited) {
+      $Process.Kill()
+      $null = $Process.WaitForExit(8000)
+    }
+  } catch { }
+}
+
 function Download-FileWithRetry {
   param(
     [Parameter(Mandatory = $true)][string]$Url,
     [Parameter(Mandatory = $true)][string]$OutFile,
     [long]$ExpectedSize = 0,
-    [int]$MaxAttempts = 6,
-    [string]$ProgressLabel = ""
+    [int]$MaxAttempts = 8,
+    [string]$ProgressLabel = "",
+    [int]$StallSeconds = 45
   )
 
   $curl = Get-CurlExe
   $destDir = Split-Path -Parent $OutFile
   if ($destDir) { New-Item -ItemType Directory -Force -Path $destDir | Out-Null }
   $label = if ($ProgressLabel) { $ProgressLabel } else { Split-Path -Leaf $OutFile }
+  $errLog = Join-Path $script:TempRoot ("curl_err_" + [System.Guid]::NewGuid().ToString("N") + ".log")
 
-  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
-    if (Test-Path -LiteralPath $OutFile) {
+  # Keep a .part file so retries can resume with curl -C - (Accept-Ranges on R2/GitHub).
+  $partFile = "$OutFile.part"
+  if ((Test-Path -LiteralPath $OutFile) -and -not (Test-Path -LiteralPath $partFile)) {
+    # Interrupted rename from a previous run — treat complete-looking files as done.
+    $existing = Get-FileLengthSafe -Path $OutFile
+    if ($ExpectedSize -gt 0 -and $existing -ge $ExpectedSize) {
+      Write-Host ("  Already present {0:N1} MB -> {1}" -f ($existing / 1MB), $OutFile)
+      Write-PmProgress -Phase "download" -Message ("Already downloaded {0}" -f $label) -Percent 100 -File $label -Downloaded $existing -Total $ExpectedSize
+      return
+    }
+    try { Move-Item -LiteralPath $OutFile -Destination $partFile -Force } catch {
       Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
     }
+  }
 
-    Write-Host ("  Download attempt {0}/{1}" -f $attempt, $MaxAttempts)
-    Write-PmProgress -Phase "download" -Message ("Downloading {0} (attempt {1}/{2})..." -f $label, $attempt, $MaxAttempts) -Percent 0 -File $label -Downloaded 0 -Total $ExpectedSize
+  for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+    $have = Get-FileLengthSafe -Path $partFile
+    if ($ExpectedSize -gt 0 -and $have -gt ($ExpectedSize + 1024)) {
+      # Corrupt/oversize partial — start clean.
+      Remove-Item -LiteralPath $partFile -Force -ErrorAction SilentlyContinue
+      $have = 0L
+    }
+
+    $resumeNote = if ($have -gt 0) { "resuming from {0:N1} MB" -f ($have / 1MB) } else { "starting" }
+    Write-Host ("  Download attempt {0}/{1} ({2})" -f $attempt, $MaxAttempts, $resumeNote)
+    Write-PmProgress -Phase $(if ($have -gt 0) { "resuming" } else { "download" }) `
+      -Message ("Downloading {0} (attempt {1}/{2}, {3})..." -f $label, $attempt, $MaxAttempts, $resumeNote) `
+      -Percent $(if ($ExpectedSize -gt 0 -and $have -gt 0) { [Math]::Min(99, [int](($have * 100.0) / $ExpectedSize)) } else { 0 }) `
+      -File $label -Downloaded $have -Total $ExpectedSize
+
+    $proc = $null
     try {
       if ($curl) {
-        # Prefer curl.exe: more reliable TLS/redirects than Invoke-WebRequest on
-        # Windows PowerShell 5.1 (avoids "connection was closed on a send").
-        # Launch as a Process and poll partial file size for UI progress.
+        # Prefer curl.exe: reliable TLS/redirects on Windows PowerShell 5.1.
+        # Critical: do NOT RedirectStandardError/Output without draining — a full
+        # pipe deadlocks curl mid-download and freezes UI progress forever.
+        # Write curl diagnostics to a temp file via --stderr instead.
         $argList = New-Object System.Collections.Generic.List[string]
-        # Only attach GitHub credentials to github.com / objects.githubusercontent.com URLs.
-        # Cloudflare R2 / custom CDN mirrors must not receive a Bearer token.
         $token = Get-GitHubToken
         if ($token -and (Test-IsGitHubUrl -Url $Url)) {
           $argList.Add("-H")
           $argList.Add("Authorization: Bearer $token")
         }
+        # -f fail on HTTP errors, -L follow redirects, -C - resume partials,
+        # --http1.1 avoids occasional HTTP/2 stalls with CDN/R2,
+        # --speed-limit/--speed-time abort silent hangs (curl then exits non-zero).
+        # Outer stall watchdog below covers cases curl does not notice.
+        # Note: avoid --retry-all-errors (needs curl >= 7.71; Win10 ships older).
         foreach ($a in @(
-          "-fL", "--tlsv1.2",
-          "--retry", "5", "--retry-delay", "3",
+          "-fL", "--tlsv1.2", "--http1.1",
+          "--retry", "5", "--retry-delay", "2",
           "--connect-timeout", "30",
+          "--speed-limit", "2048", "--speed-time", "45",
           "-A", "PocketMind-Hybrid-AI-Installer",
-          "-o", $OutFile,
+          "-C", "-",
+          "-o", $partFile,
+          "--stderr", $errLog,
           $Url
         )) { $argList.Add($a) }
 
@@ -269,9 +320,8 @@ function Download-FileWithRetry {
         $psi.FileName = $curl
         $psi.UseShellExecute = $false
         $psi.CreateNoWindow = $true
-        $psi.RedirectStandardError = $true
-        $psi.RedirectStandardOutput = $true
-        # Quote args that contain spaces (e.g. Authorization header).
+        $psi.RedirectStandardError = $false
+        $psi.RedirectStandardOutput = $false
         $psi.Arguments = (($argList | ForEach-Object {
           if ($_ -match '[\s"]') { '"' + ($_ -replace '"', '\"') + '"' } else { $_ }
         }) -join ' ')
@@ -279,58 +329,109 @@ function Download-FileWithRetry {
         $proc = New-Object System.Diagnostics.Process
         $proc.StartInfo = $psi
         [void]$proc.Start()
+
+        $lastSize = $have
+        $lastChange = Get-Date
+        $stallAnnounced = $false
         while (-not $proc.HasExited) {
           Start-Sleep -Milliseconds 700
-          $partial = 0L
-          if (Test-Path -LiteralPath $OutFile) {
-            try { $partial = [long](Get-Item -LiteralPath $OutFile).Length } catch { $partial = 0L }
-          }
+          $partial = Get-FileLengthSafe -Path $partFile
           $pct = 0
           if ($ExpectedSize -gt 0 -and $partial -gt 0) {
             $pct = [Math]::Min(99, [int](($partial * 100.0) / $ExpectedSize))
           }
           $mb = if ($partial -gt 0) { "{0:N1}" -f ($partial / 1MB) } else { "0.0" }
           $totalMb = if ($ExpectedSize -gt 0) { "{0:N1}" -f ($ExpectedSize / 1MB) } else { "?" }
-          Write-PmProgress -Phase "download" -Message ("Downloading {0}: {1} / {2} MB" -f $label, $mb, $totalMb) `
-            -Percent $pct -File $label -Downloaded $partial -Total $ExpectedSize
+
+          if ($partial -gt $lastSize) {
+            $lastSize = $partial
+            $lastChange = Get-Date
+            $stallAnnounced = $false
+            Write-PmProgress -Phase "download" -Message ("Downloading {0}: {1} / {2} MB" -f $label, $mb, $totalMb) `
+              -Percent $pct -File $label -Downloaded $partial -Total $ExpectedSize
+          } else {
+            $idleFor = ((Get-Date) - $lastChange).TotalSeconds
+            if ($idleFor -ge $StallSeconds) {
+              Write-PmProgress -Phase "stalled" `
+                -Message ("Download stalled at {0} / {1} MB — aborting attempt and retrying…" -f $mb, $totalMb) `
+                -Percent $pct -File $label -Downloaded $partial -Total $ExpectedSize
+              Stop-ProcessTreeSafe -Process $proc
+              throw ("Download stalled: no new bytes for {0}s at {1} bytes" -f $StallSeconds, $partial)
+            }
+            if (-not $stallAnnounced -and $idleFor -ge ([Math]::Max(12, [int]($StallSeconds / 3)))) {
+              $stallAnnounced = $true
+              Write-PmProgress -Phase "download" `
+                -Message ("Downloading {0}: {1} / {2} MB (waiting… {3:N0}s with no new bytes)" -f $label, $mb, $totalMb, $idleFor) `
+                -Percent $pct -File $label -Downloaded $partial -Total $ExpectedSize
+            }
+          }
         }
         $proc.WaitForExit() | Out-Null
         if ($proc.ExitCode -ne 0) {
           $errTail = ""
-          try { $errTail = $proc.StandardError.ReadToEnd() } catch { }
+          if (Test-Path -LiteralPath $errLog) {
+            try { $errTail = (Get-Content -LiteralPath $errLog -Raw -ErrorAction SilentlyContinue) } catch { }
+            if ($errTail -and $errTail.Length -gt 800) { $errTail = $errTail.Substring($errTail.Length - 800) }
+          }
           throw ("curl exited with code {0}: {1}" -f $proc.ExitCode, $errTail)
         }
       } else {
-        Write-Warning "curl.exe not found; falling back to Invoke-WebRequest (TLS 1.2)."
-        Invoke-WebRequest -Uri $Url -OutFile $OutFile -UseBasicParsing
+        Write-Warning "curl.exe not found; falling back to Invoke-WebRequest (no stall watchdog)."
+        # IWR cannot resume cleanly here; delete partial and fetch whole file.
+        if (Test-Path -LiteralPath $partFile) {
+          Remove-Item -LiteralPath $partFile -Force -ErrorAction SilentlyContinue
+        }
+        Invoke-WebRequest -Uri $Url -OutFile $partFile -UseBasicParsing
       }
 
-      if (-not (Test-Path -LiteralPath $OutFile)) {
-        throw "Download finished but file missing: $OutFile"
+      if (-not (Test-Path -LiteralPath $partFile)) {
+        throw "Download finished but file missing: $partFile"
       }
-      $len = (Get-Item -LiteralPath $OutFile).Length
+      $len = Get-FileLengthSafe -Path $partFile
       if ($len -le 0) {
-        throw "Downloaded file is empty: $OutFile"
+        throw "Downloaded file is empty: $partFile"
       }
       if ($ExpectedSize -gt 0 -and $len -lt [Math]::Max(1024, [long]($ExpectedSize * 0.5))) {
         throw ("Downloaded size {0} looks truncated (expected ~{1})" -f $len, $ExpectedSize)
       }
-      Write-Host ("  Saved {0:N1} MB -> {1}" -f ($len / 1MB), $OutFile)
-      Write-PmProgress -Phase "download" -Message ("Downloaded {0} ({1:N1} MB)" -f $label, ($len / 1MB)) -Percent 100 -File $label -Downloaded $len -Total $(if ($ExpectedSize -gt 0) { $ExpectedSize } else { $len })
-      return
-    } catch {
-      Write-Warning ("  Download failed: {0}" -f $_.Exception.Message)
+      if ($ExpectedSize -gt 0 -and $len -lt $ExpectedSize) {
+        # curl may exit 0 after a short transfer that still looks incomplete.
+        throw ("Downloaded size {0} is short of expected {1}; will resume" -f $len, $ExpectedSize)
+      }
+
       if (Test-Path -LiteralPath $OutFile) {
         Remove-Item -LiteralPath $OutFile -Force -ErrorAction SilentlyContinue
       }
+      Move-Item -LiteralPath $partFile -Destination $OutFile -Force
+      Write-Host ("  Saved {0:N1} MB -> {1}" -f ($len / 1MB), $OutFile)
+      Write-PmProgress -Phase "download" -Message ("Downloaded {0} ({1:N1} MB)" -f $label, ($len / 1MB)) -Percent 100 -File $label -Downloaded $len -Total $(if ($ExpectedSize -gt 0) { $ExpectedSize } else { $len })
+      Remove-Item -LiteralPath $errLog -Force -ErrorAction SilentlyContinue
+      return
+    } catch {
+      Write-Warning ("  Download failed: {0}" -f $_.Exception.Message)
+      Stop-ProcessTreeSafe -Process $proc
+      # Keep .part for resume unless it is clearly unusable.
+      $partialLen = Get-FileLengthSafe -Path $partFile
+      if ($partialLen -le 0) {
+        Remove-Item -LiteralPath $partFile -Force -ErrorAction SilentlyContinue
+      }
       if ($attempt -ge $MaxAttempts) {
         $msg = [string]$_.Exception.Message
+        Remove-Item -LiteralPath $errLog -Force -ErrorAction SilentlyContinue
         if ($msg -match 'Access is denied|UnauthorizedAccess|Permission denied|not enough space|disk full|There is not enough space') {
           throw ("Write/permission failure saving to {0}: {1}. Choose a writable data folder (e.g. D:\PocketMind) in Settings -> Deployment." -f $OutFile, $msg)
         }
         throw ("Failed to download {0} after {1} attempts. Last error: {2}" -f $Url, $MaxAttempts, $msg)
       }
-      Start-Sleep -Seconds ([Math]::Min(30, 3 * $attempt))
+      Write-PmProgress -Phase "retrying" `
+        -Message ("Retrying {0} (attempt {1}/{2})…" -f $label, ($attempt + 1), $MaxAttempts) `
+        -Percent $(if ($ExpectedSize -gt 0 -and $partialLen -gt 0) { [Math]::Min(99, [int](($partialLen * 100.0) / $ExpectedSize)) } else { 0 }) `
+        -File $label -Downloaded $partialLen -Total $ExpectedSize
+      Start-Sleep -Seconds ([Math]::Min(20, 2 * $attempt))
+    } finally {
+      if ($proc -ne $null) {
+        try { $proc.Dispose() } catch { }
+      }
     }
   }
 }
