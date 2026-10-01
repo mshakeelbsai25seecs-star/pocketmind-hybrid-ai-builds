@@ -53,21 +53,29 @@ download_latest_asset() {
     exit 1
   fi
 
-  echo "Resolving latest llama.cpp release asset matching *$needle* ..." >&2
-  local api_json url name out
-  api_json="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest")"
-  url="$(printf '%s' "$api_json" | python3 -c '
-import json, sys
-data = json.load(sys.stdin)
+  echo "Resolving llama.cpp release asset matching *$needle* ..." >&2
+  local url name out
+  # IMPORTANT: /releases/latest is often a stub (e.g. v0.5.0) with no binaries.
+  # Prefer the newest b##### release that ships the requested macOS asset.
+  url="$(
+    curl -fsSL "https://api.github.com/repos/${REPO}/releases?per_page=20" | python3 -c '
+import json, sys, re
 needle = sys.argv[1].lower()
-for a in data.get("assets", []):
-    n = a.get("name", "").lower()
-    if needle in n and n.endswith(".tar.gz"):
-        print(a["browser_download_url"])
-        sys.exit(0)
-sys.exit(2)
-' "$needle")" || {
-    echo "ERROR: No release asset matching *$needle*.tar.gz in $REPO latest release." >&2
+releases = json.load(sys.stdin)
+for rel in releases:
+    tag = str(rel.get("tag_name") or "")
+    if not re.match(r"^b\d+", tag):
+        continue
+    for a in rel.get("assets") or []:
+        n = (a.get("name") or "").lower()
+        if needle in n and n.endswith(".tar.gz"):
+            print(f"Selected release: {tag}", file=sys.stderr)
+            print(a["browser_download_url"])
+            raise SystemExit(0)
+raise SystemExit(2)
+' "$needle"
+  )" || {
+    echo "ERROR: No release asset matching *$needle*.tar.gz in recent $REPO b##### releases." >&2
     exit 1
   }
 

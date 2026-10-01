@@ -35,14 +35,40 @@ mkdir -p "$BASE_DIR" "$TMP_DIR"
 cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
 
-API_URL="https://api.github.com/repos/ggml-org/llama.cpp/releases/latest"
-if [[ -n "$TAG" ]]; then
-  API_URL="https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/${TAG}"
+# IMPORTANT: /releases/latest is often a stub tag (e.g. v0.5.0) with no binaries.
+# Prefer an explicit TAG, else the newest b##### release that ships Ubuntu CPU assets.
+AUTH_HDRS=(-H 'Accept: application/vnd.github+json' -H 'User-Agent: PocketMind Hybrid AI-Installer')
+if [[ -n "${GITHUB_TOKEN:-${GH_TOKEN:-}}" ]]; then
+  AUTH_HDRS+=(-H "Authorization: Bearer ${GITHUB_TOKEN:-$GH_TOKEN}")
 fi
 
-echo "Querying $API_URL"
-RELEASE_JSON="$(curl -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: PocketMind Hybrid AI-Installer' "$API_URL")"
-echo "$RELEASE_JSON" > "$TMP_DIR/release.json"
+if [[ -n "$TAG" ]]; then
+  API_URL="https://api.github.com/repos/ggml-org/llama.cpp/releases/tags/${TAG}"
+  echo "Querying $API_URL"
+  curl -fsSL "${AUTH_HDRS[@]}" "$API_URL" > "$TMP_DIR/release.json"
+else
+  LIST_URL="https://api.github.com/repos/ggml-org/llama.cpp/releases?per_page=20"
+  echo "Querying recent releases: $LIST_URL"
+  curl -fsSL "${AUTH_HDRS[@]}" "$LIST_URL" > "$TMP_DIR/releases.json"
+  python3 - "$TMP_DIR/releases.json" "$TMP_DIR/release.json" "$ARCH_TOKEN" <<'PY'
+import json, sys, re
+list_path, out_path, arch = sys.argv[1], sys.argv[2], sys.argv[3]
+releases = json.load(open(list_path))
+needle = f"bin-ubuntu-{arch}"
+for rel in releases:
+    tag = str(rel.get("tag_name") or "")
+    if not re.match(r"^b\d+", tag):
+        continue
+    for a in rel.get("assets") or []:
+        name = a.get("name") or ""
+        if needle in name and name.endswith(".tar.gz"):
+            json.dump(rel, open(out_path, "w"))
+            print(f"Selected release: {tag}", file=sys.stderr)
+            raise SystemExit(0)
+raise SystemExit(f"Could not find a llama.cpp release with Linux CPU assets ({needle})")
+PY
+fi
+
 TAG_NAME="$(python3 -c 'import json; print(json.load(open("'"$TMP_DIR"'/release.json")).get("tag_name",""))')"
 echo "Release: $TAG_NAME"
 
